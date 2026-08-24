@@ -1,0 +1,110 @@
+rules_version = '2';
+
+// Role-based access per spec item 29. No collection is left open to public read/write —
+// anything not explicitly allowed below is denied by Firestore's default-deny.
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function userDoc() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+
+    // Any signed-in, active account — admin or staff. This is who may use the POS.
+    function isActiveUser() {
+      return isSignedIn()
+        && exists(/databases/$(database)/documents/users/$(request.auth.uid))
+        && userDoc().active == true;
+    }
+
+    function isAdmin() {
+      return isActiveUser() && userDoc().role == 'admin';
+    }
+
+    // --- Catalog & shop config: everyone active can read (needed to run the POS screen),
+    //     only Admin can write (item 10: staff never edits menu/prices/settings). ---
+    match /shops/{shopId} {
+      allow read: if isActiveUser();
+      allow write: if isAdmin();
+    }
+
+    match /shopSettings/{shopId} {
+      allow read: if isActiveUser();
+      allow write: if isAdmin();
+    }
+
+    match /tables/{tableId} {
+      allow read: if isActiveUser();
+      allow write: if isAdmin();
+    }
+
+    match /categories/{categoryId} {
+      allow read: if isActiveUser();
+      allow write: if isAdmin();
+    }
+
+    match /products/{productId} {
+      allow read: if isActiveUser();
+      allow write: if isAdmin();
+    }
+
+    match /modifierGroups/{groupId} {
+      allow read: if isActiveUser();
+      allow write: if isAdmin();
+    }
+
+    match /modifierOptions/{optionId} {
+      allow read: if isActiveUser();
+      allow write: if isAdmin();
+    }
+
+    match /salesChannels/{channelId} {
+      allow read: if isActiveUser();
+      allow write: if isAdmin();
+    }
+
+    match /paymentMethods/{methodId} {
+      allow read: if isActiveUser();
+      allow write: if isAdmin();
+    }
+
+    // --- Users: everyone can read their own doc (needed at login to resolve role/active);
+    //     Admin can read/write all of them (item 11 staff management). No one edits their own
+    //     role or active flag. ---
+    match /users/{userId} {
+      allow read: if isAdmin() || (isSignedIn() && request.auth.uid == userId);
+      allow write: if isAdmin();
+    }
+
+    // --- Orders: any active user can open/read/update orders (item 5-9: staff runs the whole
+    //     order lifecycle). Deleting an order document is never allowed — removing a line item
+    //     or cancelling/voiding an order is an *update* plus an auditLogs entry (item 19),
+    //     never a Firestore delete. ---
+    match /orders/{orderId} {
+      allow read: if isActiveUser();
+      allow create: if isActiveUser();
+      allow update: if isActiveUser();
+      allow delete: if false;
+    }
+
+    // --- Payments: append-only record of completed payments. ---
+    match /payments/{paymentId} {
+      allow read: if isActiveUser();
+      allow create: if isActiveUser();
+      allow update: if false;
+      allow delete: if false;
+    }
+
+    // --- Audit log: any active user can create an entry (they're the ones performing the
+    //     logged action), but only Admin can read the log back (item 18). Immutable once written. ---
+    match /auditLogs/{logId} {
+      allow read: if isAdmin();
+      allow create: if isActiveUser();
+      allow update: if false;
+      allow delete: if false;
+    }
+  }
+}
