@@ -8,9 +8,10 @@
  * Usage:
  *   1. Fill in .env.local (see .env.example) with your Firebase Admin service account values
  *      and NEXT_PUBLIC_SHOP_ID (any short slug, e.g. "champ-noodle").
- *   2. Set SEED_ADMIN_EMAIL and SEED_ADMIN_PASSWORD in .env.local (the first Admin login).
+ *   2. Set PIN_PEPPER and SEED_ADMIN_PIN in .env.local (the first Admin login).
  *   3. npm run seed
  */
+import { computePinLookup, isValidPinFormat, PIN_LENGTH } from "../src/lib/auth/pin";
 import { getAdminAuth, getAdminDb } from "../src/lib/firebase/admin";
 import { COLLECTIONS } from "../src/lib/firebase/collections";
 import { DEFAULT_SHOP_ID } from "../src/lib/firebase/config";
@@ -162,25 +163,40 @@ async function seedPaymentMethods() {
 }
 
 async function seedAdminUser() {
-  const email = process.env.SEED_ADMIN_EMAIL;
-  const password = process.env.SEED_ADMIN_PASSWORD;
+  const pin = process.env.SEED_ADMIN_PIN;
   const name = process.env.SEED_ADMIN_NAME || "Admin";
 
-  if (!email || !password) {
+  if (!pin) {
     console.log(
-      "· SEED_ADMIN_EMAIL / SEED_ADMIN_PASSWORD not set — skipping admin user creation. " +
-        "Set them in .env.local and re-run to create the first login."
+      "· SEED_ADMIN_PIN not set — skipping admin user creation. " +
+        "Set it in .env.local and re-run to create the first login."
     );
     return;
   }
 
+  if (!isValidPinFormat(pin)) {
+    throw new Error(`SEED_ADMIN_PIN must be exactly ${PIN_LENGTH} digits.`);
+  }
+
+  const lookup = computePinLookup(pin, SHOP_ID);
+
+  // A PIN identifies its user on its own, so two accounts sharing one would make login
+  // ambiguous. Reject that here rather than silently creating an unreachable account.
+  const clash = await adminDb
+    .collection(COLLECTIONS.userSecrets)
+    .where("shopId", "==", SHOP_ID)
+    .where("pinLookup", "==", lookup)
+    .limit(1)
+    .get();
+
   let uid: string;
-  try {
-    const existing = await adminAuth.getUserByEmail(email);
-    uid = existing.uid;
-    console.log("· Firebase Auth user already exists, reusing it");
-  } catch {
-    const created = await adminAuth.createUser({ email, password, displayName: name });
+  if (!clash.empty) {
+    uid = clash.docs[0].id;
+    console.log("· a user with this PIN already exists, updating it instead of creating another");
+  } else {
+    // No email/password: the PIN is the only credential, verified server-side in /api/auth/pin,
+    // which then mints a custom token for this uid.
+    const created = await adminAuth.createUser({ displayName: name });
     uid = created.uid;
     console.log("✓ Firebase Auth user created");
   }
@@ -189,14 +205,21 @@ async function seedAdminUser() {
     {
       shopId: SHOP_ID,
       name,
-      email,
+      email: null,
       role: "admin",
       active: true,
       createdAt: Date.now(),
     },
     { merge: true }
   );
-  console.log(`✓ users/${uid} set as active admin`);
+
+  await adminDb.collection(COLLECTIONS.userSecrets).doc(uid).set({
+    shopId: SHOP_ID,
+    pinLookup: lookup,
+    updatedAt: Date.now(),
+  });
+
+  console.log(`✓ users/${uid} set as active admin (login with PIN ${pin.slice(0, 2)}****)`);
 }
 
 async function main() {

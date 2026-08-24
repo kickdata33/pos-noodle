@@ -79,6 +79,18 @@ service cloud.firestore {
       allow write: if isAdmin();
     }
 
+    // --- PIN material and failed-attempt counters: no client may read or write these, not even
+    //     an admin. They are touched exclusively by the Admin SDK in /api/auth/pin (which
+    //     bypasses these rules by design). Keeping PIN hashes out of every client-reachable
+    //     document is what stops one staff member from harvesting another's credential. ---
+    match /userSecrets/{userId} {
+      allow read, write: if false;
+    }
+
+    match /pinAttempts/{attemptKey} {
+      allow read, write: if false;
+    }
+
     // --- Orders: any active user can open/read/update orders (item 5-9: staff runs the whole
     //     order lifecycle). Deleting an order document is never allowed — removing a line item
     //     or cancelling/voiding an order is an *update* plus an auditLogs entry (item 19),
