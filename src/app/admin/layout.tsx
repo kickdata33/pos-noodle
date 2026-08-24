@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import type { ReactNode } from "react";
 
+import { AdminNav } from "@/components/admin/AdminNav";
 import { SignOutButton } from "@/components/shared/SignOutButton";
 import { getServerSession } from "@/lib/auth/session";
 
@@ -8,6 +9,9 @@ import { getServerSession } from "@/lib/auth/session";
  * Real access gate for everything under /admin (item 17: only `role === "admin"` gets in).
  * Staff who somehow reach here (e.g. a stale bookmark) are sent to /pos, not /login, since
  * they *are* validly signed in — just not authorized for this area.
+ *
+ * Unlike the Staff POS, /admin is NOT touch/tablet-first (item 26's constraints target the
+ * staff screens); a denser conventional dashboard with a sidebar is appropriate here.
  */
 export default async function AdminLayout({ children }: { children: ReactNode }) {
   const session = await getServerSession();
@@ -23,7 +27,10 @@ export default async function AdminLayout({ children }: { children: ReactNode })
         </div>
         <SignOutButton />
       </header>
-      <div className="flex-1">{children}</div>
+      <div className="flex flex-1 flex-col sm:flex-row">
+        <AdminNav />
+        <div className="min-w-0 flex-1">{children}</div>
+      </div>
     </div>
   );
 }
