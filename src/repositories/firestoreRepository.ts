@@ -72,8 +72,20 @@ export abstract class FirestoreRepository<T extends WithId> {
     const q = constraints.length
       ? query(this.collectionRef, ...constraints)
       : this.collectionRef;
-    return onSnapshot(q, (snap) => {
-      onChange(snap.docs.map((d) => ({ ...d.data(), id: d.id }) as T));
-    });
+    return onSnapshot(
+      q,
+      (snap) => {
+        onChange(snap.docs.map((d) => ({ ...d.data(), id: d.id }) as T));
+      },
+      // Without this, a listener error (most commonly: a composite index this query needs
+      // hasn't been deployed yet — `firebase deploy --only firestore:indexes`) fails silently
+      // from the screen's point of view: `onChange` is just never called again, so the list
+      // quietly stays empty/stale forever with nothing in the UI to explain why. This has bitten
+      // real usage before (missing indexes read as "the feature doesn't work"), so at minimum
+      // surface it loudly in the console with the collection name, instead of swallowing it.
+      (err) => {
+        console.error(`[${this.collectionName}] subscribe() failed — is a Firestore index missing? See firestore.indexes.json / "firebase deploy --only firestore:indexes".`, err);
+      }
+    );
   }
 }
