@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { CheckoutDialog } from "@/components/pos/CheckoutDialog";
+import { ItemNoteDialog } from "@/components/pos/ItemNoteDialog";
 import { ModifierPickerDialog } from "@/components/pos/ModifierPickerDialog";
 import { RemoveItemDialog } from "@/components/pos/RemoveItemDialog";
 import { Button } from "@/components/ui/button";
@@ -80,6 +81,7 @@ export function OrderScreen({ orderId, initialTableId, initialChannelId }: Props
   const [activeCategoryId, setActiveCategoryId] = useState<string | null>(null);
   const [pickerProduct, setPickerProduct] = useState<Product | null>(null);
   const [removeTarget, setRemoveTarget] = useState<OrderItem | null>(null);
+  const [noteTarget, setNoteTarget] = useState<OrderItem | null>(null);
   const [checkoutOpen, setCheckoutOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -168,6 +170,29 @@ export function OrderScreen({ orderId, initialTableId, initialChannelId }: Props
     [order, settings]
   );
 
+  /**
+   * Groups cart lines by product for display only — the underlying `order.items` stay separate
+   * `OrderItem`s (own id, own note, own audit trail on removal) no matter when each was added.
+   * User request: two "ก๋วยเตี๋ยวหมู" added in separate taps with different notes ("ไม่งอก" vs
+   * "ไม่ผัก") should read as "ก๋วยเตี๋ยวหมู x2" rather than two identical-looking lines — but
+   * without losing which one is which, so each still shows its own note underneath. A group of
+   * one renders exactly as a plain line always has (no redundant "x1" header).
+   */
+  const groupedItems = useMemo(() => {
+    if (!order) return [];
+    const groups: { productId: string; productName: string; totalQty: number; items: OrderItem[] }[] = [];
+    for (const item of order.items) {
+      const group = groups.find((g) => g.productId === item.productId);
+      if (group) {
+        group.totalQty += item.quantity;
+        group.items.push(item);
+      } else {
+        groups.push({ productId: item.productId, productName: item.productName, totalQty: item.quantity, items: [item] });
+      }
+    }
+    return groups;
+  }, [order]);
+
   const activeCategories = categories.filter((c) => c.active);
   const currentCategoryId = activeCategoryId ?? activeCategories[0]?.id ?? null;
   const visibleProducts = products.filter((p) => p.active && p.categoryId === currentCategoryId);
@@ -251,6 +276,19 @@ export function OrderScreen({ orderId, initialTableId, initialChannelId }: Props
         ? { ...i, quantity: newQty, lineTotal: computeLineTotal(i.unitPrice, i.modifiers, newQty) }
         : i
     );
+    applyItems(newItems);
+  }
+
+  /**
+   * Edits a line's free-text note (e.g. "ไม่งอก", "ไม่ผัก") — the only way to attach one to a
+   * product that has no modifier groups configured (see `ItemNoteDialog`), and also lets staff
+   * fix a note on an already-added line without removing and re-adding it. Not audit-gated like
+   * removal — a note is metadata about what to cook, not a change to the bill.
+   */
+  function updateItemNote(item: OrderItem, note: string) {
+    const current = orderRef.current;
+    if (!current) return;
+    const newItems = current.items.map((i) => (i.id === item.id ? { ...i, note } : i));
     applyItems(newItems);
   }
 
@@ -440,34 +478,55 @@ export function OrderScreen({ orderId, initialTableId, initialChannelId }: Props
         </div>
 
         <div className="flex-1 overflow-y-auto p-3">
-          {order.items.map((item) => (
-            <div key={item.id} className="mb-3 border-b border-border pb-3 last:border-0">
-              <div className="flex items-start justify-between gap-2">
-                <div>
-                  <p className="font-medium">{item.productName}</p>
-                  {item.modifiers.map((m) => (
-                    <p key={m.optionId} className="text-xs text-muted-foreground">
-                      {m.optionName}
-                      {m.priceDelta !== 0 ? ` (+${formatCurrency(m.priceDelta, settings.currency)})` : ""}
-                    </p>
-                  ))}
-                  {item.note ? <p className="text-xs text-muted-foreground">หมายเหตุ: {item.note}</p> : null}
-                </div>
-                <span className="whitespace-nowrap font-medium">
-                  {formatCurrency(item.lineTotal, settings.currency)}
-                </span>
-              </div>
-              <div className="mt-2 flex items-center gap-2">
-                <Button variant="outline" size="icon" onClick={() => changeQuantity(item, -1)}>
-                  −
-                </Button>
-                <span className="w-6 text-center">{item.quantity}</span>
-                <Button variant="outline" size="icon" onClick={() => changeQuantity(item, 1)}>
-                  +
-                </Button>
-                <Button variant="ghost" size="sm" onClick={() => requestRemove(item)} className="ml-auto text-destructive">
-                  ลบ
-                </Button>
+          {groupedItems.map((group) => (
+            <div key={group.productId} className="mb-3 border-b border-border pb-3 last:border-0">
+              {group.items.length > 1 ? (
+                <p className="mb-2 text-sm font-semibold">
+                  {group.productName} x{group.totalQty}
+                </p>
+              ) : null}
+              <div className="grid gap-3">
+                {group.items.map((item) => (
+                  <div key={item.id}>
+                    <div className="flex items-start justify-between gap-2">
+                      <div>
+                        {/* Grouped (2+ lines of the same product): the header above already shows
+                            the name, so each sub-line only needs to show what makes it different —
+                            its own note/modifiers — otherwise the product name repeats as usual. */}
+                        {group.items.length === 1 ? <p className="font-medium">{item.productName}</p> : null}
+                        {item.modifiers.map((m) => (
+                          <p key={m.optionId} className="text-xs text-muted-foreground">
+                            {m.optionName}
+                            {m.priceDelta !== 0 ? ` (+${formatCurrency(m.priceDelta, settings.currency)})` : ""}
+                          </p>
+                        ))}
+                        {item.note ? (
+                          <p className="text-xs text-muted-foreground">หมายเหตุ: {item.note}</p>
+                        ) : group.items.length > 1 ? (
+                          <p className="text-xs text-muted-foreground">ไม่มีหมายเหตุ</p>
+                        ) : null}
+                      </div>
+                      <span className="whitespace-nowrap font-medium">
+                        {formatCurrency(item.lineTotal, settings.currency)}
+                      </span>
+                    </div>
+                    <div className="mt-2 flex items-center gap-2">
+                      <Button variant="outline" size="icon" onClick={() => changeQuantity(item, -1)}>
+                        −
+                      </Button>
+                      <span className="w-6 text-center">{item.quantity}</span>
+                      <Button variant="outline" size="icon" onClick={() => changeQuantity(item, 1)}>
+                        +
+                      </Button>
+                      <Button variant="ghost" size="sm" onClick={() => setNoteTarget(item)}>
+                        หมายเหตุ
+                      </Button>
+                      <Button variant="ghost" size="sm" onClick={() => requestRemove(item)} className="ml-auto text-destructive">
+                        ลบ
+                      </Button>
+                    </div>
+                  </div>
+                ))}
               </div>
             </div>
           ))}
@@ -534,6 +593,17 @@ export function OrderScreen({ orderId, initialTableId, initialChannelId }: Props
           onOpenChange={(open) => !open && setRemoveTarget(null)}
           itemName={removeTarget.productName}
           onConfirm={confirmRemove}
+        />
+      ) : null}
+
+      {noteTarget ? (
+        <ItemNoteDialog
+          key={noteTarget.id}
+          open={Boolean(noteTarget)}
+          onOpenChange={(open) => !open && setNoteTarget(null)}
+          itemName={noteTarget.productName}
+          initialNote={noteTarget.note}
+          onConfirm={(note) => updateItemNote(noteTarget, note)}
         />
       ) : null}
 
