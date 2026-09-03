@@ -15,6 +15,8 @@ export const COLLECTIONS = {
   /** Server-only: failed-PIN throttling counters. Denied to every client. */
   pinAttempts: "pinAttempts",
   orders: "orders",
+  /** One doc per shop — the daily-sequence counter behind `generateOrderNumber` (lib/pos). */
+  orderCounters: "orderCounters",
   payments: "payments",
   auditLogs: "auditLogs",
 } as const;

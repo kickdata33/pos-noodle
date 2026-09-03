@@ -102,6 +102,12 @@ service cloud.firestore {
       allow delete: if false;
     }
 
+    // --- Order counters: one doc per shop, holds the daily order-number sequence. Same trust
+    //     level as orders/payments — any active user already runs the whole order lifecycle. ---
+    match /orderCounters/{shopId} {
+      allow read, write: if isActiveUser();
+    }
+
     // --- Payments: append-only record of completed payments. ---
     match /payments/{paymentId} {
       allow read: if isActiveUser();

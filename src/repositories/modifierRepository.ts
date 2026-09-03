@@ -30,6 +30,15 @@ class ModifierOptionRepository extends FirestoreRepository<ModifierOption> {
   subscribeForGroup(groupId: string, onChange: (options: ModifierOption[]) => void): Unsubscribe {
     return this.subscribe(onChange, where("groupId", "==", groupId), orderBy("sortOrder", "asc"));
   }
+
+  /**
+   * Every option for every group at once, for screens (the POS order screen) that need to look
+   * options up by groupId client-side rather than opening one subscription per group — a shop
+   * has a handful of modifier groups total, so this stays a small read either way.
+   */
+  subscribeForShop(shopId: string, onChange: (options: ModifierOption[]) => void): Unsubscribe {
+    return this.subscribe(onChange, where("shopId", "==", shopId), orderBy("sortOrder", "asc"));
+  }
 }
 
 export const modifierGroupRepository = new ModifierGroupRepository();
