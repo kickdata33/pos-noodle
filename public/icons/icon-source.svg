@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <rect width="512" height="512" rx="112" fill="#DC2626"/>
+  <!-- steam -->
+  <path d="M196 150 Q186 120 206 100 Q222 84 210 60" stroke="#FFF3E0" stroke-width="16" fill="none" stroke-linecap="round" opacity="0.9"/>
+  <path d="M256 150 Q246 118 266 96 Q284 78 270 52" stroke="#FFF3E0" stroke-width="16" fill="none" stroke-linecap="round" opacity="0.9"/>
+  <path d="M316 150 Q306 120 326 100 Q342 84 330 60" stroke="#FFF3E0" stroke-width="16" fill="none" stroke-linecap="round" opacity="0.9"/>
+  <!-- bowl -->
+  <path d="M120 220 h272 a10 10 0 0 1 9.8 12 c-14 96 -84 160 -145.8 160 s-131.8 -64 -145.8 -160 a10 10 0 0 1 9.8 -12 z" fill="#FFF3E0"/>
+  <!-- bowl rim -->
+  <ellipse cx="256" cy="220" rx="136" ry="26" fill="#FFE8CC"/>
+  <ellipse cx="256" cy="216" rx="136" ry="26" fill="#FFF7ED"/>
+  <!-- noodle swirls -->
+  <path d="M170 214 q20 -18 40 0 q20 18 40 0 q20 -18 40 0 q20 18 40 0" stroke="#DC2626" stroke-width="10" fill="none" stroke-linecap="round" opacity="0.85"/>
+  <!-- base -->
+  <rect x="222" y="378" width="68" height="18" rx="9" fill="#FFF3E0"/>
+</svg>

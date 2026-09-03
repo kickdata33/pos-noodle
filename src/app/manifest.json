@@ -1,0 +1,19 @@
+{
+  "name": "POS ร้านลูกชิ้นแชมป์ x นายฮังเพ้ง",
+  "short_name": "POS ก๋วยเตี๋ยว",
+  "description": "ระบบ POS สำหรับร้านก๋วยเตี๋ยว/ลูกชิ้น",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#FFF3E0",
+  "theme_color": "#DC2626",
+  "lang": "th",
+  "dir": "ltr",
+  "icons": [
+    { "src": "/icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/icons/maskable-192.png", "sizes": "192x192", "type": "image/png", "purpose": "maskable" },
+    { "src": "/icons/maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}
