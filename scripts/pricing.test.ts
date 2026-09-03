@@ -7,7 +7,20 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { computeLineTotal, computeOrderTotals } from "../src/lib/pos/pricing";
+import { computeLineTotal, computeOrderTotals, groupItemsByProduct } from "../src/lib/pos/pricing";
+import type { OrderItem } from "../src/types";
+
+function makeItem(overrides: Partial<OrderItem> & Pick<OrderItem, "id" | "productId">): OrderItem {
+  return {
+    productName: "ก๋วยเตี๋ยวหมู",
+    quantity: 1,
+    unitPrice: 60,
+    modifiers: [],
+    note: "",
+    lineTotal: 60,
+    ...overrides,
+  };
+}
 
 test("line total is (unitPrice + modifiers) * quantity", () => {
   assert.equal(computeLineTotal(60, [], 1), 60);
@@ -69,4 +82,52 @@ test("rounds to 2 decimal places to avoid floating-point noise", () => {
   const totals = computeOrderTotals([{ lineTotal: 33.33 }], settings);
   assert.equal(Number.isFinite(totals.total), true);
   assert.equal(totals.total, Math.round(totals.total * 100) / 100);
+});
+
+test("groupItemsByProduct: a single line of a product stays its own group of one", () => {
+  const items = [makeItem({ id: "a", productId: "p1" })];
+  const groups = groupItemsByProduct(items);
+  assert.equal(groups.length, 1);
+  assert.equal(groups[0].totalQty, 1);
+  assert.deepEqual(groups[0].items, items);
+});
+
+test("groupItemsByProduct: same product added in separate taps with different notes merges into one group", () => {
+  const items = [
+    makeItem({ id: "a", productId: "p1", note: "ไม่งอก" }),
+    makeItem({ id: "b", productId: "p1", note: "ไม่ผัก" }),
+  ];
+  const groups = groupItemsByProduct(items);
+  assert.equal(groups.length, 1);
+  assert.equal(groups[0].productName, "ก๋วยเตี๋ยวหมู");
+  assert.equal(groups[0].totalQty, 2); // headline qty is a sum, even though each line is qty 1
+  assert.deepEqual(
+    groups[0].items.map((i) => i.note),
+    ["ไม่งอก", "ไม่ผัก"] // each line's own note survives — nothing is lost by grouping
+  );
+});
+
+test("groupItemsByProduct: a line's own quantity contributes to the group total, not just line count", () => {
+  const items = [
+    makeItem({ id: "a", productId: "p1", quantity: 3, lineTotal: 180 }),
+    makeItem({ id: "b", productId: "p1", quantity: 2, lineTotal: 120, note: "ไม่ผัก" }),
+  ];
+  const groups = groupItemsByProduct(items);
+  assert.equal(groups.length, 1);
+  assert.equal(groups[0].totalQty, 5);
+});
+
+test("groupItemsByProduct: different products never merge, and group order follows first appearance", () => {
+  const items = [
+    makeItem({ id: "a", productId: "p1", productName: "ก๋วยเตี๋ยวหมู" }),
+    makeItem({ id: "b", productId: "p2", productName: "น้ำเปล่า" }),
+    makeItem({ id: "c", productId: "p1", productName: "ก๋วยเตี๋ยวหมู" }),
+  ];
+  const groups = groupItemsByProduct(items);
+  assert.deepEqual(
+    groups.map((g) => g.productId),
+    ["p1", "p2"]
+  );
+  assert.equal(groups[0].totalQty, 2);
+  assert.equal(groups[1].totalQty, 1);
 });

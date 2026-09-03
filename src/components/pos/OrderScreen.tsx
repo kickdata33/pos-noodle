@@ -11,7 +11,7 @@ import { Button } from "@/components/ui/button";
 import { formatCurrency } from "@/lib/format";
 import { DEFAULT_SHOP_ID } from "@/lib/firebase/config";
 import { useAuth } from "@/hooks/useAuth";
-import { computeLineTotal, computeOrderTotals } from "@/lib/pos/pricing";
+import { computeLineTotal, computeOrderTotals, groupItemsByProduct } from "@/lib/pos/pricing";
 import { generateOrderNumber } from "@/lib/pos/orderNumber";
 import { auditLogRepository } from "@/repositories/auditLogRepository";
 import { categoryRepository } from "@/repositories/categoryRepository";
@@ -170,28 +170,11 @@ export function OrderScreen({ orderId, initialTableId, initialChannelId }: Props
     [order, settings]
   );
 
-  /**
-   * Groups cart lines by product for display only — the underlying `order.items` stay separate
-   * `OrderItem`s (own id, own note, own audit trail on removal) no matter when each was added.
-   * User request: two "ก๋วยเตี๋ยวหมู" added in separate taps with different notes ("ไม่งอก" vs
-   * "ไม่ผัก") should read as "ก๋วยเตี๋ยวหมู x2" rather than two identical-looking lines — but
-   * without losing which one is which, so each still shows its own note underneath. A group of
-   * one renders exactly as a plain line always has (no redundant "x1" header).
-   */
-  const groupedItems = useMemo(() => {
-    if (!order) return [];
-    const groups: { productId: string; productName: string; totalQty: number; items: OrderItem[] }[] = [];
-    for (const item of order.items) {
-      const group = groups.find((g) => g.productId === item.productId);
-      if (group) {
-        group.totalQty += item.quantity;
-        group.items.push(item);
-      } else {
-        groups.push({ productId: item.productId, productName: item.productName, totalQty: item.quantity, items: [item] });
-      }
-    }
-    return groups;
-  }, [order]);
+  // Groups cart lines by product for display only (see `groupItemsByProduct`'s comment) — the
+  // underlying `order.items` stay separate `OrderItem`s (own id, own note, own audit trail on
+  // removal) no matter when each was added. Shared with `CheckoutDialog`'s summary so what
+  // staff see while ordering matches exactly what they confirm at the register.
+  const groupedItems = useMemo(() => (order ? groupItemsByProduct(order.items) : []), [order]);
 
   const activeCategories = categories.filter((c) => c.active);
   const currentCategoryId = activeCategoryId ?? activeCategories[0]?.id ?? null;
@@ -610,6 +593,7 @@ export function OrderScreen({ orderId, initialTableId, initialChannelId }: Props
       <CheckoutDialog
         open={checkoutOpen}
         onOpenChange={setCheckoutOpen}
+        items={order.items}
         totals={totals}
         currency={settings.currency}
         paymentMethods={paymentMethods.filter((m) => m.active)}

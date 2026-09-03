@@ -44,3 +44,32 @@ export function computeOrderTotals(
 function round2(value: number): number {
   return Math.round(value * 100) / 100;
 }
+
+export interface ItemGroup {
+  productId: string;
+  productName: string;
+  totalQty: number;
+  items: OrderItem[];
+}
+
+/**
+ * Groups order lines by product for display only (the cart, and the checkout summary) — never
+ * for storage, so this stays a pure function over whatever `OrderItem[]` is passed in. Two
+ * separate taps of the same product with different notes (e.g. "ก๋วยเตี๋ยวหมู" once "ไม่งอก",
+ * once "ไม่ผัก") should read as one "ก๋วยเตี๋ยวหมู x2" line while still showing each note — see
+ * `OrderScreen`'s cart and `CheckoutDialog`'s summary, which both render this the same way so
+ * what staff see while ordering matches exactly what they confirm at the register.
+ */
+export function groupItemsByProduct(items: OrderItem[]): ItemGroup[] {
+  const groups: ItemGroup[] = [];
+  for (const item of items) {
+    const group = groups.find((g) => g.productId === item.productId);
+    if (group) {
+      group.totalQty += item.quantity;
+      group.items.push(item);
+    } else {
+      groups.push({ productId: item.productId, productName: item.productName, totalQty: item.quantity, items: [item] });
+    }
+  }
+  return groups;
+}

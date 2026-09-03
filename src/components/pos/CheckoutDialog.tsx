@@ -13,12 +13,13 @@ import {
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { formatCurrency } from "@/lib/format";
-import type { OrderTotals } from "@/lib/pos/pricing";
-import type { PaymentMethod } from "@/types";
+import { groupItemsByProduct, type OrderTotals } from "@/lib/pos/pricing";
+import type { OrderItem, PaymentMethod } from "@/types";
 
 interface Props {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  items: OrderItem[];
   totals: OrderTotals;
   currency: string;
   paymentMethods: PaymentMethod[];
@@ -31,16 +32,23 @@ interface Props {
   }) => void;
 }
 
-/** Checkout lives inside the order screen as a Dialog (item 26: never switch pages to pay). */
+/**
+ * Checkout lives inside the order screen as a Dialog (item 26: never switch pages to pay). Shows
+ * the full item breakdown (not just the totals) so staff can confirm what they're actually
+ * charging for before tapping "ยืนยันชำระเงิน" — grouped the same way as the cart itself
+ * (`groupItemsByProduct`), so a merged "ก๋วยเตี๋ยวหมู x2" line here still shows each note.
+ */
 export function CheckoutDialog({
   open,
   onOpenChange,
+  items,
   totals,
   currency,
   paymentMethods,
   saving,
   onConfirm,
 }: Props) {
+  const groupedItems = groupItemsByProduct(items);
   const [methodId, setMethodId] = useState<string>(paymentMethods[0]?.id ?? "");
   const [cashReceivedText, setCashReceivedText] = useState("");
 
@@ -66,6 +74,40 @@ export function CheckoutDialog({
         <DialogHeader>
           <DialogTitle>คิดเงิน</DialogTitle>
         </DialogHeader>
+
+        <div className="grid max-h-48 gap-2 overflow-y-auto rounded-lg border border-border p-3 text-sm">
+          {groupedItems.map((group) => (
+            <div key={group.productId}>
+              <div className="flex items-center justify-between font-medium">
+                <span>
+                  {group.productName}
+                  {group.totalQty > 1 ? ` x${group.totalQty}` : ""}
+                </span>
+                <span>
+                  {formatCurrency(
+                    group.items.reduce((sum, i) => sum + i.lineTotal, 0),
+                    currency
+                  )}
+                </span>
+              </div>
+              {group.items.map((item) => {
+                const detail = [...item.modifiers.map((m) => m.optionName), item.note]
+                  .filter(Boolean)
+                  .join(", ");
+                // A single, plain line (no modifiers/note, and nothing else of this product in
+                // the cart) has nothing left to say beyond the header row above — skip it rather
+                // than rendering an empty sub-line.
+                if (group.items.length === 1 && !detail) return null;
+                return (
+                  <div key={item.id} className="pl-2 text-xs text-muted-foreground">
+                    {group.items.length > 1 ? `x${item.quantity} — ` : ""}
+                    {detail || "ไม่มีหมายเหตุ"}
+                  </div>
+                );
+              })}
+            </div>
+          ))}
+        </div>
 
         <div className="grid gap-3 text-sm">
           <Row label="ยอดรวม" value={formatCurrency(totals.subtotal, currency)} />
