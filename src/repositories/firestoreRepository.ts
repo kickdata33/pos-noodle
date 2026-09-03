@@ -34,7 +34,11 @@ export abstract class FirestoreRepository<T extends WithId> {
 
   async getById(id: string): Promise<T | null> {
     const snap = await getDoc(doc(db, this.collectionName, id));
-    return snap.exists() ? ({ id: snap.id, ...snap.data() } as T) : null;
+    // `id` spreads in *after* the document data so the real, authoritative Firestore document
+    // id always wins over any (accidental or otherwise) `id` field stored inside the data
+    // itself — see the OrderScreen `ensureSaved` fix for how such a stray field could get
+    // written in the first place. Never reorder this.
+    return snap.exists() ? ({ ...snap.data(), id: snap.id } as T) : null;
   }
 
   async list(...constraints: QueryConstraint[]): Promise<T[]> {
@@ -42,7 +46,7 @@ export abstract class FirestoreRepository<T extends WithId> {
       ? query(this.collectionRef, ...constraints)
       : this.collectionRef;
     const snap = await getDocs(q);
-    return snap.docs.map((d) => ({ id: d.id, ...d.data() }) as T);
+    return snap.docs.map((d) => ({ ...d.data(), id: d.id }) as T);
   }
 
   /** Creates with an auto-generated id (default) or a caller-supplied id (e.g. Auth UID). */
@@ -69,7 +73,7 @@ export abstract class FirestoreRepository<T extends WithId> {
       ? query(this.collectionRef, ...constraints)
       : this.collectionRef;
     return onSnapshot(q, (snap) => {
-      onChange(snap.docs.map((d) => ({ id: d.id, ...d.data() }) as T));
+      onChange(snap.docs.map((d) => ({ ...d.data(), id: d.id }) as T));
     });
   }
 }

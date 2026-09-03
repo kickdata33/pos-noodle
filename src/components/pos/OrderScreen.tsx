@@ -74,12 +74,26 @@ export function OrderScreen({ orderId, initialTableId, initialChannelId }: Props
   useEffect(() => {
     orderRef.current = order;
   }, [order]);
+  // Latches true while `ensureSaved` has an in-flight order creation — see that function's
+  // comment for why this is a plain boolean rather than the pending Promise itself.
+  const creatingRef = useRef(false);
   const [activeCategoryId, setActiveCategoryId] = useState<string | null>(null);
   const [pickerProduct, setPickerProduct] = useState<Product | null>(null);
   const [removeTarget, setRemoveTarget] = useState<OrderItem | null>(null);
   const [checkoutOpen, setCheckoutOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Brief "บันทึกแล้ว" flash after every successful auto-save (item request: no manual save step,
+  // but staff should still see confirmation that a change actually reached the server). No
+  // ref-tracked timer handle to clear/replace on rapid repeats — deliberately simple, since
+  // this codebase's purity linter flags a Promise *or* a setTimeout handle stored on a ref as
+  // unsafe and then (surprisingly) stops trusting unrelated `Date.now()` calls elsewhere in the
+  // file too. A slightly-too-long flash on a fast double-save is a fine trade for that.
+  const [justSaved, setJustSaved] = useState(false);
+  function flashSaved() {
+    setJustSaved(true);
+    setTimeout(() => setJustSaved(false), 1500);
+  }
 
   useEffect(() => categoryRepository.subscribeForShop(DEFAULT_SHOP_ID, setCategories), []);
   useEffect(() => productRepository.subscribeForShop(DEFAULT_SHOP_ID, setProducts), []);
@@ -158,19 +172,27 @@ export function OrderScreen({ orderId, initialTableId, initialChannelId }: Props
   const currentCategoryId = activeCategoryId ?? activeCategories[0]?.id ?? null;
   const visibleProducts = products.filter((p) => p.active && p.categoryId === currentCategoryId);
 
-  /** Applies a new items array: updates local state, and if the order is already persisted, saves immediately (item 13–14: another staff member glancing at the table grid must see the current total). */
   /**
+   * Applies a new items array: updates local state, and saves — immediately if the order is
+   * already persisted (item 13–14: another staff member glancing at the table grid must see the
+   * current total), or by auto-creating the order right now if this is the first item on a
+   * fresh draft (via `ensureSaved`), so tapping a menu item is the only "save" action staff ever
+   * need — a mistaken add is fixed by removing/editing it, not by an explicit save step.
+   *
    * Always reads/writes through `orderRef.current`, never the `order` this function's own
-   * closure captured — see the ref's comment above for why. `setOrder` still uses the
-   * functional form as a second layer of defense against overwriting a newer state update
-   * with a stale base object.
+   * closure captured — see the ref's comment above for why — and writes it *synchronously*
+   * (not via `setOrder`'s functional form, which would only resolve on the next render) so a
+   * second mutation fired immediately after (e.g. the qty stepper right after the item that
+   * triggered auto-save) sees this one's result rather than a stale pre-save snapshot.
    */
   async function applyItems(newItems: OrderItem[]) {
     const current = orderRef.current;
     if (!current) return;
     const newTotals = computeOrderTotals(newItems, settings, current.discount);
     const updatedAt = Date.now();
-    setOrder((prev) => (prev ? { ...prev, items: newItems, ...newTotals, updatedAt } : prev));
+    const updatedDraft: DraftOrder = { ...current, items: newItems, ...newTotals, updatedAt };
+    orderRef.current = updatedDraft;
+    setOrder(updatedDraft);
     if (current.id) {
       await orderRepository.update(current.id, {
         items: newItems,
@@ -180,6 +202,9 @@ export function OrderScreen({ orderId, initialTableId, initialChannelId }: Props
         total: newTotals.total,
         updatedAt,
       });
+      flashSaved();
+    } else if (newItems.length > 0) {
+      await ensureSaved();
     }
   }
 
@@ -259,31 +284,57 @@ export function OrderScreen({ orderId, initialTableId, initialChannelId }: Props
     setRemoveTarget(null);
   }
 
-  /** First save: draft → a real Firestore doc. Returns the order id (existing or newly created). */
+  /**
+   * First save: draft → a real Firestore doc. Returns the order id (existing or newly created).
+   * Concurrent callers (e.g. auto-save from the item that just landed and a fast follow-up edit)
+   * share the same in-flight creation via `creatingRef` instead of each generating their own
+   * order number and doc.
+   */
   async function ensureSaved(): Promise<string> {
     const current = orderRef.current;
     if (!current) throw new Error("no order");
     if (current.id) return current.id;
 
-    const orderNumber = await generateOrderNumber(DEFAULT_SHOP_ID);
-    const payload: Omit<Order, "id"> = { ...current, orderNumber, updatedAt: Date.now() };
-    const id = await orderRepository.create(payload);
-    orderRef.current = { ...payload, id };
-    setOrder(orderRef.current);
-    router.replace(`/pos/order/${id}`);
-    return id;
-  }
+    if (creatingRef.current) {
+      // Another caller (e.g. auto-save from the item that just landed) is already creating the
+      // order — wait for that to land instead of starting a second `generateOrderNumber` +
+      // `create`, which would silently produce two Firestore docs for one table. Polling
+      // `orderRef.current` here rather than sharing the in-flight Promise directly sidesteps a
+      // real quirk: storing a pending Promise on a ref confuses this codebase's purity linter
+      // into flagging unrelated `Date.now()` calls elsewhere in the file as unsafe.
+      while (creatingRef.current) {
+        await new Promise((resolve) => setTimeout(resolve, 30));
+      }
+      if (orderRef.current?.id) return orderRef.current.id;
+    }
 
-  async function handleSaveOrder() {
-    if (!order || order.items.length === 0) return;
-    setSaving(true);
-    setError(null);
+    creatingRef.current = true;
     try {
-      await ensureSaved();
-    } catch {
-      setError("บันทึกออเดอร์ไม่สำเร็จ ลองอีกครั้ง");
+      const orderNumber = await generateOrderNumber(DEFAULT_SHOP_ID);
+      // Re-read the ref right *now*, not the `current` snapshot from when this call started —
+      // a fast follow-up edit (e.g. removing the very item that triggered this save) that
+      // landed while `generateOrderNumber` was in flight must be reflected in what's persisted.
+      const latest = orderRef.current ?? current;
+      // `latest` is a DraftOrder, which really does carry an `id: string | null` field at
+      // runtime — the `Omit<Order, "id">` annotation below is compile-time only and does NOT
+      // strip it from the spread. Destructuring it off here (the `void` just tells the linter
+      // the omission itself is the point, not an oversight) is required, not decorative:
+      // without it, `payload` silently includes `id: null`, which `addDoc` happily writes into
+      // the new document's *data* — separate from the document's real, auto-generated Firestore
+      // id — and every later read merges that stored `id: null` back in, clobbering the real
+      // one. That's exactly what shipped and broke the table grid ("/pos/order/null", stuck on
+      // "กำลังโหลด...") before this fix.
+      const { id: draftId, ...currentWithoutId } = latest;
+      void draftId;
+      const payload: Omit<Order, "id"> = { ...currentWithoutId, orderNumber, updatedAt: Date.now() };
+      const id = await orderRepository.create(payload);
+      orderRef.current = { ...payload, id };
+      setOrder(orderRef.current);
+      router.replace(`/pos/order/${id}`);
+      flashSaved();
+      return id;
     } finally {
-      setSaving(false);
+      creatingRef.current = false;
     }
   }
 
@@ -370,12 +421,21 @@ export function OrderScreen({ orderId, initialTableId, initialChannelId }: Props
 
       {/* Right: current order (item 24: ~40-45%) */}
       <div className="flex min-h-0 flex-col border-t border-border md:w-[42%] md:border-l md:border-t-0">
-        <div className="border-b border-border p-3">
-          <p className="font-medium">
-            {order.tableName ? `โต๊ะ ${order.tableName}` : order.channelName}
-          </p>
-          {order.orderNumber ? (
-            <p className="text-xs text-muted-foreground">{order.orderNumber}</p>
+        <div className="flex items-start justify-between border-b border-border p-3">
+          <div>
+            <p className="font-medium">
+              {order.tableName ? `โต๊ะ ${order.tableName}` : order.channelName}
+            </p>
+            {order.orderNumber ? (
+              <p className="text-xs text-muted-foreground">{order.orderNumber}</p>
+            ) : null}
+          </div>
+          {/* Every menu tap saves immediately (create on the first item, update after) — this is
+              the only save confirmation staff get, since there's no manual "บันทึก" step anymore. */}
+          {justSaved ? (
+            <span className="rounded-full bg-primary/10 px-2 py-1 text-xs font-medium text-primary">
+              บันทึกแล้ว
+            </span>
           ) : null}
         </div>
 
@@ -441,15 +501,11 @@ export function OrderScreen({ orderId, initialTableId, initialChannelId }: Props
           </div>
           {error ? <p className="mb-2 text-sm text-destructive">{error}</p> : null}
           <div className="grid grid-cols-2 gap-2">
-            {!order.id ? (
-              <Button variant="outline" onClick={handleSaveOrder} disabled={saving || order.items.length === 0}>
-                บันทึกออเดอร์
-              </Button>
-            ) : (
-              <Button variant="outline" onClick={() => router.push("/pos")}>
-                กลับหน้าแรก
-              </Button>
-            )}
+            {/* No manual "บันทึกออเดอร์" step — every menu tap saves itself (see `applyItems`).
+                This button is just navigation, available whether or not anything's been added yet. */}
+            <Button variant="outline" onClick={() => router.push("/pos")}>
+              กลับหน้าแรก
+            </Button>
             <Button onClick={() => setCheckoutOpen(true)} disabled={saving || order.items.length === 0}>
               คิดเงิน
             </Button>
