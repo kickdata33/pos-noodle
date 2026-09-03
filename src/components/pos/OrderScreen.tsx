@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import { CheckoutDialog } from "@/components/pos/CheckoutDialog";
 import { ModifierPickerDialog } from "@/components/pos/ModifierPickerDialog";
@@ -63,6 +63,17 @@ export function OrderScreen({ orderId, initialTableId, initialChannelId }: Props
   const [settings, setSettings] = useState(DEFAULT_SETTINGS);
 
   const [order, setOrder] = useState<DraftOrder | null>(null);
+  // Mirrors `order` for the mutation functions below (applyItems, ensureSaved, etc). Those are
+  // recreated every render and can be bound to a *stale* render if two of them fire close
+  // together (e.g. the qty stepper tapped right after "บันทึกออเดอร์"'s async save resolves) —
+  // reading `order.id` from that stale closure instead of the actual latest state can silently
+  // overwrite a just-persisted order's id back to null. Reading from this ref instead of the
+  // closed-over `order` variable inside those functions keeps them correct regardless of when
+  // they were bound. JSX below still reads `order` (state) directly, which is always current.
+  const orderRef = useRef<DraftOrder | null>(null);
+  useEffect(() => {
+    orderRef.current = order;
+  }, [order]);
   const [activeCategoryId, setActiveCategoryId] = useState<string | null>(null);
   const [pickerProduct, setPickerProduct] = useState<Product | null>(null);
   const [removeTarget, setRemoveTarget] = useState<OrderItem | null>(null);
@@ -148,19 +159,26 @@ export function OrderScreen({ orderId, initialTableId, initialChannelId }: Props
   const visibleProducts = products.filter((p) => p.active && p.categoryId === currentCategoryId);
 
   /** Applies a new items array: updates local state, and if the order is already persisted, saves immediately (item 13–14: another staff member glancing at the table grid must see the current total). */
+  /**
+   * Always reads/writes through `orderRef.current`, never the `order` this function's own
+   * closure captured — see the ref's comment above for why. `setOrder` still uses the
+   * functional form as a second layer of defense against overwriting a newer state update
+   * with a stale base object.
+   */
   async function applyItems(newItems: OrderItem[]) {
-    if (!order) return;
-    const newTotals = computeOrderTotals(newItems, settings, order.discount);
-    const updated: DraftOrder = { ...order, items: newItems, ...newTotals, updatedAt: Date.now() };
-    setOrder(updated);
-    if (order.id) {
-      await orderRepository.update(order.id, {
+    const current = orderRef.current;
+    if (!current) return;
+    const newTotals = computeOrderTotals(newItems, settings, current.discount);
+    const updatedAt = Date.now();
+    setOrder((prev) => (prev ? { ...prev, items: newItems, ...newTotals, updatedAt } : prev));
+    if (current.id) {
+      await orderRepository.update(current.id, {
         items: newItems,
         subtotal: newTotals.subtotal,
         serviceCharge: newTotals.serviceCharge,
         tax: newTotals.tax,
         total: newTotals.total,
-        updatedAt: updated.updatedAt,
+        updatedAt,
       });
     }
   }
@@ -179,7 +197,8 @@ export function OrderScreen({ orderId, initialTableId, initialChannelId }: Props
     modifiers: OrderItem["modifiers"],
     note: string
   ) {
-    if (!order) return;
+    const current = orderRef.current;
+    if (!current) return;
     const lineTotal = computeLineTotal(product.price, modifiers, quantity);
     const item: OrderItem = {
       id: crypto.randomUUID(),
@@ -191,17 +210,18 @@ export function OrderScreen({ orderId, initialTableId, initialChannelId }: Props
       note,
       lineTotal,
     };
-    applyItems([...order.items, item]);
+    applyItems([...current.items, item]);
   }
 
   function changeQuantity(item: OrderItem, delta: number) {
-    if (!order) return;
+    const current = orderRef.current;
+    if (!current) return;
     const newQty = item.quantity + delta;
     if (newQty <= 0) {
       requestRemove(item);
       return;
     }
-    const newItems = order.items.map((i) =>
+    const newItems = current.items.map((i) =>
       i.id === item.id
         ? { ...i, quantity: newQty, lineTotal: computeLineTotal(i.unitPrice, i.modifiers, newQty) }
         : i
@@ -211,23 +231,25 @@ export function OrderScreen({ orderId, initialTableId, initialChannelId }: Props
 
   /** Free removal before the first save (item 18); after that, gated behind a reason (item 19). */
   function requestRemove(item: OrderItem) {
-    if (!order) return;
-    if (!order.id) {
-      applyItems(order.items.filter((i) => i.id !== item.id));
+    const current = orderRef.current;
+    if (!current) return;
+    if (!current.id) {
+      applyItems(current.items.filter((i) => i.id !== item.id));
       return;
     }
     setRemoveTarget(item);
   }
 
   async function confirmRemove(reason: AuditReason, note: string) {
-    if (!order || !removeTarget || !order.id) return;
+    const current = orderRef.current;
+    if (!current || !removeTarget || !current.id) return;
     const target = removeTarget;
-    await applyItems(order.items.filter((i) => i.id !== target.id));
+    await applyItems(current.items.filter((i) => i.id !== target.id));
     await auditLogRepository.create({
       shopId: DEFAULT_SHOP_ID,
       action: "ORDER_ITEM_REMOVED",
-      orderId: order.id,
-      description: `ลบ "${target.productName}" ออกจากออเดอร์ ${order.orderNumber}`,
+      orderId: current.id,
+      description: `ลบ "${target.productName}" ออกจากออเดอร์ ${current.orderNumber}`,
       reason,
       reasonNote: reason === "อื่น ๆ" ? note : null,
       performedBy: appUser!.id,
@@ -239,13 +261,15 @@ export function OrderScreen({ orderId, initialTableId, initialChannelId }: Props
 
   /** First save: draft → a real Firestore doc. Returns the order id (existing or newly created). */
   async function ensureSaved(): Promise<string> {
-    if (!order) throw new Error("no order");
-    if (order.id) return order.id;
+    const current = orderRef.current;
+    if (!current) throw new Error("no order");
+    if (current.id) return current.id;
 
     const orderNumber = await generateOrderNumber(DEFAULT_SHOP_ID);
-    const payload: Omit<Order, "id"> = { ...order, orderNumber, updatedAt: Date.now() };
+    const payload: Omit<Order, "id"> = { ...current, orderNumber, updatedAt: Date.now() };
     const id = await orderRepository.create(payload);
-    setOrder({ ...payload, id });
+    orderRef.current = { ...payload, id };
+    setOrder(orderRef.current);
     router.replace(`/pos/order/${id}`);
     return id;
   }
