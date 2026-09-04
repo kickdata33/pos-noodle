@@ -143,9 +143,12 @@ export function PosHome() {
         </section>
       ) : null}
 
-      <div className="mt-6">
+      <div className="mt-6 flex gap-4">
         <Link href="/pos/history" className="text-sm text-muted-foreground underline">
           ประวัติออเดอร์
+        </Link>
+        <Link href="/pos/stock" className="text-sm text-muted-foreground underline">
+          ของหมด
         </Link>
       </div>
     </main>

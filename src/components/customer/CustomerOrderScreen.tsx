@@ -35,7 +35,7 @@ interface CartLine {
   lineTotal: number;
 }
 
-type Status = "loading" | "ready" | "not-found" | "error";
+type Status = "loading" | "ready" | "closed" | "not-found" | "error";
 
 /**
  * The QR self-order screen (`/order/table/[tableId]`) — no login, reachable by anyone who scans
@@ -54,6 +54,12 @@ export function CustomerOrderScreen({ tableId }: { tableId: string }) {
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [justSubmitted, setJustSubmitted] = useState(false);
+  // True once this visit has seen (or created) an OPEN order for the table — the signal the
+  // polling effect below watches for to know when that order later gets checked out. Kept
+  // separate from `tableInfo.orderNumber` because that field only ever reflects the *last
+  // fetch*, and a brand-new table (nobody has ordered yet) legitimately has `orderNumber: null`
+  // too — the polling below must never mistake "never ordered" for "just got closed out".
+  const [hasActiveOrder, setHasActiveOrder] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -68,8 +74,10 @@ export function CustomerOrderScreen({ tableId }: { tableId: string }) {
           setStatus("not-found");
           return;
         }
+        const table = (await tableRes.json()) as TableResponse;
         setMenu((await menuRes.json()) as MenuResponse);
-        setTableInfo((await tableRes.json()) as TableResponse);
+        setTableInfo(table);
+        setHasActiveOrder(table.orderNumber !== null);
         setStatus("ready");
       } catch {
         if (!cancelled) setStatus("error");
@@ -80,6 +88,32 @@ export function CustomerOrderScreen({ tableId }: { tableId: string }) {
       cancelled = true;
     };
   }, [tableId]);
+
+  // Cuts the customer off the moment staff checks out this table's bill (item: "หลังคิดเงินทุก
+  // ครั้ง ต้องสแกนใหม่") — the QR is meant to be reusable table-to-table, not a standing link
+  // into a bill that's already been paid. Polls rather than pushing, same reasoning as the rest
+  // of the customer surface: no auth, no Firestore listener a stranger's browser could hold
+  // open, just a plain GET. Only runs once this visit has actually seen an OPEN order (see
+  // `hasActiveOrder`'s comment) and stops for good once it fires.
+  useEffect(() => {
+    if (status !== "ready" || !hasActiveOrder) return;
+    const interval = setInterval(async () => {
+      try {
+        const res = await fetch(`/api/customer/table/${tableId}`);
+        if (!res.ok) return;
+        const table = (await res.json()) as TableResponse;
+        if (table.orderNumber === null) {
+          setStatus("closed");
+          return;
+        }
+        setTableInfo(table);
+      } catch {
+        // A transient network hiccup — just try again next tick rather than disrupting the
+        // customer's screen over it.
+      }
+    }, 10000);
+    return () => clearInterval(interval);
+  }, [status, hasActiveOrder, tableId]);
 
   const activeCategories = useMemo(() => menu?.categories ?? [], [menu]);
   const currentCategoryId = activeCategoryId ?? activeCategories[0]?.id ?? null;
@@ -164,6 +198,7 @@ export function CustomerOrderScreen({ tableId }: { tableId: string }) {
           : prev
       );
       setCart([]);
+      setHasActiveOrder(true);
       setJustSubmitted(true);
       setTimeout(() => setJustSubmitted(false), 3000);
     } catch {
@@ -181,6 +216,16 @@ export function CustomerOrderScreen({ tableId }: { tableId: string }) {
       <main className="flex min-h-dvh flex-col items-center justify-center gap-2 p-6 text-center">
         <p className="text-lg font-medium">ไม่พบโต๊ะนี้</p>
         <p className="text-sm text-muted-foreground">กรุณาสแกน QR โค้ดที่โต๊ะอีกครั้ง หรือแจ้งพนักงาน</p>
+      </main>
+    );
+  }
+  if (status === "closed") {
+    return (
+      <main className="flex min-h-dvh flex-col items-center justify-center gap-3 p-6 text-center">
+        <p className="text-xl font-semibold">ขอบคุณที่ใช้บริการ 🙏</p>
+        <p className="text-sm text-muted-foreground">
+          บิลนี้ปิดแล้ว หากต้องการสั่งเพิ่ม กรุณาสแกน QR โค้ดที่โต๊ะใหม่อีกครั้ง
+        </p>
       </main>
     );
   }
