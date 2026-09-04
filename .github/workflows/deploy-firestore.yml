@@ -1,0 +1,47 @@
+name: Deploy Firestore rules & indexes
+
+# Runs only when the files Firebase actually cares about change — most pushes to main
+# won't touch firestore.rules or firestore.indexes.json, so this stays a no-op then.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "firestore.rules"
+      - "firestore.indexes.json"
+  # Lets us re-run it by hand from the Actions tab without needing a dummy commit.
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Write service account key to disk
+        run: echo "$FIREBASE_SERVICE_ACCOUNT_KEY" > "$RUNNER_TEMP/firebase-key.json"
+        env:
+          FIREBASE_SERVICE_ACCOUNT_KEY: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_KEY }}
+
+      - name: Read project id from the key
+        id: project
+        run: |
+          PROJECT_ID=$(node -e "console.log(require('$RUNNER_TEMP/firebase-key.json').project_id)")
+          if [ -z "$PROJECT_ID" ]; then
+            echo "Could not read project_id from the service account key" >&2
+            exit 1
+          fi
+          echo "id=$PROJECT_ID" >> "$GITHUB_OUTPUT"
+
+      - name: Deploy rules & indexes
+        run: npx firebase-tools deploy --only firestore:rules,firestore:indexes --project "$PROJECT_ID" --non-interactive
+        env:
+          GOOGLE_APPLICATION_CREDENTIALS: ${{ runner.temp }}/firebase-key.json
+          PROJECT_ID: ${{ steps.project.outputs.id }}
+
+      - name: Clean up credentials
+        if: always()
+        run: rm -f "$RUNNER_TEMP/firebase-key.json"
