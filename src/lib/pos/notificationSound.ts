@@ -1,9 +1,10 @@
 /**
  * Full alert for a new QR self-order landing on a table (`PosHome`): a short attention tone
- * followed by a spoken Thai "มีออเดอร์ใหม่ค่ะ", spoken once per new order rather than repeating
- * (the shop's choice). The tone plays first since `speechSynthesis.speak()` can take a beat to
- * actually start (voice list still loading, first call in the page), so staff get *some*
- * audible cue immediately either way.
+ * followed by a spoken English "You have a new order", spoken once per new order rather than
+ * repeating (the shop's choice). Was originally Thai ("มีออเดอร์ใหม่ค่ะ") — the shop asked to
+ * switch the whole alert (text + voice) to English. The tone plays first since
+ * `speechSynthesis.speak()` can take a beat to actually start (voice list still loading, first
+ * call in the page), so staff get *some* audible cue immediately either way.
  */
 export function playOrderAlertSound(): void {
   playAttentionTone();
@@ -12,7 +13,8 @@ export function playOrderAlertSound(): void {
 
 /** The exact phrase/rate/pitch spoken for a new order — shared with the "ทดสอบ" preview button
  * on `/pos/alert-voice` so testing a voice there sounds exactly like the real alert. */
-const ALERT_TEXT = "มีออเดอร์ใหม่ค่ะ";
+const ALERT_TEXT = "You have a new order";
+const ALERT_LANG = "en-US";
 const ALERT_RATE = 0.75; // slower — shop asked for "พูดช้าๆ"
 const ALERT_PITCH = 1.15; // a touch higher — reads clearer/softer, "พูดชัดๆ"
 
@@ -21,7 +23,7 @@ const VOICE_PREFERENCE_KEY = "posnoodle:alertVoiceURI";
 /**
  * Which specific installed voice to speak the alert with, if the shop has picked one on
  * `/pos/alert-voice` — see that page's comment for why a manual picker exists at all (the Web
- * Speech API has no gender field, so an automatic "find a female Thai voice" guess can land on
+ * Speech API has no gender field, so an automatic "find a female English voice" guess can land on
  * whatever single, oddly-named voice a given Android/Chrome install happens to ship, with no
  * reliable way to detect it's male). Stored in `localStorage`, not `ShopSettings` — voice
  * availability is a property of *this device's* OS/browser, so the right voice on one staff
@@ -77,7 +79,7 @@ export function speakWithVoice(voice: SpeechSynthesisVoice | undefined): void {
   try {
     if (!("speechSynthesis" in window)) return;
     const utterance = new SpeechSynthesisUtterance(ALERT_TEXT);
-    utterance.lang = "th-TH";
+    utterance.lang = ALERT_LANG;
     utterance.rate = ALERT_RATE;
     utterance.pitch = ALERT_PITCH;
     if (voice) utterance.voice = voice;
@@ -104,22 +106,22 @@ function pickVoice(voices: SpeechSynthesisVoice[]): SpeechSynthesisVoice | undef
     const preferred = voices.find((v) => v.voiceURI === preferredURI);
     if (preferred) return preferred;
   }
-  return pickFemaleThaiVoice(voices);
+  return pickFemaleEnglishVoice(voices);
 }
 
-/** Best-effort match for a female-sounding Thai voice — the Web Speech API exposes no gender
+/** Best-effort match for a female-sounding English voice — the Web Speech API exposes no gender
  * field, only a free-text `name`/`voiceURI` the OS/browser chose, so this checks common naming
  * across engines (Google, Microsoft, Apple all label voices this way) before falling back to
- * whichever Thai voice is first in the list. Some devices (commonly Android) ship a single Thai
- * voice with an internal, non-descriptive name this can never match — for those, `/pos/alert-voice`
- * lets the shop pick a voice by ear instead of by name. */
-function pickFemaleThaiVoice(voices: SpeechSynthesisVoice[]): SpeechSynthesisVoice | undefined {
-  const thaiVoices = voices.filter((v) => v.lang.toLowerCase().startsWith("th"));
-  if (thaiVoices.length === 0) return undefined;
-  const femaleHints = ["female", "หญิง", "kanya", "narisa", "premwadee", "achara", "samantha"];
+ * whichever English voice is first in the list. Some devices (commonly Android) ship a single
+ * voice with an internal, non-descriptive name this can never match — for those,
+ * `/pos/alert-voice` lets the shop pick a voice by ear instead of by name. */
+function pickFemaleEnglishVoice(voices: SpeechSynthesisVoice[]): SpeechSynthesisVoice | undefined {
+  const englishVoices = voices.filter((v) => v.lang.toLowerCase().startsWith("en"));
+  if (englishVoices.length === 0) return undefined;
+  const femaleHints = ["female", "samantha", "victoria", "karen", "susan", "zira", "aria", "jenny"];
   return (
-    thaiVoices.find((v) => femaleHints.some((hint) => v.name.toLowerCase().includes(hint))) ??
-    thaiVoices[0]
+    englishVoices.find((v) => femaleHints.some((hint) => v.name.toLowerCase().includes(hint))) ??
+    englishVoices[0]
   );
 }
 

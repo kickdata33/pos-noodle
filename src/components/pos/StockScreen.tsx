@@ -10,6 +10,8 @@ import { modifierGroupRepository, modifierOptionRepository } from "@/repositorie
 import { productRepository } from "@/repositories/productRepository";
 import type { Category, ModifierGroup, ModifierOption, Product } from "@/types";
 
+import { PosBackLink } from "./PosBackLink";
+
 /**
  * Staff-facing "ของหมด" screen — reachable from `/pos` by any signed-in staff/admin (unlike the
  * Admin catalog pages, which are gated to `role === "admin"` and full of edit/price/delete
@@ -44,6 +46,7 @@ export function StockScreen() {
 
   return (
     <main className="mx-auto max-w-2xl p-4 sm:p-6">
+      <PosBackLink />
       <h1 className="mb-1 text-lg font-semibold">ของหมด</h1>
       <p className="mb-4 text-sm text-muted-foreground">
         ปิดเมนู/ตัวเลือกที่ของหมดชั่วคราวได้ที่นี่ — ลูกค้าและพนักงานจะสั่งรายการที่ปิดไม่ได้

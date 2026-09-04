@@ -16,6 +16,8 @@ import { orderRepository } from "@/repositories/orderRepository";
 import { shopRepository } from "@/repositories/shopRepository";
 import type { Order, OrderStatus } from "@/types";
 
+import { PosBackLink } from "./PosBackLink";
+
 const STATUS_LABEL: Record<OrderStatus, string> = {
   OPEN: "เปิดอยู่",
   PAID: "ชำระแล้ว",
@@ -47,6 +49,7 @@ export function OrderHistory() {
 
   return (
     <main className="mx-auto max-w-4xl p-4 sm:p-6">
+      <PosBackLink />
       <h1 className="mb-4 text-lg font-semibold">ประวัติออเดอร์</h1>
       <div className="overflow-x-auto rounded-lg border border-border">
         <Table>

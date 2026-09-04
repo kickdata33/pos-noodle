@@ -11,14 +11,17 @@ import {
   speakWithVoice,
 } from "@/lib/pos/notificationSound";
 
+import { PosBackLink } from "./PosBackLink";
+
 /**
- * Lets the shop pick, by ear, which installed voice speaks the "มีออเดอร์ใหม่ค่ะ" alert on
+ * Lets the shop pick, by ear, which installed voice speaks the "You have a new order" alert on
  * *this device* — see `notificationSound.ts`'s comment on why this exists at all: the Web
- * Speech API has no gender field, so the automatic "find a female Thai voice" guess can only
- * match on a voice's name, and some devices (commonly Android/Chrome) ship a single Thai voice
- * with an internal, non-descriptive name that guess can never recognize as female. Stored in
- * `localStorage`, per device — a tablet at the register may have different voices installed
- * than a phone in the kitchen, so this is deliberately not a shop-wide `ShopSettings` value.
+ * Speech API has no gender field, so the automatic "find a female English voice" guess can only
+ * match on a voice's name, and some devices (commonly Android/Chrome) ship a single voice for a
+ * given language with an internal, non-descriptive name that guess can never recognize as
+ * female. Stored in `localStorage`, per device — a tablet at the register may have different
+ * voices installed than a phone in the kitchen, so this is deliberately not a shop-wide
+ * `ShopSettings` value.
  */
 export function AlertVoiceSettings() {
   const [voices, setVoices] = useState<SpeechSynthesisVoice[] | null>(null);
@@ -40,15 +43,16 @@ export function AlertVoiceSettings() {
     setSelectedURI(null);
   }
 
-  // Thai-tagged voices first (the ones actually likely to pronounce the phrase correctly), then
-  // everything else — some devices mislabel or omit the Thai voice's language tag entirely, so
+  // English-tagged voices first (the ones actually likely to pronounce the phrase correctly),
+  // then everything else — some devices mislabel or omit a voice's language tag entirely, so
   // showing every voice (with a "ทดสอบ" button) is what actually lets the shop find it by ear.
   const sorted = voices
-    ? [...voices].sort((a, b) => Number(b.lang.toLowerCase().startsWith("th")) - Number(a.lang.toLowerCase().startsWith("th")))
+    ? [...voices].sort((a, b) => Number(b.lang.toLowerCase().startsWith("en")) - Number(a.lang.toLowerCase().startsWith("en")))
     : null;
 
   return (
     <main className="mx-auto max-w-2xl p-4 sm:p-6">
+      <PosBackLink />
       <h1 className="mb-1 text-lg font-semibold">เสียงแจ้งเตือนออเดอร์ใหม่</h1>
       <p className="mb-4 text-sm text-muted-foreground">
         กด &quot;ทดสอบ&quot; ฟังแต่ละเสียง แล้วกด &quot;เลือกใช้เสียงนี้&quot; สำหรับเสียงที่ชอบ —
@@ -57,7 +61,7 @@ export function AlertVoiceSettings() {
 
       <div className="mb-4 flex items-center justify-between rounded-lg border border-border bg-card p-3">
         <div>
-          <p className="font-medium">อัตโนมัติ (ค้นหาเสียงผู้หญิงให้เอง)</p>
+          <p className="font-medium">อัตโนมัติ (ค้นหาเสียงผู้หญิงภาษาอังกฤษให้เอง)</p>
           <p className="text-xs text-muted-foreground">ค่าเริ่มต้น — ถ้ายังไม่เคยเลือกเสียงเอง</p>
         </div>
         <div className="flex items-center gap-2">
