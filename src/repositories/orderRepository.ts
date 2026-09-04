@@ -39,6 +39,24 @@ class OrderRepository extends FirestoreRepository<Order> {
   listForShop(shopId: string): Promise<Order[]> {
     return this.list(where("shopId", "==", shopId), orderBy("createdAt", "desc"));
   }
+
+  /**
+   * PAID orders whose payment fell inside `[startMs, endMs]` — the source data for the sales
+   * report (`lib/pos/reports.ts`). Filtered on `paidAt`, not `createdAt`: the report answers
+   * "how much did we take in on this day", which is when payment happened, not when the order
+   * was first opened (usually the same moment, but not always — e.g. a table opened just before
+   * midnight and paid just after). Requires the `shopId+status+paidAt` composite index in
+   * `firestore.indexes.json`.
+   */
+  listPaidForShopInRange(shopId: string, startMs: number, endMs: number): Promise<Order[]> {
+    return this.list(
+      where("shopId", "==", shopId),
+      where("status", "==", "PAID"),
+      where("paidAt", ">=", startMs),
+      where("paidAt", "<=", endMs),
+      orderBy("paidAt", "asc")
+    );
+  }
 }
 
 export const orderRepository = new OrderRepository();

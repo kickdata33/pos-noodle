@@ -9,7 +9,7 @@
     "lint": "eslint",
     "seed": "tsx --conditions=react-server --env-file=.env.local scripts/seed.ts",
     "test:pin": "tsx --test scripts/pin.test.ts",
-    "test:pos": "tsx --test scripts/orderNumber.test.ts scripts/pricing.test.ts"
+    "test:pos": "tsx --test scripts/orderNumber.test.ts scripts/pricing.test.ts scripts/reports.test.ts"
   },
   "dependencies": {
     "@radix-ui/react-checkbox": "^1.3.11",

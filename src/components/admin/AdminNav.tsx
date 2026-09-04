@@ -7,6 +7,7 @@ import { cn } from "@/lib/utils";
 
 const NAV_ITEMS = [
   { href: "/admin", label: "ภาพรวม" },
+  { href: "/admin/reports", label: "รายงานสรุปยอด" },
   { href: "/admin/categories", label: "หมวดหมู่" },
   { href: "/admin/products", label: "เมนู" },
   { href: "/admin/modifiers", label: "Modifier" },
