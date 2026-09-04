@@ -19,4 +19,7 @@ export const COLLECTIONS = {
   orderCounters: "orderCounters",
   payments: "payments",
   auditLogs: "auditLogs",
+  /** Server-only: last-submitted-at per table, for `lib/pos/customerThrottle.ts`. Denied to
+   * every client — only the customer QR-order API route (Admin SDK) ever touches this. */
+  customerOrderThrottle: "customerOrderThrottle",
 } as const;

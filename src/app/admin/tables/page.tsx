@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 
 import { AdminSection } from "@/components/admin/AdminSection";
 import { SortButtons } from "@/components/admin/SortButtons";
+import { TableQrDialog } from "@/components/admin/tables/TableQrDialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -34,6 +35,7 @@ export default function TablesPage() {
   const [editing, setEditing] = useState<PosTable | null>(null);
   const [name, setName] = useState("");
   const [saving, setSaving] = useState(false);
+  const [qrTable, setQrTable] = useState<PosTable | null>(null);
 
   useEffect(() => tableRepository.subscribeForShop(DEFAULT_SHOP_ID, setItems), []);
 
@@ -122,6 +124,9 @@ export default function TablesPage() {
               <TableCell className="text-right">
                 <div className="flex justify-end gap-2">
                   <Switch checked={table.active} onCheckedChange={() => toggleActive(table)} />
+                  <Button variant="outline" size="sm" onClick={() => setQrTable(table)}>
+                    QR
+                  </Button>
                   <Button variant="outline" size="sm" onClick={() => openEdit(table)}>
                     แก้ไข
                   </Button>
@@ -167,6 +172,8 @@ export default function TablesPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <TableQrDialog table={qrTable} onOpenChange={(open) => !open && setQrTable(null)} />
     </AdminSection>
   );
 }
