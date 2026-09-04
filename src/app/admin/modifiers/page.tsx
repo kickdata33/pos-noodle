@@ -16,8 +16,9 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { computeSwap } from "@/lib/admin/sortOrder";
 import { DEFAULT_SHOP_ID } from "@/lib/firebase/config";
-import { modifierGroupRepository } from "@/repositories/modifierRepository";
-import type { ModifierGroup, ModifierSelectionType } from "@/types";
+import { modifierGroupRepository, modifierOptionRepository } from "@/repositories/modifierRepository";
+import { productRepository } from "@/repositories/productRepository";
+import type { ModifierGroup, ModifierSelectionType, Product } from "@/types";
 import { GroupCard } from "./GroupCard";
 
 interface FormState {
@@ -35,12 +36,14 @@ const EMPTY_FORM: FormState = { name: "", required: false, selectionType: "singl
  */
 export default function ModifiersPage() {
   const [groups, setGroups] = useState<ModifierGroup[]>([]);
+  const [products, setProducts] = useState<Product[]>([]);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState<ModifierGroup | null>(null);
   const [form, setForm] = useState<FormState>(EMPTY_FORM);
   const [saving, setSaving] = useState(false);
 
   useEffect(() => modifierGroupRepository.subscribeForShop(DEFAULT_SHOP_ID, setGroups), []);
+  useEffect(() => productRepository.subscribeForShop(DEFAULT_SHOP_ID, setProducts), []);
 
   function openCreate() {
     setEditing(null);
@@ -94,6 +97,20 @@ export default function ModifiersPage() {
     );
   }
 
+  async function handleDelete(group: ModifierGroup) {
+    const productCount = products.filter((p) => p.modifierGroupIds.includes(group.id)).length;
+    if (productCount > 0) {
+      alert(`ลบไม่ได้ — ยังมีเมนู ${productCount} รายการใช้กลุ่มนี้อยู่ เอาออกจากเมนูเหล่านั้นก่อน`);
+      return;
+    }
+    if (!confirm(`ลบกลุ่ม Modifier "${group.name}" ใช่หรือไม่? ลบแล้วกู้คืนไม่ได้ (ตัวเลือกในกลุ่มจะถูกลบไปด้วย)`)) return;
+    // Cascade: an option with no parent group left is unreachable dead data (nothing lists
+    // options outside their group's own subscription), never useful to leave behind.
+    const orphanedOptions = await modifierOptionRepository.listForGroup(group.id);
+    await Promise.all(orphanedOptions.map((o) => modifierOptionRepository.remove(o.id)));
+    await modifierGroupRepository.remove(group.id);
+  }
+
   return (
     <AdminSection
       title="Modifier"
@@ -108,6 +125,7 @@ export default function ModifiersPage() {
             group={group}
             onEdit={() => openEdit(group)}
             onToggleActive={() => toggleActive(group)}
+            onDelete={() => handleDelete(group)}
             onMove={(direction) => move(index, direction)}
             disabledUp={index === 0}
             disabledDown={index === groups.length - 1}

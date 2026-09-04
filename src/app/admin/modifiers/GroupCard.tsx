@@ -14,13 +14,16 @@ import type { ModifierGroup, ModifierOption } from "@/types";
 /**
  * One Modifier Group and its Options, expandable — matches item 12's shape: e.g. Group "เส้น"
  * (required, single-select) with plain options, or Group "เพิ่มเติม" (optional, multi-select)
- * with priced options like "พิเศษ +10". Options are deactivated rather than deleted, same
- * reasoning as Products/Categories — a past order may reference one.
+ * with priced options like "พิเศษ +10". Real delete is offered for both group and options —
+ * safe for options (a past order's `OrderItemModifier` already snapshots optionId/name/price,
+ * never reads the live doc again); the group delete itself is guarded one level up in
+ * `ModifiersPage` (blocked while any Product still lists this group).
  */
 export function GroupCard({
   group,
   onEdit,
   onToggleActive,
+  onDelete,
   onMove,
   disabledUp,
   disabledDown,
@@ -28,6 +31,7 @@ export function GroupCard({
   group: ModifierGroup;
   onEdit: () => void;
   onToggleActive: () => void;
+  onDelete: () => void;
   onMove: (direction: "up" | "down") => void;
   disabledUp: boolean;
   disabledDown: boolean;
@@ -69,6 +73,11 @@ export function GroupCard({
     await modifierOptionRepository.update(option.id, { active: !option.active });
   }
 
+  async function deleteOption(option: ModifierOption) {
+    if (!confirm(`ลบตัวเลือก "${option.name}" ใช่หรือไม่? ลบแล้วกู้คืนไม่ได้`)) return;
+    await modifierOptionRepository.remove(option.id);
+  }
+
   async function moveOption(index: number, direction: "up" | "down") {
     const swap = computeSwap(options, index, direction);
     if (!swap) return;
@@ -98,6 +107,9 @@ export function GroupCard({
         <Button variant="outline" size="sm" onClick={onEdit}>
           แก้ไข
         </Button>
+        <Button variant="destructive" size="sm" onClick={onDelete}>
+          ลบ
+        </Button>
         <Button variant="ghost" size="sm" onClick={() => setExpanded((e) => !e)}>
           {expanded ? "ย่อ" : "ตัวเลือก"}
         </Button>
@@ -119,6 +131,9 @@ export function GroupCard({
                   {option.priceDelta > 0 ? `+${option.priceDelta}` : option.priceDelta} บาท
                 </span>
                 <Switch checked={option.active} onCheckedChange={() => toggleOptionActive(option)} />
+                <Button variant="destructive" size="sm" onClick={() => deleteOption(option)}>
+                  ลบ
+                </Button>
               </div>
             ))}
             {options.length === 0 ? (
