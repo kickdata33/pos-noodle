@@ -74,20 +74,23 @@ export function PosHome() {
                     : `/pos/order/new?tableId=${table.id}`
                 }
                 className={
-                  "relative flex flex-col items-center justify-center gap-1 rounded-lg border p-4 h-24 " +
+                  "relative isolate flex flex-col items-center justify-center gap-1 overflow-hidden rounded-lg border p-4 h-24 " +
                   (order?.pendingReview
-                    ? "border-destructive bg-destructive/10"
+                    ? "border-success"
                     : order
                       ? "border-primary bg-primary/10"
                       : "border-border bg-card hover:bg-accent")
                 }
               >
                 {order?.pendingReview ? (
-                  <span className="absolute -right-1.5 -top-1.5 h-3.5 w-3.5 animate-pulse rounded-full bg-destructive" />
+                  // The whole card blinks green until staff opens this order (see globals.css)
+                  // — a full-card background layer, not just a corner dot, so it reads across
+                  // the room. Sits behind the content below (`-z-10`) so text stays fully legible.
+                  <span className="animate-order-alert absolute inset-0 -z-10 bg-success" aria-hidden />
                 ) : null}
                 <span className="text-lg font-semibold">{table.name}</span>
                 {order ? (
-                  <Badge variant={order.pendingReview ? "destructive" : "default"}>
+                  <Badge variant={order.pendingReview ? "success" : "default"}>
                     {order.pendingReview ? "ออเดอร์ใหม่จาก QR" : formatCurrency(order.total, currency)}
                   </Badge>
                 ) : (

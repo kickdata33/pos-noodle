@@ -96,3 +96,19 @@ button,
 [role="button"] {
   touch-action: manipulation;
 }
+
+/* A whole table card blinking green — a new QR self-order landed and staff hasn't opened it yet
+   (`PosHome`). Blinks the *card*, not just a small dot, so it reads from across the room; keeps
+   going until the order's `pendingReview` clears (staff opens the order), not on a timer. */
+@keyframes order-alert-blink {
+  0%,
+  100% {
+    opacity: 0.15;
+  }
+  50% {
+    opacity: 0.6;
+  }
+}
+.animate-order-alert {
+  animation: order-alert-blink 1s ease-in-out infinite;
+}

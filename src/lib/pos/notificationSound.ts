@@ -1,10 +1,34 @@
 /**
- * A short two-tone alert beep for a new QR self-order landing on a table (`PosHome`). Built with
- * the Web Audio API rather than an audio file — no asset to host/fetch, matching this project's
- * general preference for not depending on network resources that don't need to be there (same
- * reasoning as the offline service worker and the locally-generated QR codes).
+ * Full alert for a new QR self-order landing on a table (`PosHome`): a short attention tone
+ * followed by a spoken Thai "มีออเดอร์ใหม่" — the shop asked for a spoken alert over a plain
+ * beep, spoken once per new order rather than repeating (their choice). The tone plays first
+ * since `speechSynthesis.speak()` can take a beat to actually start (voice list still loading,
+ * first call in the page), so staff get *some* audible cue immediately either way.
  */
 export function playOrderAlertSound(): void {
+  playAttentionTone();
+  speakNewOrderAlert();
+}
+
+/** Speaks "มีออเดอร์ใหม่" once via the browser's built-in text-to-speech — no audio file to
+ * host, same reasoning as the tone below. Silently does nothing if the browser has no speech
+ * synthesis support, or blocks it (some browsers require a prior user gesture on the page,
+ * which staff will have already made just by logging in / tapping around `/pos`). */
+function speakNewOrderAlert(): void {
+  try {
+    if (!("speechSynthesis" in window)) return;
+    const utterance = new SpeechSynthesisUtterance("มีออเดอร์ใหม่");
+    utterance.lang = "th-TH";
+    const thaiVoice = window.speechSynthesis.getVoices().find((v) => v.lang === "th-TH");
+    if (thaiVoice) utterance.voice = thaiVoice;
+    window.speechSynthesis.speak(utterance);
+  } catch {
+    // A missing/blocked TTS engine still leaves the tone below and the blinking card — never
+    // worth crashing the table grid over.
+  }
+}
+
+function playAttentionTone(): void {
   try {
     const AudioContextClass = window.AudioContext ?? (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
     if (!AudioContextClass) return;

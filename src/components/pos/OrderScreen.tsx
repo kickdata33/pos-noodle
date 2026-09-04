@@ -8,7 +8,7 @@ import { ItemNoteDialog } from "@/components/pos/ItemNoteDialog";
 import { ModifierPickerDialog } from "@/components/pos/ModifierPickerDialog";
 import { RemoveItemDialog } from "@/components/pos/RemoveItemDialog";
 import { Button } from "@/components/ui/button";
-import { formatCurrency } from "@/lib/format";
+import { formatCurrency, formatTime } from "@/lib/format";
 import { DEFAULT_SHOP_ID } from "@/lib/firebase/config";
 import { useAuth } from "@/hooks/useAuth";
 import { computeLineTotal, computeOrderTotals, groupItemsByProduct } from "@/lib/pos/pricing";
@@ -467,7 +467,9 @@ export function OrderScreen({ orderId, initialTableId, initialChannelId }: Props
               {order.tableName ? `โต๊ะ ${order.tableName}` : order.channelName}
             </p>
             {order.orderNumber ? (
-              <p className="text-xs text-muted-foreground">{order.orderNumber}</p>
+              <p className="text-xs text-muted-foreground">
+                {order.orderNumber} · เปิดโต๊ะเมื่อ {formatTime(order.createdAt)}
+              </p>
             ) : null}
           </div>
           {/* Every menu tap saves immediately (create on the first item, update after) — this is
