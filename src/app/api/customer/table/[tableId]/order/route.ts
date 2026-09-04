@@ -73,7 +73,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     return NextResponse.json({ error: "ร้านยังไม่พร้อมรับออเดอร์ กรุณาแจ้งพนักงาน" }, { status: 503 });
   }
 
-  const { items: resolvedItems, errors } = resolveCustomerOrder(selections, catalog);
+  const { items: resolvedItems, errors } = resolveCustomerOrder(selections, { ...catalog, channel: dineInChannel });
   if (errors.length > 0) {
     return NextResponse.json({ error: errors.join(", ") }, { status: 400 });
   }

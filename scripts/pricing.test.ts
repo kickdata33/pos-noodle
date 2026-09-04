@@ -7,8 +7,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { computeLineTotal, computeOrderTotals, groupItemsByProduct } from "../src/lib/pos/pricing";
-import type { OrderItem } from "../src/types";
+import { computeLineTotal, computeOrderTotals, groupItemsByProduct, resolveChannelPrice } from "../src/lib/pos/pricing";
+import type { OrderItem, Product, SalesChannel } from "../src/types";
 
 function makeItem(overrides: Partial<OrderItem> & Pick<OrderItem, "id" | "productId">): OrderItem {
   return {
@@ -130,4 +130,44 @@ test("groupItemsByProduct: different products never merge, and group order follo
   );
   assert.equal(groups[0].totalQty, 2);
   assert.equal(groups[1].totalQty, 1);
+});
+
+// --- resolveChannelPrice (item 23: channel price markup, e.g. Grab/LINE MAN/ShopeeFood) ---
+
+function testProduct(overrides: Partial<Pick<Product, "price" | "channelPrices">> = {}): Pick<Product, "price" | "channelPrices"> {
+  return { price: 60, ...overrides };
+}
+
+function testChannel(overrides: Partial<Pick<SalesChannel, "id" | "markupPercent">> = {}): Pick<SalesChannel, "id" | "markupPercent"> {
+  return { id: "grab", ...overrides };
+}
+
+test("resolveChannelPrice: no channel falls straight through to the plain price", () => {
+  assert.equal(resolveChannelPrice(testProduct({ price: 60 }), null), 60);
+});
+
+test("resolveChannelPrice: a channel with no markup set falls straight through to the plain price", () => {
+  assert.equal(resolveChannelPrice(testProduct({ price: 60 }), testChannel({ markupPercent: undefined })), 60);
+  assert.equal(resolveChannelPrice(testProduct({ price: 60 }), testChannel({ markupPercent: 0 })), 60);
+});
+
+test("resolveChannelPrice: applies the channel's markup percent, rounded UP to the nearest 5 baht", () => {
+  // 60 + 20% = 72 -> rounds up to 75
+  assert.equal(resolveChannelPrice(testProduct({ price: 60 }), testChannel({ markupPercent: 20 })), 75);
+  // 60 + 25% = 75 exactly -> stays 75, never rounds further up past an exact multiple of 5
+  assert.equal(resolveChannelPrice(testProduct({ price: 60 }), testChannel({ markupPercent: 25 })), 75);
+  // 60 + 15% = 69 -> rounds up to 70
+  assert.equal(resolveChannelPrice(testProduct({ price: 60 }), testChannel({ markupPercent: 15 })), 70);
+});
+
+test("resolveChannelPrice: a manual per-item channelPrices override always wins over the percent markup", () => {
+  const product = testProduct({ price: 60, channelPrices: { grab: 65 } });
+  assert.equal(resolveChannelPrice(product, testChannel({ id: "grab", markupPercent: 20 })), 65);
+  // A different channel with no override still gets the automatic markup.
+  assert.equal(resolveChannelPrice(product, testChannel({ id: "lineman", markupPercent: 20 })), 75);
+});
+
+test("resolveChannelPrice: an override of exactly 0 is a real override, not treated as unset", () => {
+  const product = testProduct({ price: 60, channelPrices: { grab: 0 } });
+  assert.equal(resolveChannelPrice(product, testChannel({ id: "grab", markupPercent: 20 })), 0);
 });

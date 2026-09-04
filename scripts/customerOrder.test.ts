@@ -131,3 +131,25 @@ test("resolveCustomerOrder: collects every line's error instead of stopping at t
   assert.equal(items.length, 1);
   assert.equal(errors.length, 2);
 });
+
+test("resolveCustomerOrderItem: applies the dine-in channel's markup, same as the staff order screen", () => {
+  const catalog: CustomerOrderCatalog = {
+    products: [product({ id: "p1", price: 60 })],
+    modifierGroups: [],
+    modifierOptions: [],
+    channel: { id: "dineIn", markupPercent: 20 },
+  };
+  const result = resolveCustomerOrderItem({ productId: "p1", quantity: 1, optionIds: [], note: "" }, catalog);
+  assert.equal(result.ok, true);
+  if (result.ok) {
+    assert.equal(result.item.unitPrice, 75); // 60 + 20% = 72, rounds up to nearest 5
+    assert.equal(result.item.lineTotal, 75);
+  }
+});
+
+test("resolveCustomerOrderItem: no channel passed behaves exactly as before — plain product price", () => {
+  const catalog: CustomerOrderCatalog = { products: [product({ id: "p1", price: 60 })], modifierGroups: [], modifierOptions: [] };
+  const result = resolveCustomerOrderItem({ productId: "p1", quantity: 1, optionIds: [], note: "" }, catalog);
+  assert.equal(result.ok, true);
+  if (result.ok) assert.equal(result.item.unitPrice, 60);
+});

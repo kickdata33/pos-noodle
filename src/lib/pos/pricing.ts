@@ -1,4 +1,4 @@
-import type { OrderItem, OrderItemModifier, ShopSettings } from "@/types";
+import type { OrderItem, OrderItemModifier, Product, SalesChannel, ShopSettings } from "@/types";
 
 /** (unitPrice + sum of modifier priceDelta) * quantity — item 21/22. */
 export function computeLineTotal(
@@ -8,6 +8,37 @@ export function computeLineTotal(
 ): number {
   const modifierTotal = modifiers.reduce((sum, m) => sum + m.priceDelta, 0);
   return (unitPrice + modifierTotal) * quantity;
+}
+
+/**
+ * What this product actually costs when ordered on a given channel — item 23 turned on for
+ * delivery apps (confirmed with the shop): Grab/LINE MAN/ShopeeFood commonly mark menu prices
+ * up to cover platform commission, each app usually by a different percent.
+ *
+ * Resolution order:
+ * 1. A manual per-item override in `Product.channelPrices[channel.id]` always wins outright —
+ *    an admin who set an exact price for this one item on this one channel meant it literally,
+ *    markup or not.
+ * 2. Otherwise apply the channel's `markupPercent` on top of the plain `Product.price`, rounded
+ *    UP to the nearest 5 baht (the shop's rounding rule) — rounding up, never down, so the shop
+ *    is never left quietly eating part of the platform's commission from a rounding loss.
+ * 3. No channel (`null` — dine-in draft still resolving its channel) or a channel with no
+ *    markup set falls straight through to the plain price, unchanged from before this feature.
+ */
+export function resolveChannelPrice(
+  product: Pick<Product, "price" | "channelPrices">,
+  channel: Pick<SalesChannel, "id" | "markupPercent"> | null
+): number {
+  if (!channel) return product.price;
+  const override = product.channelPrices?.[channel.id];
+  if (override !== undefined) return override;
+  const markupPercent = channel.markupPercent ?? 0;
+  if (markupPercent === 0) return product.price;
+  return roundUpToNearest5(product.price * (1 + markupPercent / 100));
+}
+
+function roundUpToNearest5(value: number): number {
+  return Math.ceil(value / 5) * 5;
 }
 
 export interface OrderTotals {

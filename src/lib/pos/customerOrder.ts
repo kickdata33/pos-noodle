@@ -1,5 +1,5 @@
-import type { ModifierGroup, ModifierOption, OrderItem, OrderItemModifier, Product } from "@/types";
-import { computeLineTotal } from "./pricing";
+import type { ModifierGroup, ModifierOption, OrderItem, OrderItemModifier, Product, SalesChannel } from "@/types";
+import { computeLineTotal, resolveChannelPrice } from "./pricing";
 
 /**
  * Turns one raw selection from the customer-facing QR order screen (`/order/table/[tableId]`)
@@ -22,6 +22,14 @@ export interface CustomerOrderCatalog {
   products: Product[];
   modifierGroups: ModifierGroup[];
   modifierOptions: ModifierOption[];
+  /**
+   * The channel this order is on — QR ordering is dine-in only (see the API route's comment),
+   * so this is always the shop's dine-in `SalesChannel`, passed through to `resolveChannelPrice`
+   * for consistency with the staff order screen's pricing. Optional only so existing tests that
+   * don't care about channel pricing don't need a channel object; the real API route always
+   * passes one. Absent behaves exactly as before this field existed — plain `Product.price`.
+   */
+  channel?: Pick<SalesChannel, "id" | "markupPercent">;
 }
 
 export type ResolveResult =
@@ -72,7 +80,8 @@ export function resolveCustomerOrderItem(
   }
 
   const note = selection.note.trim().slice(0, 200);
-  const lineTotal = computeLineTotal(product.price, modifiers, selection.quantity);
+  const unitPrice = resolveChannelPrice(product, catalog.channel ?? null);
+  const lineTotal = computeLineTotal(unitPrice, modifiers, selection.quantity);
 
   return {
     ok: true,
@@ -80,7 +89,7 @@ export function resolveCustomerOrderItem(
       productId: product.id,
       productName: product.name,
       quantity: selection.quantity,
-      unitPrice: product.price,
+      unitPrice,
       modifiers,
       note,
       lineTotal,

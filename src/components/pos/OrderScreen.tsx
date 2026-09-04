@@ -11,7 +11,7 @@ import { Button } from "@/components/ui/button";
 import { formatCurrency, formatTime } from "@/lib/format";
 import { DEFAULT_SHOP_ID } from "@/lib/firebase/config";
 import { useAuth } from "@/hooks/useAuth";
-import { computeLineTotal, computeOrderTotals, groupItemsByProduct } from "@/lib/pos/pricing";
+import { computeLineTotal, computeOrderTotals, groupItemsByProduct, resolveChannelPrice } from "@/lib/pos/pricing";
 import { generateOrderNumber } from "@/lib/pos/orderNumber";
 import { auditLogRepository } from "@/repositories/auditLogRepository";
 import { categoryRepository } from "@/repositories/categoryRepository";
@@ -208,6 +208,11 @@ export function OrderScreen({ orderId, initialTableId, initialChannelId }: Props
   const currentCategoryId = activeCategoryId ?? activeCategories[0]?.id ?? null;
   const visibleProducts = products.filter((p) => p.active && p.categoryId === currentCategoryId);
 
+  // This order's channel (Grab/LINE MAN/ShopeeFood may mark prices up — item 23) — looked up by
+  // id rather than trusted from anywhere else, same as every other channel-derived display value
+  // in this app (item 34: never hardcode what should come from data).
+  const currentChannel = channels.find((c) => c.id === order?.channelId) ?? null;
+
   /**
    * Applies a new items array: updates local state, and saves — immediately if the order is
    * already persisted (item 13–14: another staff member glancing at the table grid must see the
@@ -260,13 +265,18 @@ export function OrderScreen({ orderId, initialTableId, initialChannelId }: Props
   ) {
     const current = orderRef.current;
     if (!current) return;
-    const lineTotal = computeLineTotal(product.price, modifiers, quantity);
+    // Grab/LINE MAN/ShopeeFood etc. may mark this product's price up (or an admin may have set
+    // an exact override for it on this channel) — see `resolveChannelPrice`'s comment. Dine-in
+    // (and any channel with no markup set) resolves straight through to `product.price`.
+    const channel = channels.find((c) => c.id === current.channelId) ?? null;
+    const unitPrice = resolveChannelPrice(product, channel);
+    const lineTotal = computeLineTotal(unitPrice, modifiers, quantity);
     const item: OrderItem = {
       id: crypto.randomUUID(),
       productId: product.id,
       productName: product.name,
       quantity,
-      unitPrice: product.price,
+      unitPrice,
       modifiers,
       note,
       lineTotal,
@@ -458,7 +468,7 @@ export function OrderScreen({ orderId, initialTableId, initialChannelId }: Props
             >
               <span className="font-medium">{product.name}</span>
               <span className="text-sm text-muted-foreground">
-                {formatCurrency(product.price, settings.currency)}
+                {formatCurrency(resolveChannelPrice(product, currentChannel), settings.currency)}
               </span>
             </button>
           ))}

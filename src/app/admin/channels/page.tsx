@@ -38,6 +38,7 @@ export default function ChannelsPage() {
   const [name, setName] = useState("");
   const [color, setColor] = useState(DEFAULT_COLOR);
   const [requiresTable, setRequiresTable] = useState(false);
+  const [markupPercent, setMarkupPercent] = useState("0");
   const [saving, setSaving] = useState(false);
 
   useEffect(() => channelRepository.subscribeForShop(DEFAULT_SHOP_ID, setItems), []);
@@ -47,6 +48,7 @@ export default function ChannelsPage() {
     setName("");
     setColor(DEFAULT_COLOR);
     setRequiresTable(false);
+    setMarkupPercent("0");
     setDialogOpen(true);
   }
 
@@ -55,16 +57,18 @@ export default function ChannelsPage() {
     setName(channel.name);
     setColor(channel.color);
     setRequiresTable(channel.requiresTable);
+    setMarkupPercent(String(channel.markupPercent ?? 0));
     setDialogOpen(true);
   }
 
   async function handleSave() {
     const trimmed = name.trim();
-    if (!trimmed) return;
+    const markup = Number(markupPercent);
+    if (!trimmed || !Number.isFinite(markup) || markup < 0) return;
     setSaving(true);
     try {
       if (editing) {
-        await channelRepository.update(editing.id, { name: trimmed, color, requiresTable });
+        await channelRepository.update(editing.id, { name: trimmed, color, requiresTable, markupPercent: markup });
       } else {
         await channelRepository.create({
           shopId: DEFAULT_SHOP_ID,
@@ -76,6 +80,7 @@ export default function ChannelsPage() {
           active: true,
           sortOrder: items.length,
           createdAt: Date.now(),
+          markupPercent: markup,
         });
       }
       setDialogOpen(false);
@@ -131,6 +136,9 @@ export default function ChannelsPage() {
                   <span className="font-medium">{channel.name}</span>
                   {channel.requiresTable ? (
                     <span className="text-xs text-muted-foreground">(ใช้โต๊ะ)</span>
+                  ) : null}
+                  {channel.markupPercent ? (
+                    <Badge variant="muted">+{channel.markupPercent}%</Badge>
                   ) : null}
                   {channel.code ? (
                     <Badge variant="muted" className="text-[10px]">
@@ -194,12 +202,32 @@ export default function ChannelsPage() {
               <Checkbox checked={requiresTable} onCheckedChange={(v) => setRequiresTable(v === true)} />
               เป็นช่องทางที่ใช้โต๊ะ (เช่น หน้าร้าน)
             </label>
+            <div className="grid gap-2">
+              <Label htmlFor="channel-markup">บวกราคาอัตโนมัติ (%)</Label>
+              <Input
+                id="channel-markup"
+                type="number"
+                inputMode="decimal"
+                min={0}
+                value={markupPercent}
+                onChange={(e) => setMarkupPercent(e.target.value)}
+                placeholder="0"
+              />
+              <p className="text-xs text-muted-foreground">
+                เช่น Grab ใส่ 20 = บวกราคาเมนู 20% แล้วปัดขึ้นเป็นเลขลงท้าย 5 บาท — ใส่ 0
+                ถ้าไม่ต้องการบวกราคา (เช่น หน้าร้าน, กลับบ้าน) ตั้งราคาเฉพาะบางเมนูเองได้ที่หน้า
+                &quot;เมนู&quot;
+              </p>
+            </div>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setDialogOpen(false)}>
               ยกเลิก
             </Button>
-            <Button onClick={handleSave} disabled={saving || !name.trim()}>
+            <Button
+              onClick={handleSave}
+              disabled={saving || !name.trim() || !Number.isFinite(Number(markupPercent)) || Number(markupPercent) < 0}
+            >
               บันทึก
             </Button>
           </DialogFooter>
