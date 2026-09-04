@@ -1,31 +1,74 @@
 /**
  * Full alert for a new QR self-order landing on a table (`PosHome`): a short attention tone
- * followed by a spoken Thai "มีออเดอร์ใหม่" — the shop asked for a spoken alert over a plain
- * beep, spoken once per new order rather than repeating (their choice). The tone plays first
- * since `speechSynthesis.speak()` can take a beat to actually start (voice list still loading,
- * first call in the page), so staff get *some* audible cue immediately either way.
+ * followed by a spoken Thai "มีออเดอร์ใหม่ค่ะ" in a female voice, spoken slowly and clearly (the
+ * shop's request) — spoken once per new order rather than repeating (their earlier choice). The
+ * tone plays first since `speechSynthesis.speak()` can take a beat to actually start (voice list
+ * still loading, first call in the page), so staff get *some* audible cue immediately either way.
  */
 export function playOrderAlertSound(): void {
   playAttentionTone();
   speakNewOrderAlert();
 }
 
-/** Speaks "มีออเดอร์ใหม่" once via the browser's built-in text-to-speech — no audio file to
+/**
+ * Speaks "มีออเดอร์ใหม่ค่ะ" once via the browser's built-in text-to-speech — no audio file to
  * host, same reasoning as the tone below. Silently does nothing if the browser has no speech
  * synthesis support, or blocks it (some browsers require a prior user gesture on the page,
- * which staff will have already made just by logging in / tapping around `/pos`). */
+ * which staff will have already made just by logging in / tapping around `/pos`).
+ *
+ * Shop feedback: wanted a female voice, pleasant, speaking slowly and clearly. Web Speech API
+ * has no gender field on a voice, so `pickFemaleThaiVoice` below is a best-effort name match —
+ * the polite feminine particle "ค่ะ" added to the phrase itself does more reliable work here,
+ * since it reads as a woman speaking regardless of which underlying voice/timbre the device
+ * actually has installed. `rate`/`pitch` are turned down/up a touch for "ช้าๆ ชัดๆ".
+ */
 function speakNewOrderAlert(): void {
   try {
     if (!("speechSynthesis" in window)) return;
-    const utterance = new SpeechSynthesisUtterance("มีออเดอร์ใหม่");
-    utterance.lang = "th-TH";
-    const thaiVoice = window.speechSynthesis.getVoices().find((v) => v.lang === "th-TH");
-    if (thaiVoice) utterance.voice = thaiVoice;
-    window.speechSynthesis.speak(utterance);
+
+    let spoken = false;
+    const speak = () => {
+      // Guards against speaking twice — both the `voiceschanged` listener and the fallback
+      // timeout below can fire in some browsers, and this must only ever say it once per order.
+      if (spoken) return;
+      spoken = true;
+      const utterance = new SpeechSynthesisUtterance("มีออเดอร์ใหม่ค่ะ");
+      utterance.lang = "th-TH";
+      utterance.rate = 0.75; // slower — "พูดช้าๆ"
+      utterance.pitch = 1.15; // a touch higher — reads clearer/softer, "พูดชัดๆ"
+      const voice = pickFemaleThaiVoice(window.speechSynthesis.getVoices());
+      if (voice) utterance.voice = voice;
+      window.speechSynthesis.speak(utterance);
+    };
+
+    // Chrome (and others) load the voice list asynchronously — `getVoices()` can come back
+    // empty on the very first call of the page, which would silently skip the female-voice
+    // match above. Wait for `voiceschanged` when that happens, with a timeout fallback in case
+    // the event never fires (some browsers only raise it once, before this listener attaches).
+    if (window.speechSynthesis.getVoices().length === 0) {
+      window.speechSynthesis.addEventListener("voiceschanged", speak, { once: true });
+      setTimeout(speak, 300);
+    } else {
+      speak();
+    }
   } catch {
     // A missing/blocked TTS engine still leaves the tone below and the blinking card — never
     // worth crashing the table grid over.
   }
+}
+
+/** Best-effort match for a female-sounding Thai voice — the Web Speech API exposes no gender
+ * field, only a free-text `name`/`voiceURI` the OS/browser chose, so this checks common naming
+ * across engines (Google, Microsoft, Apple all label voices this way) before falling back to
+ * whichever Thai voice is first in the list. */
+function pickFemaleThaiVoice(voices: SpeechSynthesisVoice[]): SpeechSynthesisVoice | undefined {
+  const thaiVoices = voices.filter((v) => v.lang.toLowerCase().startsWith("th"));
+  if (thaiVoices.length === 0) return undefined;
+  const femaleHints = ["female", "หญิง", "kanya", "narisa", "premwadee", "achara", "samantha"];
+  return (
+    thaiVoices.find((v) => femaleHints.some((hint) => v.name.toLowerCase().includes(hint))) ??
+    thaiVoices[0]
+  );
 }
 
 /**
