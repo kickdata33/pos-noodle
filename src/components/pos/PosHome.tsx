@@ -150,6 +150,9 @@ export function PosHome() {
         <Link href="/pos/stock" className="text-sm text-muted-foreground underline">
           ของหมด
         </Link>
+        <Link href="/pos/alert-voice" className="text-sm text-muted-foreground underline">
+          เสียงแจ้งเตือน
+        </Link>
       </div>
     </main>
   );

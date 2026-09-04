@@ -1,66 +1,118 @@
 /**
  * Full alert for a new QR self-order landing on a table (`PosHome`): a short attention tone
- * followed by a spoken Thai "มีออเดอร์ใหม่ค่ะ" in a female voice, spoken slowly and clearly (the
- * shop's request) — spoken once per new order rather than repeating (their earlier choice). The
- * tone plays first since `speechSynthesis.speak()` can take a beat to actually start (voice list
- * still loading, first call in the page), so staff get *some* audible cue immediately either way.
+ * followed by a spoken Thai "มีออเดอร์ใหม่ค่ะ", spoken once per new order rather than repeating
+ * (the shop's choice). The tone plays first since `speechSynthesis.speak()` can take a beat to
+ * actually start (voice list still loading, first call in the page), so staff get *some*
+ * audible cue immediately either way.
  */
 export function playOrderAlertSound(): void {
   playAttentionTone();
   speakNewOrderAlert();
 }
 
+/** The exact phrase/rate/pitch spoken for a new order — shared with the "ทดสอบ" preview button
+ * on `/pos/alert-voice` so testing a voice there sounds exactly like the real alert. */
+const ALERT_TEXT = "มีออเดอร์ใหม่ค่ะ";
+const ALERT_RATE = 0.75; // slower — shop asked for "พูดช้าๆ"
+const ALERT_PITCH = 1.15; // a touch higher — reads clearer/softer, "พูดชัดๆ"
+
+const VOICE_PREFERENCE_KEY = "posnoodle:alertVoiceURI";
+
 /**
- * Speaks "มีออเดอร์ใหม่ค่ะ" once via the browser's built-in text-to-speech — no audio file to
- * host, same reasoning as the tone below. Silently does nothing if the browser has no speech
- * synthesis support, or blocks it (some browsers require a prior user gesture on the page,
- * which staff will have already made just by logging in / tapping around `/pos`).
- *
- * Shop feedback: wanted a female voice, pleasant, speaking slowly and clearly. Web Speech API
- * has no gender field on a voice, so `pickFemaleThaiVoice` below is a best-effort name match —
- * the polite feminine particle "ค่ะ" added to the phrase itself does more reliable work here,
- * since it reads as a woman speaking regardless of which underlying voice/timbre the device
- * actually has installed. `rate`/`pitch` are turned down/up a touch for "ช้าๆ ชัดๆ".
+ * Which specific installed voice to speak the alert with, if the shop has picked one on
+ * `/pos/alert-voice` — see that page's comment for why a manual picker exists at all (the Web
+ * Speech API has no gender field, so an automatic "find a female Thai voice" guess can land on
+ * whatever single, oddly-named voice a given Android/Chrome install happens to ship, with no
+ * reliable way to detect it's male). Stored in `localStorage`, not `ShopSettings` — voice
+ * availability is a property of *this device's* OS/browser, so the right voice on one staff
+ * tablet may not even exist on another.
  */
+export function getPreferredVoiceURI(): string | null {
+  try {
+    return window.localStorage.getItem(VOICE_PREFERENCE_KEY);
+  } catch {
+    return null; // private-browsing / storage blocked — falls back to the automatic guess
+  }
+}
+
+export function setPreferredVoiceURI(voiceURI: string | null): void {
+  try {
+    if (voiceURI) window.localStorage.setItem(VOICE_PREFERENCE_KEY, voiceURI);
+    else window.localStorage.removeItem(VOICE_PREFERENCE_KEY);
+  } catch {
+    // Never worth crashing the settings page over — the automatic guess is still a fallback.
+  }
+}
+
+/**
+ * Loads the browser's voice list, waiting out the async-load quirk some browsers (notably
+ * Chrome) have where `getVoices()` returns empty on the very first call of the page. Shared by
+ * the live alert and the `/pos/alert-voice` settings list so both see the same voices.
+ */
+export function loadVoices(callback: (voices: SpeechSynthesisVoice[]) => void): void {
+  if (!("speechSynthesis" in window)) {
+    callback([]);
+    return;
+  }
+  const existing = window.speechSynthesis.getVoices();
+  if (existing.length > 0) {
+    callback(existing);
+    return;
+  }
+  let called = false;
+  const done = () => {
+    if (called) return;
+    called = true;
+    callback(window.speechSynthesis.getVoices());
+  };
+  window.speechSynthesis.addEventListener("voiceschanged", done, { once: true });
+  // Some browsers only ever raise `voiceschanged` once, before this listener attached — this
+  // fallback guarantees `callback` still fires even then.
+  setTimeout(done, 300);
+}
+
+/** Speaks the alert phrase with a specific voice — used both for the real alert and for the
+ * "ทดสอบ" preview button on the settings page, so a preview sounds exactly like the real thing. */
+export function speakWithVoice(voice: SpeechSynthesisVoice | undefined): void {
+  try {
+    if (!("speechSynthesis" in window)) return;
+    const utterance = new SpeechSynthesisUtterance(ALERT_TEXT);
+    utterance.lang = "th-TH";
+    utterance.rate = ALERT_RATE;
+    utterance.pitch = ALERT_PITCH;
+    if (voice) utterance.voice = voice;
+    window.speechSynthesis.speak(utterance);
+  } catch {
+    // A missing/blocked TTS engine still leaves the tone/badge — never worth crashing over.
+  }
+}
+
 function speakNewOrderAlert(): void {
   try {
     if (!("speechSynthesis" in window)) return;
-
-    let spoken = false;
-    const speak = () => {
-      // Guards against speaking twice — both the `voiceschanged` listener and the fallback
-      // timeout below can fire in some browsers, and this must only ever say it once per order.
-      if (spoken) return;
-      spoken = true;
-      const utterance = new SpeechSynthesisUtterance("มีออเดอร์ใหม่ค่ะ");
-      utterance.lang = "th-TH";
-      utterance.rate = 0.75; // slower — "พูดช้าๆ"
-      utterance.pitch = 1.15; // a touch higher — reads clearer/softer, "พูดชัดๆ"
-      const voice = pickFemaleThaiVoice(window.speechSynthesis.getVoices());
-      if (voice) utterance.voice = voice;
-      window.speechSynthesis.speak(utterance);
-    };
-
-    // Chrome (and others) load the voice list asynchronously — `getVoices()` can come back
-    // empty on the very first call of the page, which would silently skip the female-voice
-    // match above. Wait for `voiceschanged` when that happens, with a timeout fallback in case
-    // the event never fires (some browsers only raise it once, before this listener attaches).
-    if (window.speechSynthesis.getVoices().length === 0) {
-      window.speechSynthesis.addEventListener("voiceschanged", speak, { once: true });
-      setTimeout(speak, 300);
-    } else {
-      speak();
-    }
+    loadVoices((voices) => speakWithVoice(pickVoice(voices)));
   } catch {
-    // A missing/blocked TTS engine still leaves the tone below and the blinking card — never
-    // worth crashing the table grid over.
+    // Same reasoning as `speakWithVoice` above.
   }
+}
+
+/** The shop's manual pick (see `getPreferredVoiceURI`) wins whenever it's still installed on
+ * this device; otherwise falls back to the best-effort automatic guess below. */
+function pickVoice(voices: SpeechSynthesisVoice[]): SpeechSynthesisVoice | undefined {
+  const preferredURI = getPreferredVoiceURI();
+  if (preferredURI) {
+    const preferred = voices.find((v) => v.voiceURI === preferredURI);
+    if (preferred) return preferred;
+  }
+  return pickFemaleThaiVoice(voices);
 }
 
 /** Best-effort match for a female-sounding Thai voice — the Web Speech API exposes no gender
  * field, only a free-text `name`/`voiceURI` the OS/browser chose, so this checks common naming
  * across engines (Google, Microsoft, Apple all label voices this way) before falling back to
- * whichever Thai voice is first in the list. */
+ * whichever Thai voice is first in the list. Some devices (commonly Android) ship a single Thai
+ * voice with an internal, non-descriptive name this can never match — for those, `/pos/alert-voice`
+ * lets the shop pick a voice by ear instead of by name. */
 function pickFemaleThaiVoice(voices: SpeechSynthesisVoice[]): SpeechSynthesisVoice | undefined {
   const thaiVoices = voices.filter((v) => v.lang.toLowerCase().startsWith("th"));
   if (thaiVoices.length === 0) return undefined;
