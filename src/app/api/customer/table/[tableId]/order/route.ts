@@ -113,7 +113,9 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
         const order = orderDoc.data() as Order;
         const mergedItems = [...order.items, ...newItems];
         const totals = computeOrderTotals(mergedItems, settings, order.discount);
-        tx.update(orderDoc.ref, { items: mergedItems, ...totals, updatedAt: now });
+        // Flags this table for the badge + alert sound on the POS home screen (`PosHome`) until
+        // a staff member actually opens the order — see `Order.pendingReview`'s comment.
+        tx.update(orderDoc.ref, { items: mergedItems, ...totals, updatedAt: now, pendingReview: true });
         tx.set(throttleRef, { lastSubmittedAt: now });
         return orderDoc.id;
       }
@@ -145,6 +147,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
         createdAt: now,
         updatedAt: now,
         paidAt: null,
+        pendingReview: true,
       };
       tx.set(newOrderRef, orderData);
       tx.set(throttleRef, { lastSubmittedAt: now });

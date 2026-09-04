@@ -67,6 +67,26 @@ export abstract class FirestoreRepository<T extends WithId> {
     await deleteDoc(doc(db, this.collectionName, id));
   }
 
+  /**
+   * Live subscription to one document by id — for a screen that's actively viewing/editing an
+   * already-persisted record and must never silently drift out of sync with a write that came
+   * from somewhere else (e.g. `OrderScreen` reopening a table order that a customer's QR
+   * self-order can add items to concurrently — see that screen's loading effect for why a
+   * one-time `getById` there was a real overwrite risk, not just a staleness inconvenience).
+   * Calls `onChange(null)` if the document doesn't exist (including if it's deleted mid-session).
+   */
+  subscribeById(id: string, onChange: (item: T | null) => void): Unsubscribe {
+    return onSnapshot(
+      doc(db, this.collectionName, id),
+      (snap) => {
+        onChange(snap.exists() ? ({ ...snap.data(), id: snap.id } as T) : null);
+      },
+      (err) => {
+        console.error(`[${this.collectionName}] subscribeById(${id}) failed`, err);
+      }
+    );
+  }
+
   /** Live subscription for POS/Admin screens that need to reflect changes in real time. */
   subscribe(onChange: (items: T[]) => void, ...constraints: QueryConstraint[]): Unsubscribe {
     const q = constraints.length

@@ -110,16 +110,35 @@ export function OrderScreen({ orderId, initialTableId, initialChannelId }: Props
     });
   }, []);
 
-  // Load an existing order, or seed a fresh local draft — runs once catalog data + auth are ready.
+  // Reopening an existing order: subscribe live rather than a one-time fetch. Every edit staff
+  // makes here goes straight to Firestore (see `applyItems`), so this screen is only ever
+  // showing "the current server state" — but a customer's QR self-order (`/api/customer/table/
+  // [tableId]/order`) can add items to the *same* order document from outside this screen at any
+  // moment. A one-time `getById` would leave `orderRef.current.items` stale, and the next staff
+  // edit's `applyItems` writes `items: newItems` computed from that stale array — silently
+  // erasing whatever the customer just ordered. Subscribing keeps the local copy always current.
   useEffect(() => {
-    if (order || !appUser) return;
+    if (!orderId) return;
+    return orderRepository.subscribeById(orderId, (existing) => {
+      if (existing) setOrder(existing);
+    });
+  }, [orderId]);
 
-    if (orderId) {
-      orderRepository.getById(orderId).then((existing) => {
-        if (existing) setOrder(existing);
-      });
-      return;
-    }
+  // Acknowledge a QR self-order once staff actually opens this screen — clears the badge/alert
+  // on the POS home table grid. Fires at most once per mount (not on every snapshot the
+  // subscription above delivers) via the ref guard.
+  const acknowledgedRef = useRef(false);
+  useEffect(() => {
+    if (!order?.id || !order.pendingReview || acknowledgedRef.current) return;
+    acknowledgedRef.current = true;
+    orderRepository.update(order.id, { pendingReview: false });
+  }, [order]);
+
+  // Seed a fresh local draft for a brand-new order — runs once catalog data + auth are ready.
+  // Never touches Firestore until the first item is added (`ensureSaved`), so this stays a
+  // plain local derivation, unlike the live subscription above for a *reopened* order.
+  useEffect(() => {
+    if (order || !appUser || orderId) return;
 
     if (channels.length === 0) return; // wait for channel list before seeding a draft
     if (initialTableId && tables.length === 0) return;

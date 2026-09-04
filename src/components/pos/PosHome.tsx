@@ -1,11 +1,12 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { Badge } from "@/components/ui/badge";
 import { formatCurrency } from "@/lib/format";
 import { DEFAULT_SHOP_ID } from "@/lib/firebase/config";
+import { playOrderAlertSound } from "@/lib/pos/notificationSound";
 import { channelRepository } from "@/repositories/channelRepository";
 import { orderRepository } from "@/repositories/orderRepository";
 import { shopRepository } from "@/repositories/shopRepository";
@@ -26,12 +27,31 @@ export function PosHome() {
 
   useEffect(() => tableRepository.subscribeForShop(DEFAULT_SHOP_ID, setTables), []);
   useEffect(() => channelRepository.subscribeForShop(DEFAULT_SHOP_ID, setChannels), []);
-  useEffect(() => orderRepository.subscribeOpenForShop(DEFAULT_SHOP_ID, setOpenOrders), []);
   useEffect(() => {
     shopRepository.getSettings(DEFAULT_SHOP_ID).then((s) => {
       if (s) setCurrency(s.currency);
     });
   }, []);
+
+  // Tracks which orders were already flagged `pendingReview` as of the *previous* snapshot, so
+  // the alert sound only ever fires for a QR order that newly arrived while this screen was open
+  // — never on first load (a table already awaiting review when staff opens `/pos` shouldn't
+  // make every device chime at once) and never again for a table staff hasn't acknowledged yet
+  // (the badge itself already says "still waiting", repeating the sound would just be noise).
+  const seenPendingIdsRef = useRef<Set<string> | null>(null);
+  useEffect(
+    () =>
+      orderRepository.subscribeOpenForShop(DEFAULT_SHOP_ID, (orders) => {
+        const pendingIds = new Set(orders.filter((o) => o.pendingReview).map((o) => o.id));
+        if (seenPendingIdsRef.current !== null) {
+          const isNewlyPending = [...pendingIds].some((id) => !seenPendingIdsRef.current!.has(id));
+          if (isNewlyPending) playOrderAlertSound();
+        }
+        seenPendingIdsRef.current = pendingIds;
+        setOpenOrders(orders);
+      }),
+    []
+  );
 
   const activeTables = tables.filter((t) => t.active);
   const otherChannels = channels.filter((c) => c.active && !c.requiresTable);
@@ -54,15 +74,22 @@ export function PosHome() {
                     : `/pos/order/new?tableId=${table.id}`
                 }
                 className={
-                  "flex flex-col items-center justify-center gap-1 rounded-lg border p-4 h-24 " +
-                  (order
-                    ? "border-primary bg-primary/10"
-                    : "border-border bg-card hover:bg-accent")
+                  "relative flex flex-col items-center justify-center gap-1 rounded-lg border p-4 h-24 " +
+                  (order?.pendingReview
+                    ? "border-destructive bg-destructive/10"
+                    : order
+                      ? "border-primary bg-primary/10"
+                      : "border-border bg-card hover:bg-accent")
                 }
               >
+                {order?.pendingReview ? (
+                  <span className="absolute -right-1.5 -top-1.5 h-3.5 w-3.5 animate-pulse rounded-full bg-destructive" />
+                ) : null}
                 <span className="text-lg font-semibold">{table.name}</span>
                 {order ? (
-                  <Badge variant="default">{formatCurrency(order.total, currency)}</Badge>
+                  <Badge variant={order.pendingReview ? "destructive" : "default"}>
+                    {order.pendingReview ? "ออเดอร์ใหม่จาก QR" : formatCurrency(order.total, currency)}
+                  </Badge>
                 ) : (
                   <Badge variant="muted">ว่าง</Badge>
                 )}

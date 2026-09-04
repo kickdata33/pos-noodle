@@ -65,6 +65,15 @@ export interface Order extends WithId {
   createdAt: EpochMillis;
   updatedAt: EpochMillis;
   paidAt: EpochMillis | null;
+
+  /**
+   * True while this order has QR self-order items staff hasn't seen yet — set by
+   * `/api/customer/table/[tableId]/order` whenever a customer submits, cleared by `OrderScreen`
+   * the moment staff actually opens this order. Drives the badge + alert sound on the `/pos`
+   * table grid (`PosHome`). Absent (not just `false`) on every order from before this feature —
+   * every read of it must treat `undefined` the same as `false`, never assume the field exists.
+   */
+  pendingReview?: boolean;
 }
 
 /** A completed payment against an order — kept even if the order later gets refunded/voided. */
