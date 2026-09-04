@@ -20,20 +20,26 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { DEFAULT_SHOP_ID } from "@/lib/firebase/config";
 import { computeSwap } from "@/lib/admin/sortOrder";
 import { categoryRepository } from "@/repositories/categoryRepository";
-import type { Category } from "@/types";
+import { productRepository } from "@/repositories/productRepository";
+import type { Category, Product } from "@/types";
 
 /**
- * Category CRUD (item 11: "หมวดหมู่ ... สามารถสร้างเองได้ทั้งหมด"). Deactivate rather than
- * hard-delete — a category a Product still references shouldn't disappear from under it.
+ * Category CRUD (item 11: "หมวดหมู่ ... สามารถสร้างเองได้ทั้งหมด"). Real delete is offered
+ * (the shop asked for it — "ทำให้สามารถลบรายการได้ด้วย"), but only once no `Product` still
+ * points at this category — deleting from under one would leave it with a dangling
+ * `categoryId` and no tab to appear under on the POS/QR ordering screens (unlike Products,
+ * where deleting is always safe: see that page's comment on `OrderItem` snapshotting).
  */
 export default function CategoriesPage() {
   const [items, setItems] = useState<Category[]>([]);
+  const [products, setProducts] = useState<Product[]>([]);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState<Category | null>(null);
   const [name, setName] = useState("");
   const [saving, setSaving] = useState(false);
 
   useEffect(() => categoryRepository.subscribeForShop(DEFAULT_SHOP_ID, setItems), []);
+  useEffect(() => productRepository.subscribeForShop(DEFAULT_SHOP_ID, setProducts), []);
 
   function openCreate() {
     setEditing(null);
@@ -79,6 +85,16 @@ export default function CategoriesPage() {
     await Promise.all(swap.map((s) => categoryRepository.update(s.id, { sortOrder: s.sortOrder })));
   }
 
+  async function handleDelete(category: Category) {
+    const productCount = products.filter((p) => p.categoryId === category.id).length;
+    if (productCount > 0) {
+      alert(`ลบไม่ได้ — ยังมีเมนู ${productCount} รายการอยู่ในหมวดหมู่นี้ ย้ายหรือลบเมนูเหล่านั้นก่อน`);
+      return;
+    }
+    if (!confirm(`ลบหมวดหมู่ "${category.name}" ใช่หรือไม่? ลบแล้วกู้คืนไม่ได้`)) return;
+    await categoryRepository.remove(category.id);
+  }
+
   return (
     <AdminSection
       title="หมวดหมู่"
@@ -117,6 +133,9 @@ export default function CategoriesPage() {
                   <Switch checked={category.active} onCheckedChange={() => toggleActive(category)} />
                   <Button variant="outline" size="sm" onClick={() => openEdit(category)}>
                     แก้ไข
+                  </Button>
+                  <Button variant="destructive" size="sm" onClick={() => handleDelete(category)}>
+                    ลบ
                   </Button>
                 </div>
               </TableCell>

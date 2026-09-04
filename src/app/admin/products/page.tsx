@@ -40,6 +40,11 @@ const EMPTY_FORM: FormState = { name: "", categoryId: "", price: "", modifierGro
  * (item 12's linkage — `Product.modifierGroupIds`). `channelPrices` (item 23) already exists on
  * the type from Milestone 1 but is intentionally not exposed here — the spec defers turning on
  * per-channel pricing past v1, it only asks that the schema be ready for it.
+ *
+ * Real delete is safe here (unlike Categories, see that page's comment): `OrderItem` snapshots
+ * `productName`/`unitPrice`/etc at add-time, so a past order never actually reads a live
+ * `Product` doc again — deleting one only removes it from future ordering, exactly like the
+ * shop asked for ("ทำให้สามารถลบรายการได้ด้วย").
  */
 export default function ProductsPage() {
   const [items, setItems] = useState<Product[]>([]);
@@ -130,6 +135,11 @@ export default function ProductsPage() {
     await Promise.all(swap.map((s) => productRepository.update(s.id, { sortOrder: s.sortOrder })));
   }
 
+  async function handleDelete(product: Product) {
+    if (!confirm(`ลบเมนู "${product.name}" ใช่หรือไม่? ลบแล้วกู้คืนไม่ได้`)) return;
+    await productRepository.remove(product.id);
+  }
+
   return (
     <AdminSection
       title="เมนู"
@@ -178,6 +188,9 @@ export default function ProductsPage() {
                   <Switch checked={product.active} onCheckedChange={() => toggleActive(product)} />
                   <Button variant="outline" size="sm" onClick={() => openEdit(product)}>
                     แก้ไข
+                  </Button>
+                  <Button variant="destructive" size="sm" onClick={() => handleDelete(product)}>
+                    ลบ
                   </Button>
                 </div>
               </TableCell>
