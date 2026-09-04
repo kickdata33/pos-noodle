@@ -78,7 +78,9 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     return NextResponse.json({ error: errors.join(", ") }, { status: 400 });
   }
 
-  const newItems: OrderItem[] = resolvedItems.map((item) => ({ ...item, id: randomUUID() }));
+  // `newSinceReview` marks these as unseen so `OrderScreen` can highlight exactly these lines
+  // (not the whole order) once staff opens it — see the field's comment in `types/order.ts`.
+  const newItems: OrderItem[] = resolvedItems.map((item) => ({ ...item, id: randomUUID(), newSinceReview: true }));
 
   const throttleRef = db.collection(COLLECTIONS.customerOrderThrottle).doc(tableId);
   const ordersRef = db.collection(COLLECTIONS.orders);

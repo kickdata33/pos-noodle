@@ -26,6 +26,15 @@ export interface OrderItem extends WithId {
   note: string;
   /** (unitPrice + sum of modifier priceDelta) * quantity. */
   lineTotal: number;
+  /**
+   * True for a line a customer added via QR self-order that staff hasn't seen yet — set by
+   * `/api/customer/table/[tableId]/order`, cleared (on every item at once) by `OrderScreen` the
+   * moment staff opens this order, same trigger as `Order.pendingReview`. Drives the per-line
+   * highlight in the cart list so staff can tell *which* items are the new ones, not just that
+   * something changed. Absent (not just `false`) on every item added by staff directly, and on
+   * every item from before this feature — every read must treat `undefined` as `false`.
+   */
+  newSinceReview?: boolean;
 }
 
 /**

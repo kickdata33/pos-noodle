@@ -126,12 +126,21 @@ export function OrderScreen({ orderId, initialTableId, initialChannelId }: Props
 
   // Acknowledge a QR self-order once staff actually opens this screen — clears the badge/alert
   // on the POS home table grid. Fires at most once per mount (not on every snapshot the
-  // subscription above delivers) via the ref guard.
+  // subscription above delivers) via the ref guard. Before clearing, snapshot which item ids were
+  // `newSinceReview` into local state: Firestore's copy of that flag gets cleared in the same
+  // write, so if the highlight instead read the live field it would flash and vanish on the very
+  // render that shows it. `highlightedItemIds` keeps the highlight visible for the rest of this
+  // screen's lifetime even though the underlying flag is already gone server-side.
   const acknowledgedRef = useRef(false);
+  const [highlightedItemIds, setHighlightedItemIds] = useState<Set<string>>(new Set());
   useEffect(() => {
     if (!order?.id || !order.pendingReview || acknowledgedRef.current) return;
     acknowledgedRef.current = true;
-    orderRepository.update(order.id, { pendingReview: false });
+    setHighlightedItemIds(new Set(order.items.filter((i) => i.newSinceReview).map((i) => i.id)));
+    orderRepository.update(order.id, {
+      pendingReview: false,
+      items: order.items.map((i) => (i.newSinceReview ? { ...i, newSinceReview: false } : i)),
+    });
   }, [order]);
 
   // Seed a fresh local draft for a brand-new order — runs once catalog data + auth are ready.
@@ -491,13 +500,29 @@ export function OrderScreen({ orderId, initialTableId, initialChannelId }: Props
               ) : null}
               <div className="grid gap-3">
                 {group.items.map((item) => (
-                  <div key={item.id}>
+                  <div
+                    key={item.id}
+                    className={
+                      highlightedItemIds.has(item.id)
+                        ? "-mx-2 rounded-md border-l-4 border-success bg-success/10 px-2 py-1"
+                        : undefined
+                    }
+                  >
                     <div className="flex items-start justify-between gap-2">
                       <div>
                         {/* Grouped (2+ lines of the same product): the header above already shows
                             the name, so each sub-line only needs to show what makes it different —
                             its own note/modifiers — otherwise the product name repeats as usual. */}
-                        {group.items.length === 1 ? <p className="font-medium">{item.productName}</p> : null}
+                        {group.items.length === 1 ? (
+                          <p className="font-medium">
+                            {item.productName}
+                            {highlightedItemIds.has(item.id) ? (
+                              <span className="ml-2 rounded-full bg-success/20 px-2 py-0.5 text-xs font-medium text-success">
+                                ใหม่
+                              </span>
+                            ) : null}
+                          </p>
+                        ) : null}
                         {item.modifiers.map((m) => (
                           <p key={m.optionId} className="text-xs text-muted-foreground">
                             {m.optionName}
