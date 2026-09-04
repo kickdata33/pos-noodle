@@ -45,6 +45,7 @@ export default function ReportsPage() {
   const [orders, setOrders] = useState<Order[]>([]);
   const [loading, setLoading] = useState(true);
   const [currency, setCurrency] = useState("THB");
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   useEffect(() => {
     shopRepository.getSettings(DEFAULT_SHOP_ID).then((settings) => {
@@ -67,10 +68,28 @@ export default function ReportsPage() {
     // nothing to move this into; matches the same pattern/reasoning as OrderScreen's draft-seed effect.
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setLoading(true);
+    setLoadError(null);
     orderRepository
       .listPaidForShopInRange(DEFAULT_SHOP_ID, range.startMs, range.endMs)
       .then((result) => {
         if (!cancelled) setOrders(result);
+      })
+      .catch((err) => {
+        // Without this, a query error (most commonly: the composite index this query needs —
+        // shopId + status + paidAt — hasn't been deployed yet) fails *silently* from the page's
+        // point of view: `orders` just stays `[]` forever, so every card reads "0.00" with
+        // nothing on screen to explain why real, paid orders aren't showing up. Surface it loudly
+        // instead of letting a real bug read as "no sales this week".
+        console.error(
+          "[reports] listPaidForShopInRange failed — is the shopId+status+paidAt Firestore index deployed? See firestore.indexes.json / \"firebase deploy --only firestore:indexes\".",
+          err
+        );
+        if (!cancelled) {
+          setOrders([]);
+          setLoadError(
+            err instanceof Error && err.message ? err.message : "โหลดข้อมูลไม่สำเร็จ"
+          );
+        }
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
@@ -120,6 +139,12 @@ export default function ReportsPage() {
       <p className="mb-4 text-sm text-muted-foreground">
         แสดงข้อมูล {formatRangeLabel(range)} {loading && "· กำลังโหลด..."}
       </p>
+
+      {loadError ? (
+        <div className="mb-4 rounded-md border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive">
+          โหลดรายงานไม่สำเร็จ: {loadError} — ลองกดรีเฟรชหน้านี้ใหม่ ถ้ายังไม่ได้กรุณาแจ้งผู้ดูแลระบบ
+        </div>
+      ) : null}
 
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <StatCard label="ยอดขายรวม" value={formatCurrency(summary.revenue, currency)} />
