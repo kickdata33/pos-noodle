@@ -90,6 +90,28 @@ export interface Order extends WithId {
    * every read of it must treat `undefined` the same as `false`, never assume the field exists.
    */
   pendingReview?: boolean;
+
+  /**
+   * How to identify this order's customer at pickup — "คิว 12" or a name they typed in — set
+   * only by the self-order takeaway flow (`/api/customer/pickup/order`). `undefined` for every
+   * order placed any other way (dine-in, staff-entered takeaway/Grab/etc.) and for every order
+   * from before this feature existed — every read must treat that the same as "no label to show".
+   */
+  customerLabel?: string;
+  /**
+   * What the customer said they'd do for payment when self-ordering takeaway — purely
+   * informational context for staff. The actual checkout, payment method, and `PAID` status
+   * still only ever happen through the normal `CheckoutDialog` flow; this never drives anything
+   * on its own. `undefined` for every order this feature doesn't apply to.
+   */
+  pickupPaymentIntent?: "cash" | "transfer";
+  /**
+   * The customer tapped "แจ้งว่าโอนแล้ว" after scanning the PromptPay QR shown on their own
+   * screen — a claim, not a verified fact (there is no bank API integration here). Staff still
+   * check their own banking app before confirming payment through `CheckoutDialog`, same as any
+   * other transfer; this only drives a "รอตรวจสอบยอดโอน" nudge on the POS side so it isn't missed.
+   */
+  customerClaimedTransfer?: boolean;
 }
 
 /** A completed payment against an order — kept even if the order later gets refunded/voided. */

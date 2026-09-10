@@ -70,7 +70,7 @@ export function OrderHistory() {
                 onClick={() => setSelected(order)}
               >
                 <TableCell>{order.orderNumber || "—"}</TableCell>
-                <TableCell>{order.tableName ? `โต๊ะ ${order.tableName}` : order.channelName}</TableCell>
+                <TableCell>{order.tableName ? `โต๊ะ ${order.tableName}` : order.channelName}{order.customerLabel ? ` · ${order.customerLabel}` : ""}</TableCell>
                 <TableCell>{formatCurrency(order.total, currency)}</TableCell>
                 <TableCell>
                   <Badge variant={STATUS_VARIANT[order.status]}>{STATUS_LABEL[order.status]}</Badge>
@@ -93,7 +93,7 @@ export function OrderHistory() {
         <DialogContent>
           <DialogHeader>
             <DialogTitle>
-              {selected?.orderNumber} — {selected?.tableName ? `โต๊ะ ${selected.tableName}` : selected?.channelName}
+              {selected?.orderNumber} — {selected?.tableName ? `โต๊ะ ${selected.tableName}` : selected?.channelName}{selected?.customerLabel ? ` · ${selected.customerLabel}` : ""}
             </DialogTitle>
           </DialogHeader>
           <div className="grid gap-3">

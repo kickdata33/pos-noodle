@@ -3,9 +3,11 @@
 import { useEffect, useState } from "react";
 
 import { AdminSection } from "@/components/admin/AdminSection";
+import { PickupQrDialog } from "@/components/admin/settings/PickupQrDialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { DEFAULT_SHOP_ID } from "@/lib/firebase/config";
@@ -23,10 +25,16 @@ export default function SettingsPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [savedAt, setSavedAt] = useState<number | null>(null);
+  const [pickupQrOpen, setPickupQrOpen] = useState(false);
 
   useEffect(() => {
     shopRepository.getSettings(DEFAULT_SHOP_ID).then((s) => {
-      setSettings(s);
+      // Backfill for a settings doc saved before this feature existed — normalized here, at the
+      // moment it enters local state, so an unrelated save elsewhere on this page never writes
+      // back `undefined` for these fields (Firestore's client SDK rejects that outright).
+      setSettings(
+        s ? { ...s, promptPayId: s.promptPayId ?? null, pickupIdentificationMode: s.pickupIdentificationMode ?? "queue" } : s
+      );
       setLoading(false);
     });
   }, []);
@@ -172,6 +180,47 @@ export default function SettingsPage() {
             />
           </div>
         ) : null}
+
+        <div className="grid gap-2">
+          <Label htmlFor="s-promptpay">PromptPay ID (เบอร์โทรหรือเลขประจำตัวผู้เสียภาษี)</Label>
+          <Input
+            id="s-promptpay"
+            value={settings.promptPayId ?? ""}
+            onChange={(e) => update("promptPayId", e.target.value.trim() || null)}
+            placeholder="เช่น 0812345678"
+          />
+          <p className="text-xs text-muted-foreground">
+            ใส่แล้วหน้าสั่งกลับบ้าน (สแกน QR เอง) จะมีตัวเลือก &quot;โอนพร้อมเพย์&quot; ให้ลูกค้า — ถ้าเว้นว่างจะมีแต่ &quot;เงินสด&quot;
+          </p>
+        </div>
+
+        <div className="grid gap-2">
+          <Label htmlFor="s-pickup-id-mode">ระบุตัวลูกค้าออเดอร์กลับบ้าน (สแกน QR เอง) แบบไหน</Label>
+          <Select
+            value={settings.pickupIdentificationMode}
+            onValueChange={(v) => update("pickupIdentificationMode", v as "queue" | "name")}
+          >
+            <SelectTrigger id="s-pickup-id-mode" className="w-64">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="queue">ออกเลขคิวอัตโนมัติ (เช่น คิว 12)</SelectItem>
+              <SelectItem value="name">ให้ลูกค้ากรอกชื่อ</SelectItem>
+            </SelectContent>
+          </Select>
+          <p className="text-xs text-muted-foreground">สลับได้ตลอด ไม่กระทบออเดอร์เก่าที่สั่งไปแล้ว</p>
+        </div>
+
+        <div className="flex items-center justify-between rounded-lg border border-border p-4">
+          <div>
+            <p className="font-medium">QR สั่งกลับบ้าน</p>
+            <p className="text-sm text-muted-foreground">QR เดียวสำหรับทั้งร้าน — พิมพ์วางไว้ที่เคาน์เตอร์</p>
+          </div>
+          <Button variant="outline" onClick={() => setPickupQrOpen(true)}>
+            แสดง QR
+          </Button>
+        </div>
+        <PickupQrDialog open={pickupQrOpen} onOpenChange={setPickupQrOpen} />
 
         <div className="flex items-center gap-3">
           <Button onClick={handleSave} disabled={saving}>

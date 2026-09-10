@@ -49,6 +49,8 @@ async function seedShopAndSettings() {
       vatRate: 7,
       serviceChargeEnabled: false,
       serviceChargeRate: 0,
+      promptPayId: null,
+      pickupIdentificationMode: "queue",
       updatedAt: now,
     });
     console.log("✓ shopSettings created");

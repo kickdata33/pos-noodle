@@ -48,7 +48,7 @@ export function KitchenScreen() {
           <div key={order.id} className="rounded-lg border border-border bg-card p-4">
             <div className="mb-3 flex items-center justify-between">
               <span className="text-lg font-semibold">
-                {order.tableName ?? order.channelName} · {order.orderNumber}
+                {order.tableName ?? order.customerLabel ?? order.channelName} · {order.orderNumber}
               </span>
               <span className="text-sm text-muted-foreground">เปิดเมื่อ {formatTime(order.createdAt)}</span>
             </div>

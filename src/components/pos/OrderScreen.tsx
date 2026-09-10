@@ -495,10 +495,16 @@ export function OrderScreen({ orderId, initialTableId, initialChannelId }: Props
           <div>
             <p className="font-medium">
               {order.tableName ? `โต๊ะ ${order.tableName}` : order.channelName}
+              {order.customerLabel ? ` · ${order.customerLabel}` : ""}
             </p>
             {order.orderNumber ? (
               <p className="text-xs text-muted-foreground">
                 {order.orderNumber} · เปิดโต๊ะเมื่อ {formatTime(order.createdAt)}
+              </p>
+            ) : null}
+            {order.customerClaimedTransfer ? (
+              <p className="text-xs font-medium text-destructive">
+                ลูกค้าแจ้งว่าโอนแล้ว — กรุณาตรวจสอบยอดในแอปธนาคารก่อนยืนยันรับชำระ
               </p>
             ) : null}
           </div>

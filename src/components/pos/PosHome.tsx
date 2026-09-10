@@ -121,12 +121,27 @@ export function PosHome() {
               <Link
                 key={order.id}
                 href={`/pos/order/${order.id}`}
-                className="flex items-center justify-between rounded-lg border border-border bg-card p-3 hover:bg-accent"
+                className={
+                  "relative isolate flex items-center justify-between overflow-hidden rounded-lg border p-3 " +
+                  (order.pendingReview ? "border-success" : "border-border bg-card hover:bg-accent")
+                }
               >
+                {order.pendingReview ? (
+                  // Same full-card blink as a table's pendingReview card above — this list is
+                  // "orders staff need to notice", so a self-order takeaway/Grab/etc. order
+                  // arriving deserves exactly the same treatment as a QR order on a table.
+                  <span className="animate-order-alert absolute inset-0 -z-10 bg-success" aria-hidden />
+                ) : null}
                 <span>
-                  {order.channelName} — {order.orderNumber}
+                  {order.channelName}
+                  {order.customerLabel ? ` · ${order.customerLabel}` : ` — ${order.orderNumber}`}
+                  {order.customerClaimedTransfer ? (
+                    <span className="ml-2 text-xs font-medium text-destructive">รอตรวจสอบยอดโอน</span>
+                  ) : null}
                 </span>
-                <Badge variant="default">{formatCurrency(order.total, currency)}</Badge>
+                <Badge variant={order.pendingReview ? "success" : "default"}>
+                  {order.pendingReview ? "ออเดอร์ใหม่" : formatCurrency(order.total, currency)}
+                </Badge>
               </Link>
             ))}
           </div>

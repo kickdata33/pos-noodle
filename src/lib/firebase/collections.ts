@@ -22,4 +22,8 @@ export const COLLECTIONS = {
   /** Server-only: last-submitted-at per table, for `lib/pos/customerThrottle.ts`. Denied to
    * every client — only the customer QR-order API route (Admin SDK) ever touches this. */
   customerOrderThrottle: "customerOrderThrottle",
+  /** Server-only: one doc per shop, the daily pickup-queue counter behind
+   * `lib/pos/queueNumberAdmin.ts`. Denied to every client — only the customer pickup-order API
+   * route (Admin SDK) ever touches this. */
+  pickupQueueCounters: "pickupQueueCounters",
 } as const;

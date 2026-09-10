@@ -46,5 +46,10 @@ export async function GET() {
     modifierGroups: byId<ModifierGroup>(groupsSnap),
     modifierOptions: byId<ModifierOption>(optionsSnap),
     currency: settings?.currency ?? "THB",
+    // Shared with `/order/pickup` (the takeaway self-order screen) as well as the dine-in one —
+    // harmless extra fields for a consumer that doesn't need them, avoids a whole second
+    // near-identical menu endpoint for one more screen.
+    promptPayAvailable: Boolean(settings?.promptPayId),
+    pickupIdentificationMode: settings?.pickupIdentificationMode ?? "queue",
   });
 }
