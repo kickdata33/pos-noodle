@@ -61,6 +61,24 @@ export function CustomerOrderScreen({ tableId }: { tableId: string }) {
   // too — the polling below must never mistake "never ordered" for "just got closed out".
   const [hasActiveOrder, setHasActiveOrder] = useState(false);
 
+  // The moment staff checks out this bill, the "ขอบคุณ" screen below is shown — but that's just
+  // React state, never a real page navigation, so there's normally nothing for the browser's
+  // back button to undo. The one way back into the ordering screen anyway: mobile browsers can
+  // restore this exact tab from the bfcache (e.g. after the customer briefly switched apps and
+  // came back, or tapped back after having navigated elsewhere) — which resurrects this
+  // component's state exactly as it was *before* checkout was detected, silently skipping past
+  // "ขอบคุณ" back to the menu. A bfcache restore fires `pageshow` with `event.persisted: true`;
+  // forcing a hard reload there re-runs the initial fetch below and shows whatever the server
+  // says right now (closed, if the bill really was checked out) — the one thing a QR order screen
+  // must never let a stale back-navigation lie about (item: "หลังคิดเงินทุกครั้ง ต้องสแกนใหม่").
+  useEffect(() => {
+    function handlePageShow(event: PageTransitionEvent) {
+      if (event.persisted) window.location.reload();
+    }
+    window.addEventListener("pageshow", handlePageShow);
+    return () => window.removeEventListener("pageshow", handlePageShow);
+  }, []);
+
   useEffect(() => {
     let cancelled = false;
     async function load() {
