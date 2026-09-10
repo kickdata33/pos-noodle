@@ -1,16 +1,13 @@
 "use client";
 
-import { useEffect, useState } from "react";
-
 import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
-import { DEFAULT_SHOP_ID } from "@/lib/firebase/config";
-import { categoryRepository } from "@/repositories/categoryRepository";
-import { modifierGroupRepository, modifierOptionRepository } from "@/repositories/modifierRepository";
+import { modifierOptionRepository } from "@/repositories/modifierRepository";
 import { productRepository } from "@/repositories/productRepository";
-import type { Category, ModifierGroup, ModifierOption, Product } from "@/types";
+import type { ModifierOption, Product } from "@/types";
 
 import { PosBackLink } from "./PosBackLink";
+import { usePosCatalog } from "./PosCatalogContext";
 
 /**
  * Staff-facing "ของหมด" screen — reachable from `/pos` by any signed-in staff/admin (unlike the
@@ -22,15 +19,7 @@ import { PosBackLink } from "./PosBackLink";
  * of the surrounding CRUD. A product or option someone re-stocks just gets flipped back on here.
  */
 export function StockScreen() {
-  const [categories, setCategories] = useState<Category[]>([]);
-  const [products, setProducts] = useState<Product[]>([]);
-  const [modifierGroups, setModifierGroups] = useState<ModifierGroup[]>([]);
-  const [modifierOptions, setModifierOptions] = useState<ModifierOption[]>([]);
-
-  useEffect(() => categoryRepository.subscribeForShop(DEFAULT_SHOP_ID, setCategories), []);
-  useEffect(() => productRepository.subscribeForShop(DEFAULT_SHOP_ID, setProducts), []);
-  useEffect(() => modifierGroupRepository.subscribeForShop(DEFAULT_SHOP_ID, setModifierGroups), []);
-  useEffect(() => modifierOptionRepository.subscribeForShop(DEFAULT_SHOP_ID, setModifierOptions), []);
+  const { categories, products, modifierGroups, modifierOptions } = usePosCatalog();
 
   async function toggleProduct(product: Product) {
     // Event handler only (invoked from Switch's onCheckedChange below), never during render —

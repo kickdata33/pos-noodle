@@ -7,6 +7,7 @@ import { CancelOrderDialog } from "@/components/pos/CancelOrderDialog";
 import { CheckoutDialog } from "@/components/pos/CheckoutDialog";
 import { ItemNoteDialog } from "@/components/pos/ItemNoteDialog";
 import { ModifierPickerDialog } from "@/components/pos/ModifierPickerDialog";
+import { usePosCatalog } from "@/components/pos/PosCatalogContext";
 import { RemoveItemDialog } from "@/components/pos/RemoveItemDialog";
 import { Button } from "@/components/ui/button";
 import { formatCurrency, formatTime } from "@/lib/format";
@@ -15,28 +16,9 @@ import { useAuth } from "@/hooks/useAuth";
 import { computeLineTotal, computeOrderTotals, groupItemsByProduct, resolveChannelPrice } from "@/lib/pos/pricing";
 import { generateOrderNumber } from "@/lib/pos/orderNumber";
 import { auditLogRepository } from "@/repositories/auditLogRepository";
-import { categoryRepository } from "@/repositories/categoryRepository";
-import { channelRepository } from "@/repositories/channelRepository";
-import { modifierGroupRepository, modifierOptionRepository } from "@/repositories/modifierRepository";
 import { orderRepository } from "@/repositories/orderRepository";
-import { paymentMethodRepository } from "@/repositories/paymentMethodRepository";
 import { paymentRepository } from "@/repositories/paymentRepository";
-import { productRepository } from "@/repositories/productRepository";
-import { shopRepository } from "@/repositories/shopRepository";
-import { tableRepository } from "@/repositories/tableRepository";
-import type {
-  AuditReason,
-  Category,
-  ModifierGroup,
-  ModifierOption,
-  Order,
-  OrderItem,
-  PaymentMethod,
-  Product,
-  SalesChannel,
-  ShopSettings,
-  Table,
-} from "@/types";
+import type { AuditReason, Order, OrderItem, Product, ShopSettings } from "@/types";
 
 type DraftOrder = Omit<Order, "id"> & { id: string | null };
 
@@ -55,14 +37,13 @@ export function OrderScreen({ orderId, initialTableId, initialChannelId }: Props
   const router = useRouter();
   const { appUser } = useAuth();
 
-  const [categories, setCategories] = useState<Category[]>([]);
-  const [products, setProducts] = useState<Product[]>([]);
-  const [modifierGroups, setModifierGroups] = useState<ModifierGroup[]>([]);
-  const [modifierOptions, setModifierOptions] = useState<ModifierOption[]>([]);
-  const [channels, setChannels] = useState<SalesChannel[]>([]);
-  const [tables, setTables] = useState<Table[]>([]);
-  const [paymentMethods, setPaymentMethods] = useState<PaymentMethod[]>([]);
-  const [settings, setSettings] = useState(DEFAULT_SETTINGS);
+  // Shared across every /pos/* screen (see `PosCatalogProvider`'s comment) — this screen used to
+  // subscribe to all of it itself, meaning every tap into an order re-fetched all seven of these
+  // from scratch. `settings` falls back to `DEFAULT_SETTINGS` until the provider's one-time fetch
+  // resolves, same as this screen's own local state used to before the fallback existed here.
+  const { categories, products, modifierGroups, modifierOptions, channels, tables, paymentMethods, settings: catalogSettings } =
+    usePosCatalog();
+  const settings = catalogSettings ?? DEFAULT_SETTINGS;
 
   const [order, setOrder] = useState<DraftOrder | null>(null);
   // Mirrors `order` for the mutation functions below (applyItems, ensureSaved, etc). Those are
@@ -98,19 +79,6 @@ export function OrderScreen({ orderId, initialTableId, initialChannelId }: Props
     setJustSaved(true);
     setTimeout(() => setJustSaved(false), 1500);
   }
-
-  useEffect(() => categoryRepository.subscribeForShop(DEFAULT_SHOP_ID, setCategories), []);
-  useEffect(() => productRepository.subscribeForShop(DEFAULT_SHOP_ID, setProducts), []);
-  useEffect(() => modifierGroupRepository.subscribeForShop(DEFAULT_SHOP_ID, setModifierGroups), []);
-  useEffect(() => modifierOptionRepository.subscribeForShop(DEFAULT_SHOP_ID, setModifierOptions), []);
-  useEffect(() => channelRepository.subscribeForShop(DEFAULT_SHOP_ID, setChannels), []);
-  useEffect(() => tableRepository.subscribeForShop(DEFAULT_SHOP_ID, setTables), []);
-  useEffect(() => paymentMethodRepository.subscribeForShop(DEFAULT_SHOP_ID, setPaymentMethods), []);
-  useEffect(() => {
-    shopRepository.getSettings(DEFAULT_SHOP_ID).then((s) => {
-      if (s) setSettings(s);
-    });
-  }, []);
 
   // Reopening an existing order: subscribe live rather than a one-time fetch. Every edit staff
   // makes here goes straight to Firestore (see `applyItems`), so this screen is only ever

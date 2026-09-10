@@ -7,11 +7,10 @@ import { Badge } from "@/components/ui/badge";
 import { formatCurrency } from "@/lib/format";
 import { DEFAULT_SHOP_ID } from "@/lib/firebase/config";
 import { playOrderAlertSound } from "@/lib/pos/notificationSound";
-import { channelRepository } from "@/repositories/channelRepository";
 import { orderRepository } from "@/repositories/orderRepository";
-import { shopRepository } from "@/repositories/shopRepository";
-import { tableRepository } from "@/repositories/tableRepository";
-import type { Order, SalesChannel, Table } from "@/types";
+import type { Order } from "@/types";
+
+import { usePosCatalog } from "./PosCatalogContext";
 
 /**
  * POS home (item 5): the table grid plus the big non-table channel buttons. A table's
@@ -20,18 +19,9 @@ import type { Order, SalesChannel, Table } from "@/types";
  * Milestone 3 plan: "table occupancy is derived, not stored").
  */
 export function PosHome() {
-  const [tables, setTables] = useState<Table[]>([]);
-  const [channels, setChannels] = useState<SalesChannel[]>([]);
+  const { tables, channels, settings } = usePosCatalog();
   const [openOrders, setOpenOrders] = useState<Order[]>([]);
-  const [currency, setCurrency] = useState("THB");
-
-  useEffect(() => tableRepository.subscribeForShop(DEFAULT_SHOP_ID, setTables), []);
-  useEffect(() => channelRepository.subscribeForShop(DEFAULT_SHOP_ID, setChannels), []);
-  useEffect(() => {
-    shopRepository.getSettings(DEFAULT_SHOP_ID).then((s) => {
-      if (s) setCurrency(s.currency);
-    });
-  }, []);
+  const currency = settings?.currency ?? "THB";
 
   // Tracks which orders were already flagged `pendingReview` as of the *previous* snapshot, so
   // the alert sound only ever fires for a QR order that newly arrived while this screen was open

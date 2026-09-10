@@ -143,6 +143,11 @@ export function CustomerOrderScreen({ tableId }: { tableId: string }) {
   // of the customer surface: no auth, no Firestore listener a stranger's browser could hold
   // open, just a plain GET. Only runs once this visit has actually seen an OPEN order (see
   // `hasActiveOrder`'s comment) and stops for good once it fires.
+  //
+  // 3s rather than the original 10s: staff checking out a bill in person, with the customer
+  // sitting right there watching their own phone, felt the old 10s worst-case (5s on average) as
+  // a real delay before "ขอบคุณ" appeared. This is one small GET per tick against a single
+  // Firestore doc read — cheap enough at this shop's scale to poll noticeably faster.
   useEffect(() => {
     if (status !== "ready" || !hasActiveOrder) return;
     const interval = setInterval(async () => {
@@ -160,7 +165,7 @@ export function CustomerOrderScreen({ tableId }: { tableId: string }) {
         // A transient network hiccup — just try again next tick rather than disrupting the
         // customer's screen over it.
       }
-    }, 10000);
+    }, 3000);
     return () => clearInterval(interval);
   }, [status, hasActiveOrder, tableId]);
 
