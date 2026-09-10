@@ -37,6 +37,34 @@ interface CartLine {
 
 type Status = "loading" | "ready" | "closed" | "not-found" | "error";
 
+// A same-tab refresh (or history/back navigation) must never resurrect the ordering screen once
+// this tab has seen "ขอบคุณ" — the shop's whole point of the QR flow is that ordering again
+// requires an actual fresh scan (item: "หลังคิดเงินทุกครั้ง ต้องสแกนใหม่"), not just reopening the
+// same page. `sessionStorage` is exactly the right scope for this: it survives a reload of *this*
+// tab but starts empty for a brand-new tab — which is what an actual QR scan opens (the phone's
+// camera/scanner app hands the link to a fresh browser tab, not this one) — so a genuine re-scan
+// still works immediately, only this one tab is ever locked out. Module-scope, parameterized by
+// `tableId`, rather than closures inside the component, so effects don't need them as deps.
+function closedStorageKey(tableId: string): string {
+  return `qrOrderClosed:${tableId}`;
+}
+function markClosedThisTab(tableId: string): void {
+  try {
+    sessionStorage.setItem(closedStorageKey(tableId), "1");
+  } catch {
+    // Private browsing / storage disabled — `status` staying "closed" in memory for the rest of
+    // this tab's life already covers everything except a refresh, which is the one case this
+    // flag exists for; nothing to fall back to, so just skip the extra protection.
+  }
+}
+function wasClosedThisTab(tableId: string): boolean {
+  try {
+    return sessionStorage.getItem(closedStorageKey(tableId)) === "1";
+  } catch {
+    return false;
+  }
+}
+
 /**
  * The QR self-order screen (`/order/table/[tableId]`) — no login, reachable by anyone who scans
  * the table's code. Deliberately kept separate from staff `OrderScreen` rather than reused: it
@@ -96,7 +124,9 @@ export function CustomerOrderScreen({ tableId }: { tableId: string }) {
         setMenu((await menuRes.json()) as MenuResponse);
         setTableInfo(table);
         setHasActiveOrder(table.orderNumber !== null);
-        setStatus("ready");
+        // This tab already said goodbye once — stay closed even though the table itself may now
+        // be free to order on again (a different tab/scan is exactly how that's meant to happen).
+        setStatus(wasClosedThisTab(tableId) ? "closed" : "ready");
       } catch {
         if (!cancelled) setStatus("error");
       }
@@ -121,6 +151,7 @@ export function CustomerOrderScreen({ tableId }: { tableId: string }) {
         if (!res.ok) return;
         const table = (await res.json()) as TableResponse;
         if (table.orderNumber === null) {
+          markClosedThisTab(tableId);
           setStatus("closed");
           return;
         }
