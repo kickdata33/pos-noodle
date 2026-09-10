@@ -49,11 +49,16 @@ export function ModifierPickerDialog({
     .map((id) => modifierGroups.find((g) => g.id === id))
     .filter((g): g is ModifierGroup => Boolean(g) && g!.active);
 
+  // Sold-out options (`active: false`, toggled from `/pos/stock`) still show — greyed out with
+  // a "ของหมด" badge — rather than silently vanishing from the list (same reasoning as the
+  // product grid; see `CustomerOrderScreen`'s and this file's own comments on why).
   function optionsFor(groupId: string): ModifierOption[] {
-    return modifierOptions.filter((o) => o.groupId === groupId && o.active);
+    return modifierOptions.filter((o) => o.groupId === groupId);
   }
 
   function toggleOption(group: ModifierGroup, optionId: string) {
+    const option = optionsFor(group.id).find((o) => o.id === optionId);
+    if (!option?.active) return; // sold out — never selectable, guards a stale/replayed tap too
     setSelections((prev) => {
       const current = prev[group.id] ?? [];
       if (group.selectionType === "single") {
@@ -106,16 +111,21 @@ export function ModifierPickerDialog({
                     <button
                       key={option.id}
                       type="button"
+                      disabled={!option.active}
                       onClick={() => toggleOption(group, option.id)}
                       className={
                         "flex items-center justify-between rounded-lg border px-4 py-3 text-left " +
-                        (selected
-                          ? "border-primary bg-primary/10"
-                          : "border-border bg-card hover:bg-accent")
+                        (!option.active
+                          ? "cursor-not-allowed border-border bg-muted/40 opacity-60"
+                          : selected
+                            ? "border-primary bg-primary/10"
+                            : "border-border bg-card hover:bg-accent")
                       }
                     >
-                      <span>{option.name}</span>
-                      {option.priceDelta !== 0 ? (
+                      <span className={!option.active ? "line-through" : undefined}>{option.name}</span>
+                      {!option.active ? (
+                        <span className="text-xs font-medium text-destructive">ของหมด</span>
+                      ) : option.priceDelta !== 0 ? (
                         <span className="text-sm text-muted-foreground">
                           +{formatCurrency(option.priceDelta, currency)}
                         </span>

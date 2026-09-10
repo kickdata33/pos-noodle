@@ -3,6 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 
+import { CancelOrderDialog } from "@/components/pos/CancelOrderDialog";
 import { CheckoutDialog } from "@/components/pos/CheckoutDialog";
 import { ItemNoteDialog } from "@/components/pos/ItemNoteDialog";
 import { ModifierPickerDialog } from "@/components/pos/ModifierPickerDialog";
@@ -83,6 +84,7 @@ export function OrderScreen({ orderId, initialTableId, initialChannelId }: Props
   const [removeTarget, setRemoveTarget] = useState<OrderItem | null>(null);
   const [noteTarget, setNoteTarget] = useState<OrderItem | null>(null);
   const [checkoutOpen, setCheckoutOpen] = useState(false);
+  const [cancelOpen, setCancelOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // Brief "บันทึกแล้ว" flash after every successful auto-save (item request: no manual save step,
@@ -206,7 +208,11 @@ export function OrderScreen({ orderId, initialTableId, initialChannelId }: Props
 
   const activeCategories = categories.filter((c) => c.active);
   const currentCategoryId = activeCategoryId ?? activeCategories[0]?.id ?? null;
-  const visibleProducts = products.filter((p) => p.active && p.categoryId === currentCategoryId);
+  // Sold-out products (`active: false`, toggled from `/pos/stock`) still show here, greyed out
+  // with a "ของหมด" badge, rather than vanishing from the grid — a menu item that just disappears
+  // reads as "removed from the menu", not "sold out today", and staff need to see it same as
+  // customers do (see `handleAddProduct`'s guard and `CustomerOrderScreen`'s matching comment).
+  const visibleProducts = products.filter((p) => p.categoryId === currentCategoryId);
 
   // This order's channel (Grab/LINE MAN/ShopeeFood may mark prices up — item 23) — looked up by
   // id rather than trusted from anywhere else, same as every other channel-derived display value
@@ -250,6 +256,7 @@ export function OrderScreen({ orderId, initialTableId, initialChannelId }: Props
   }
 
   function handleAddProduct(product: Product) {
+    if (!product.active) return; // sold out — see `visibleProducts`'s comment
     if (product.modifierGroupIds.length > 0) {
       setPickerProduct(product);
       return;
@@ -341,6 +348,32 @@ export function OrderScreen({ orderId, initialTableId, initialChannelId }: Props
       createdAt: Date.now(),
     });
     setRemoveTarget(null);
+  }
+
+  /**
+   * Cancels the whole saved order (item: emptying an order line-by-line left the table stuck
+   * "occupied" forever — see `CancelOrderDialog`'s comment for the full picture). Sets
+   * `status: "CANCELLED"` (freeing the table on the POS home grid the same way a paid checkout
+   * does) and writes an audit log entry, then leaves this screen since there's nothing left here
+   * to look at.
+   */
+  async function confirmCancelOrder(reason: AuditReason, note: string) {
+    const current = orderRef.current;
+    if (!current?.id) return;
+    const updatedAt = Date.now();
+    await orderRepository.update(current.id, { status: "CANCELLED", updatedAt });
+    await auditLogRepository.create({
+      shopId: DEFAULT_SHOP_ID,
+      action: "ORDER_CANCELLED",
+      orderId: current.id,
+      description: `ยกเลิกออเดอร์ ${current.orderNumber}`,
+      reason,
+      reasonNote: reason === "อื่น ๆ" ? note : null,
+      performedBy: appUser!.id,
+      performedByName: appUser!.name,
+      createdAt: updatedAt,
+    });
+    router.push("/pos");
   }
 
   /**
@@ -463,13 +496,23 @@ export function OrderScreen({ orderId, initialTableId, initialChannelId }: Props
           {visibleProducts.map((product) => (
             <button
               key={product.id}
+              disabled={!product.active}
               onClick={() => handleAddProduct(product)}
-              className="flex flex-col items-start gap-1 rounded-lg border border-border bg-card p-3 text-left hover:bg-accent"
+              className={
+                "flex flex-col items-start gap-1 rounded-lg border p-3 text-left " +
+                (product.active
+                  ? "border-border bg-card hover:bg-accent"
+                  : "cursor-not-allowed border-border bg-muted/40 opacity-60")
+              }
             >
-              <span className="font-medium">{product.name}</span>
-              <span className="text-sm text-muted-foreground">
-                {formatCurrency(resolveChannelPrice(product, currentChannel), settings.currency)}
-              </span>
+              <span className={"font-medium" + (product.active ? "" : " line-through")}>{product.name}</span>
+              {product.active ? (
+                <span className="text-sm text-muted-foreground">
+                  {formatCurrency(resolveChannelPrice(product, currentChannel), settings.currency)}
+                </span>
+              ) : (
+                <span className="text-sm font-medium text-destructive">ของหมด</span>
+              )}
             </button>
           ))}
           {visibleProducts.length === 0 ? (
@@ -608,6 +651,19 @@ export function OrderScreen({ orderId, initialTableId, initialChannelId }: Props
               คิดเงิน
             </Button>
           </div>
+          {/* Only a *saved* order can be stuck occupying a table — an unsaved draft has nothing
+              to cancel, staff just tap "กลับหน้าแรก" above and it's gone (see `confirmCancelOrder`'s
+              comment). Full-width and visually separated so it doesn't get mistaken for one more
+              routine action alongside the two above it. */}
+          {order.id ? (
+            <Button
+              variant="ghost"
+              className="mt-2 w-full text-destructive"
+              onClick={() => setCancelOpen(true)}
+            >
+              ยกเลิกออเดอร์
+            </Button>
+          ) : null}
         </div>
       </div>
 
@@ -632,6 +688,15 @@ export function OrderScreen({ orderId, initialTableId, initialChannelId }: Props
           onOpenChange={(open) => !open && setRemoveTarget(null)}
           itemName={removeTarget.productName}
           onConfirm={confirmRemove}
+        />
+      ) : null}
+
+      {order.id ? (
+        <CancelOrderDialog
+          open={cancelOpen}
+          onOpenChange={setCancelOpen}
+          orderNumber={order.orderNumber}
+          onConfirm={confirmCancelOrder}
         />
       ) : null}
 

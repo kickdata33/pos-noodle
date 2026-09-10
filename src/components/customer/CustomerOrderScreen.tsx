@@ -139,6 +139,7 @@ export function CustomerOrderScreen({ tableId }: { tableId: string }) {
   }
 
   function handleProductTap(product: Product) {
+    if (!product.active) return; // sold out — see the "ของหมด" rendering below
     if (product.modifierGroupIds.length > 0) {
       setPickerProduct(product);
     } else {
@@ -281,11 +282,21 @@ export function CustomerOrderScreen({ tableId }: { tableId: string }) {
         {visibleProducts.map((product) => (
           <button
             key={product.id}
+            disabled={!product.active}
             onClick={() => handleProductTap(product)}
-            className="flex flex-col items-start gap-1 rounded-lg border border-border bg-card p-3 text-left hover:bg-accent"
+            className={
+              "flex flex-col items-start gap-1 rounded-lg border p-3 text-left " +
+              (product.active
+                ? "border-border bg-card hover:bg-accent"
+                : "cursor-not-allowed border-border bg-muted/40 opacity-60")
+            }
           >
-            <span className="font-medium">{product.name}</span>
-            <span className="text-sm text-muted-foreground">{formatCurrency(product.price, currency)}</span>
+            <span className={"font-medium" + (product.active ? "" : " line-through")}>{product.name}</span>
+            {product.active ? (
+              <span className="text-sm text-muted-foreground">{formatCurrency(product.price, currency)}</span>
+            ) : (
+              <span className="text-sm font-medium text-destructive">ของหมด</span>
+            )}
           </button>
         ))}
         {visibleProducts.length === 0 ? (
