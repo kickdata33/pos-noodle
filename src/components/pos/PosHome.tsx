@@ -144,6 +144,9 @@ export function PosHome() {
       ) : null}
 
       <div className="mt-6 flex gap-4">
+        <Link href="/pos/kitchen" className="text-sm text-muted-foreground underline">
+          หน้าจอครัว
+        </Link>
         <Link href="/pos/history" className="text-sm text-muted-foreground underline">
           ประวัติออเดอร์
         </Link>

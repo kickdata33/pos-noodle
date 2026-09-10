@@ -35,6 +35,13 @@ export interface OrderItem extends WithId {
    * every item from before this feature — every read must treat `undefined` as `false`.
    */
   newSinceReview?: boolean;
+  /**
+   * True once the kitchen has marked this line as made — toggled from `/pos/kitchen`, per-item
+   * (not per-order) since a shop may want to track prep per menu line. Absent (not just `false`)
+   * on every item added before this feature, and on every item a customer/staff adds afterward
+   * until the kitchen taps it — every read must treat `undefined` the same as `false`.
+   */
+  prepared?: boolean;
 }
 
 /**
