@@ -62,6 +62,13 @@ export function ModifierPickerDialog({
     setSelections((prev) => {
       const current = prev[group.id] ?? [];
       if (group.selectionType === "single") {
+        // An optional (not required) single-choice group must still be clearable — tapping the
+        // already-selected option again deselects it, same as unchecking the only checked box in
+        // a multi-select group below. A *required* group can't go empty by design, so the tapped
+        // option there just stays selected (there's always exactly one, never zero, to pick from).
+        if (current.includes(optionId) && !group.required) {
+          return { ...prev, [group.id]: [] };
+        }
         return { ...prev, [group.id]: [optionId] };
       }
       const next = current.includes(optionId)
