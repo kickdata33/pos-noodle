@@ -2,7 +2,7 @@
   "name": "POS ร้านลูกชิ้นแชมป์ x นายฮังเพ้ง",
   "short_name": "POS ก๋วยเตี๋ยว",
   "description": "ระบบ POS สำหรับร้านก๋วยเตี๋ยว/ลูกชิ้น",
-  "start_url": "/",
+  "start_url": "/pos",
   "scope": "/",
   "display": "standalone",
   "orientation": "any",
