@@ -1,5 +1,5 @@
 import type { ModifierGroup, ModifierOption, OrderItem, OrderItemModifier, Product, SalesChannel } from "@/types";
-import { computeLineTotal, resolveChannelPrice } from "./pricing";
+import { computeLineTotal, distributeTieredPriceDeltas, resolveChannelPrice, resolveTieredGroupPrice } from "./pricing";
 
 /**
  * Turns one raw selection from the customer-facing QR order screen (`/order/table/[tableId]`)
@@ -68,16 +68,24 @@ export function resolveCustomerOrderItem(
       return { ok: false, error: `กรุณาเลือก "${group.name}"` };
     }
 
-    for (const optionId of chosen) {
+    // Tiered groups price by *how many* were chosen, not which ones — the whole group's tier
+    // price lands on the last option, the rest get 0 (see `distributeTieredPriceDeltas`), never
+    // each option's own `priceDelta`.
+    const tieredDeltas =
+      group.pricingMode === "tieredByCount"
+        ? distributeTieredPriceDeltas(chosen.length, resolveTieredGroupPrice(group.tierPricing, chosen.length))
+        : null;
+
+    chosen.forEach((optionId, index) => {
       const option = catalog.modifierOptions.find((o) => o.id === optionId)!;
       modifiers.push({
         groupId: group.id,
         groupName: group.name,
         optionId: option.id,
         optionName: option.name,
-        priceDelta: option.priceDelta,
+        priceDelta: tieredDeltas ? tieredDeltas[index] : option.priceDelta,
       });
-    }
+    });
   }
 
   const note = selection.note.trim().slice(0, 200);

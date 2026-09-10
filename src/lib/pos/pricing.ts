@@ -1,4 +1,4 @@
-import type { OrderItem, OrderItemModifier, Product, SalesChannel, ShopSettings } from "@/types";
+import type { ModifierTier, OrderItem, OrderItemModifier, Product, SalesChannel, ShopSettings } from "@/types";
 
 /** (unitPrice + sum of modifier priceDelta) * quantity — item 21/22. */
 export function computeLineTotal(
@@ -8,6 +8,37 @@ export function computeLineTotal(
 ): number {
   const modifierTotal = modifiers.reduce((sum, m) => sum + m.priceDelta, 0);
   return (unitPrice + modifierTotal) * quantity;
+}
+
+/**
+ * A `"tieredByCount"` modifier group's total add-on price for selecting `count` options — the
+ * tier whose `count` exactly matches wins; if the group's tier list doesn't have an exact match
+ * (e.g. misconfigured, or `count` is 0) it falls back to the next tier *below* `count`, or 0 if
+ * there isn't one, rather than throwing — the group still has to price *something* for whatever
+ * was actually selected. Pure so it's usable identically client-side (`ModifierPickerDialog`,
+ * for the live preview and for what the staff POS actually persists) and server-side
+ * (`resolveCustomerOrderItem`, the authoritative price for customer/QR orders) — see the
+ * `maxSelect` doc comment on `ModifierGroup` for why these two paths must never drift apart.
+ */
+export function resolveTieredGroupPrice(tierPricing: ModifierTier[] | null | undefined, count: number): number {
+  if (!tierPricing || count <= 0) return 0;
+  let best: ModifierTier | null = null;
+  for (const tier of tierPricing) {
+    if (tier.count <= count && (!best || tier.count > best.count)) best = tier;
+  }
+  return best?.price ?? 0;
+}
+
+/**
+ * Turns a `"tieredByCount"` group's chosen options into each option's individual `priceDelta`
+ * — every option gets 0 except the last, which carries the group's whole tier price, so
+ * `computeLineTotal`'s ordinary per-modifier sum lands on the right total without needing its
+ * own tiered-pricing branch. The group's real per-option names/ids are kept (unlike collapsing
+ * to one synthetic line) so the kitchen/receipt still show which meats were actually picked and
+ * the customer order flow can still round-trip real option ids back to the server.
+ */
+export function distributeTieredPriceDeltas(count: number, totalPrice: number): number[] {
+  return Array.from({ length: count }, (_, i) => (i === count - 1 ? totalPrice : 0));
 }
 
 /**

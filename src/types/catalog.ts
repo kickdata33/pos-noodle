@@ -33,6 +33,19 @@ export interface Product extends WithId {
 
 export type ModifierSelectionType = "single" | "multiple";
 
+export type ModifierPricingMode = "perOption" | "tieredByCount";
+
+/**
+ * Only meaningful when `ModifierGroup.pricingMode === "tieredByCount"` — the group's total
+ * add-on price for selecting exactly `count` options from it, e.g. for "เนื้อสัตว์": `[{count:
+ * 1, price: 50}, {count: 2, price: 50}, {count: 3, price: 60}]`. Every option's own `priceDelta`
+ * is ignored in this mode — only the *number* selected decides the price, not which ones.
+ */
+export interface ModifierTier {
+  count: number;
+  price: number;
+}
+
 /** e.g. Group "เส้น" (required, single-select) or "เพิ่มเติม" (optional, multi-select) — item 12. */
 export interface ModifierGroup extends WithId {
   shopId: string;
@@ -47,8 +60,23 @@ export interface ModifierGroup extends WithId {
    * cap". Enforced in two places that must never drift apart: `ModifierPickerDialog` (blocks the
    * tap once at the cap) and `resolveCustomerOrderItem` in `lib/pos/customerOrder.ts` (server-side
    * truncation — the real backstop, since the QR order API trusts nothing the request body says).
+   * `"tieredByCount"` pricing (below) additionally *requires* this to be set, since a tier list
+   * needs a known upper bound.
    */
   maxSelect?: number | null;
+  /**
+   * How this group prices a selection — `"perOption"` (default: each selected option's own
+   * `priceDelta` adds independently, the original/only behavior before this field existed) or
+   * `"tieredByCount"` (the shop charges by *how many* options are picked, not which ones — e.g.
+   * "เนื้อสัตว์": 1 or 2 kinds = 50 บาท, 3 kinds = 60 บาท, see `tierPricing`). `undefined` on
+   * every group from before this field existed — every read must treat that the same as
+   * `"perOption"`.
+   */
+  pricingMode?: ModifierPricingMode | null;
+  /** See `ModifierTier`. Only read when `pricingMode === "tieredByCount"`. Nullable (like
+   * `maxSelect` above) so the Admin UI can explicitly clear it when switching a group back to
+   * `"perOption"` pricing, rather than leaving a stale tier list sitting unused in Firestore. */
+  tierPricing?: ModifierTier[] | null;
   active: boolean;
   sortOrder: number;
   createdAt: EpochMillis;

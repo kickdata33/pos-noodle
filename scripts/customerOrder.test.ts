@@ -192,3 +192,76 @@ test("resolveCustomerOrderItem: a multi-select group with no maxSelect stays unl
   assert.equal(result.ok, true);
   if (result.ok) assert.equal(result.item.modifiers.length, 3);
 });
+
+test("resolveCustomerOrderItem: a tieredByCount group prices by how many are chosen, not which ones — the meat-topping example", () => {
+  const catalog: CustomerOrderCatalog = {
+    products: [product({ id: "p1", price: 40, modifierGroupIds: ["g1"] })],
+    modifierGroups: [
+      group({
+        id: "g1",
+        name: "เนื้อสัตว์",
+        selectionType: "multiple",
+        maxSelect: 3,
+        pricingMode: "tieredByCount",
+        tierPricing: [
+          { count: 1, price: 50 },
+          { count: 2, price: 50 },
+          { count: 3, price: 60 },
+        ],
+      }),
+    ],
+    modifierOptions: [
+      option({ id: "o1", groupId: "g1", name: "หมู", priceDelta: 0 }),
+      option({ id: "o2", groupId: "g1", name: "ไก่", priceDelta: 0 }),
+      option({ id: "o3", groupId: "g1", name: "วัว", priceDelta: 0 }),
+    ],
+  };
+
+  const one = resolveCustomerOrderItem({ productId: "p1", quantity: 1, optionIds: ["o1"], note: "" }, catalog);
+  assert.equal(one.ok, true);
+  if (one.ok) assert.equal(one.item.lineTotal, 90); // 40 + 50
+
+  const two = resolveCustomerOrderItem({ productId: "p1", quantity: 1, optionIds: ["o1", "o2"], note: "" }, catalog);
+  assert.equal(two.ok, true);
+  if (two.ok) {
+    assert.equal(two.item.lineTotal, 90); // 40 + 50 — same as choosing 1
+    // Names of both chosen meats still show up (kitchen/receipt need real names), only the
+    // pricing is redistributed — see `distributeTieredPriceDeltas`.
+    assert.deepEqual(
+      two.item.modifiers.map((m) => m.optionName),
+      ["หมู", "ไก่"]
+    );
+    assert.deepEqual(
+      two.item.modifiers.map((m) => m.priceDelta),
+      [0, 50]
+    );
+  }
+
+  const three = resolveCustomerOrderItem(
+    { productId: "p1", quantity: 2, optionIds: ["o1", "o2", "o3"], note: "" },
+    catalog
+  );
+  assert.equal(three.ok, true);
+  if (three.ok) assert.equal(three.item.lineTotal, 200); // (40 + 60) * 2
+});
+
+test("resolveCustomerOrderItem: a tieredByCount group's per-option priceDelta is ignored even if set", () => {
+  const catalog: CustomerOrderCatalog = {
+    products: [product({ id: "p1", price: 40, modifierGroupIds: ["g1"] })],
+    modifierGroups: [
+      group({
+        id: "g1",
+        selectionType: "multiple",
+        maxSelect: 1,
+        pricingMode: "tieredByCount",
+        tierPricing: [{ count: 1, price: 50 }],
+      }),
+    ],
+    // Even a stale/mistaken non-zero priceDelta on the option itself must not add on top of the
+    // tier price — the tier price is the whole story in this mode.
+    modifierOptions: [option({ id: "o1", groupId: "g1", priceDelta: 999 })],
+  };
+  const result = resolveCustomerOrderItem({ productId: "p1", quantity: 1, optionIds: ["o1"], note: "" }, catalog);
+  assert.equal(result.ok, true);
+  if (result.ok) assert.equal(result.item.lineTotal, 90); // 40 + 50, never 40 + 999
+});

@@ -12,6 +12,7 @@ import {
 } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
 import { formatCurrency } from "@/lib/format";
+import { distributeTieredPriceDeltas, resolveTieredGroupPrice } from "@/lib/pos/pricing";
 import type { ModifierGroup, ModifierOption, OrderItemModifier, Product } from "@/types";
 
 interface Props {
@@ -87,18 +88,26 @@ export function ModifierPickerDialog({
   const missingRequired = groups.some((g) => g.required && (selections[g.id] ?? []).length === 0);
 
   function handleConfirm() {
-    const modifiers: OrderItemModifier[] = groups.flatMap((group) =>
-      (selections[group.id] ?? []).map((optionId) => {
+    const modifiers: OrderItemModifier[] = groups.flatMap((group) => {
+      const chosenIds = selections[group.id] ?? [];
+      // Tiered groups price by *how many* were chosen, not which ones — see
+      // `distributeTieredPriceDeltas`'s doc comment. Every other group keeps each option's own
+      // `priceDelta`, unchanged from before this feature.
+      const tieredDeltas =
+        group.pricingMode === "tieredByCount"
+          ? distributeTieredPriceDeltas(chosenIds.length, resolveTieredGroupPrice(group.tierPricing, chosenIds.length))
+          : null;
+      return chosenIds.map((optionId, index) => {
         const option = optionsFor(group.id).find((o) => o.id === optionId)!;
         return {
           groupId: group.id,
           groupName: group.name,
           optionId: option.id,
           optionName: option.name,
-          priceDelta: option.priceDelta,
+          priceDelta: tieredDeltas ? tieredDeltas[index] : option.priceDelta,
         };
-      })
-    );
+      });
+    });
     onConfirm({ quantity, modifiers, note: note.trim() });
     onOpenChange(false);
   }
@@ -114,6 +123,8 @@ export function ModifierPickerDialog({
           {groups.map((group) => {
             const groupSelections = selections[group.id] ?? [];
             const atCap = Boolean(group.maxSelect) && groupSelections.length >= group.maxSelect!;
+            const tiered = group.pricingMode === "tieredByCount";
+            const currentTierPrice = tiered ? resolveTieredGroupPrice(group.tierPricing, groupSelections.length) : 0;
             return (
             <div key={group.id} className="grid gap-2">
               <p className="text-sm font-medium">
@@ -124,7 +135,21 @@ export function ModifierPickerDialog({
                     (เลือกได้สูงสุด {group.maxSelect} — เลือกแล้ว {groupSelections.length})
                   </span>
                 ) : null}
+                {tiered && groupSelections.length > 0 ? (
+                  <span className="ml-2 font-normal text-primary">
+                    รวม {formatCurrency(currentTierPrice, currency)}
+                  </span>
+                ) : null}
               </p>
+              {tiered && group.tierPricing && group.tierPricing.length > 0 ? (
+                <p className="text-xs text-muted-foreground">
+                  {group.tierPricing
+                    .slice()
+                    .sort((a, b) => a.count - b.count)
+                    .map((t) => `${t.count} อย่าง ${formatCurrency(t.price, currency)}`)
+                    .join(" / ")}
+                </p>
+              ) : null}
               <div className="grid gap-2">
                 {optionsFor(group.id).map((option) => {
                   const selected = groupSelections.includes(option.id);
@@ -147,7 +172,7 @@ export function ModifierPickerDialog({
                       <span className={!option.active ? "line-through" : undefined}>{option.name}</span>
                       {!option.active ? (
                         <span className="text-xs font-medium text-destructive">ของหมด</span>
-                      ) : option.priceDelta !== 0 ? (
+                      ) : tiered ? null : option.priceDelta !== 0 ? (
                         <span className="text-sm text-muted-foreground">
                           +{formatCurrency(option.priceDelta, currency)}
                         </span>

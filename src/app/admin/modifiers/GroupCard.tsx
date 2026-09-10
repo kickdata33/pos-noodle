@@ -104,6 +104,18 @@ export function GroupCard({
                 ? `เลือกได้สูงสุด ${group.maxSelect}`
                 : "เลือกได้หลายอัน"}
           </Badge>
+          {group.pricingMode === "tieredByCount" ? (
+            <Badge variant="muted">
+              ราคาตามจำนวน
+              {group.tierPricing && group.tierPricing.length > 0
+                ? `: ${group.tierPricing
+                    .slice()
+                    .sort((a, b) => a.count - b.count)
+                    .map((t) => `${t.count}=${t.price}`)
+                    .join(" / ")}`
+                : ""}
+            </Badge>
+          ) : null}
           <Badge variant={group.active ? "success" : "muted"}>
             {group.active ? "เปิดใช้งาน" : "ปิดใช้งาน"}
           </Badge>
@@ -133,9 +145,11 @@ export function GroupCard({
                   onDown={() => moveOption(index, "down")}
                 />
                 <span className="flex-1 text-sm">{option.name}</span>
-                <span className="text-sm text-muted-foreground">
-                  {option.priceDelta > 0 ? `+${option.priceDelta}` : option.priceDelta} บาท
-                </span>
+                {group.pricingMode !== "tieredByCount" ? (
+                  <span className="text-sm text-muted-foreground">
+                    {option.priceDelta > 0 ? `+${option.priceDelta}` : option.priceDelta} บาท
+                  </span>
+                ) : null}
                 <Switch checked={option.active} onCheckedChange={() => toggleOptionActive(option)} />
                 <Button variant="destructive" size="sm" onClick={() => deleteOption(option)}>
                   ลบ
@@ -156,14 +170,20 @@ export function GroupCard({
                 placeholder="เช่น ไม่งอก"
               />
             </div>
-            <div className="grid w-28 gap-1">
-              <span className="text-xs text-muted-foreground">ราคาเพิ่ม</span>
-              <Input
-                type="number"
-                value={addingPrice}
-                onChange={(e) => setAddingPrice(e.target.value)}
-              />
-            </div>
+            {group.pricingMode !== "tieredByCount" ? (
+              <div className="grid w-28 gap-1">
+                <span className="text-xs text-muted-foreground">ราคาเพิ่ม</span>
+                <Input
+                  type="number"
+                  value={addingPrice}
+                  onChange={(e) => setAddingPrice(e.target.value)}
+                />
+              </div>
+            ) : (
+              <p className="pb-2 text-xs text-muted-foreground">
+                กลุ่มนี้คิดราคาตามจำนวนที่เลือก — ตัวเลือกใหม่ไม่มีราคาต่อชิ้น (แก้ไขราคาตามจำนวนได้ที่ปุ่ม &quot;แก้ไข&quot;)
+              </p>
+            )}
             <Button size="sm" onClick={addOption} disabled={saving || !addingName.trim()}>
               + เพิ่ม
             </Button>

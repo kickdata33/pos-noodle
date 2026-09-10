@@ -7,7 +7,14 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { computeLineTotal, computeOrderTotals, groupItemsByProduct, resolveChannelPrice } from "../src/lib/pos/pricing";
+import {
+  computeLineTotal,
+  computeOrderTotals,
+  distributeTieredPriceDeltas,
+  groupItemsByProduct,
+  resolveChannelPrice,
+  resolveTieredGroupPrice,
+} from "../src/lib/pos/pricing";
 import type { OrderItem, Product, SalesChannel } from "../src/types";
 
 function makeItem(overrides: Partial<OrderItem> & Pick<OrderItem, "id" | "productId">): OrderItem {
@@ -170,4 +177,42 @@ test("resolveChannelPrice: a manual per-item channelPrices override always wins 
 test("resolveChannelPrice: an override of exactly 0 is a real override, not treated as unset", () => {
   const product = testProduct({ price: 60, channelPrices: { grab: 0 } });
   assert.equal(resolveChannelPrice(product, testChannel({ id: "grab", markupPercent: 20 })), 0);
+});
+
+test("resolveTieredGroupPrice: exact match per the meat-topping example — 1/2 อย่าง 50, 3 อย่าง 60", () => {
+  const tiers = [
+    { count: 1, price: 50 },
+    { count: 2, price: 50 },
+    { count: 3, price: 60 },
+  ];
+  assert.equal(resolveTieredGroupPrice(tiers, 1), 50);
+  assert.equal(resolveTieredGroupPrice(tiers, 2), 50);
+  assert.equal(resolveTieredGroupPrice(tiers, 3), 60);
+});
+
+test("resolveTieredGroupPrice: 0 selected, no tiers, or a count with no matching/lower tier all price at 0", () => {
+  const tiers = [{ count: 2, price: 50 }];
+  assert.equal(resolveTieredGroupPrice(tiers, 0), 0);
+  assert.equal(resolveTieredGroupPrice(undefined, 2), 0);
+  assert.equal(resolveTieredGroupPrice(tiers, 1), 0); // no tier <= 1
+});
+
+test("resolveTieredGroupPrice: an incomplete tier list falls back to the closest lower tier, not 0", () => {
+  const tiers = [
+    { count: 1, price: 40 },
+    { count: 3, price: 60 },
+  ];
+  // count 2 has no exact tier — falls back to the count-1 tier (40), never silently 0.
+  assert.equal(resolveTieredGroupPrice(tiers, 2), 40);
+});
+
+test("distributeTieredPriceDeltas: whole tier price lands on the last option, others get 0", () => {
+  assert.deepEqual(distributeTieredPriceDeltas(1, 50), [50]);
+  assert.deepEqual(distributeTieredPriceDeltas(2, 50), [0, 50]);
+  assert.deepEqual(distributeTieredPriceDeltas(3, 60), [0, 0, 60]);
+  // Sum always equals the tier price, regardless of count.
+  for (const [count, price] of [[1, 50], [2, 50], [3, 60]] as const) {
+    const deltas = distributeTieredPriceDeltas(count, price);
+    assert.equal(deltas.reduce((a, b) => a + b, 0), price);
+  }
 });

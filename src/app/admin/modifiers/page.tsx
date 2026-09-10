@@ -18,7 +18,7 @@ import { computeSwap } from "@/lib/admin/sortOrder";
 import { DEFAULT_SHOP_ID } from "@/lib/firebase/config";
 import { modifierGroupRepository, modifierOptionRepository } from "@/repositories/modifierRepository";
 import { productRepository } from "@/repositories/productRepository";
-import type { ModifierGroup, ModifierSelectionType, Product } from "@/types";
+import type { ModifierGroup, ModifierPricingMode, ModifierSelectionType, Product } from "@/types";
 import { GroupCard } from "./GroupCard";
 
 interface FormState {
@@ -28,9 +28,34 @@ interface FormState {
   /** Text field state for `ModifierGroup.maxSelect` — empty string means unlimited. Only read
    * when `selectionType === "multiple"`; kept as a string here purely for the `Input`'s value. */
   maxSelect: string;
+  /** "perOption" (default, per-option `priceDelta` add-ons) or "tieredByCount" (total price
+   * depends on how many options are picked, e.g. "เนื้อสัตว์": 2 อย่าง 50 / 3 อย่าง 60). Only
+   * selectable when `selectionType === "multiple"` — a single-select group always picks exactly
+   * one option, so "by count" pricing has nothing to vary. */
+  pricingMode: ModifierPricingMode;
+  /** Text field state for `ModifierTier.price`, index i = the price for selecting `i + 1`
+   * options. Length is kept in sync with `maxSelect` whenever it changes — `"tieredByCount"`
+   * pricing requires a known upper bound (unlike the free-form "no cap" `maxSelect` otherwise
+   * allows), enforced on save below. */
+  tierPrices: string[];
 }
 
-const EMPTY_FORM: FormState = { name: "", required: false, selectionType: "single", maxSelect: "" };
+const EMPTY_FORM: FormState = {
+  name: "",
+  required: false,
+  selectionType: "single",
+  maxSelect: "",
+  pricingMode: "perOption",
+  tierPrices: [],
+};
+
+/** Keeps `tierPrices`'s length equal to `maxSelect` when the cap changes — pads new tiers with
+ * "" (unset) rather than guessing a price, trims extra tiers off the end. */
+function resizeTierPrices(tierPrices: string[], maxSelect: number): string[] {
+  const next = tierPrices.slice(0, maxSelect);
+  while (next.length < maxSelect) next.push("");
+  return next;
+}
 
 /**
  * Modifier Group + Option management (item 12). Groups here; each `GroupCard` expands to manage
@@ -61,6 +86,13 @@ export default function ModifiersPage() {
       required: group.required,
       selectionType: group.selectionType,
       maxSelect: group.maxSelect ? String(group.maxSelect) : "",
+      pricingMode: group.pricingMode ?? "perOption",
+      tierPrices: group.maxSelect
+        ? resizeTierPrices(
+            (group.tierPricing ?? []).map((t) => String(t.price)),
+            group.maxSelect
+          )
+        : [],
     });
     setDialogOpen(true);
   }
@@ -70,11 +102,32 @@ export default function ModifiersPage() {
     if (!name) return;
     // Meaningless for "single" (already capped at 1) — never persisted there even if a stray
     // value is sitting in the form from before the selection type was switched.
-    const parsed = Number(form.maxSelect.trim());
+    const parsedMaxSelect = Number(form.maxSelect.trim());
     const maxSelect =
-      form.selectionType === "multiple" && form.maxSelect.trim() && Number.isInteger(parsed) && parsed > 0
-        ? parsed
+      form.selectionType === "multiple" && form.maxSelect.trim() && Number.isInteger(parsedMaxSelect) && parsedMaxSelect > 0
+        ? parsedMaxSelect
         : undefined;
+    const tiered = form.selectionType === "multiple" && form.pricingMode === "tieredByCount";
+
+    // Tiered pricing needs a known upper bound (unlike per-option pricing, where "no cap" is a
+    // valid choice) and a price for every count from 1 up to that bound — an incomplete tier
+    // list would silently price some selection counts at 0 via `resolveTieredGroupPrice`'s
+    // fallback, which is exactly the kind of "menu says one thing, POS charges another" mistake
+    // item 34 exists to prevent.
+    if (tiered && !maxSelect) {
+      alert('โหมด "ราคาตามจำนวนที่เลือก" ต้องกำหนด "จำกัดจำนวนที่เลือกได้" ก่อน');
+      return;
+    }
+    let tierPricing: { count: number; price: number }[] | undefined;
+    if (tiered && maxSelect) {
+      const prices = resizeTierPrices(form.tierPrices, maxSelect).map((p) => Number(p.trim()));
+      if (prices.some((p) => !Number.isFinite(p) || p < 0)) {
+        alert(`กรุณากรอกราคาให้ครบทุกจำนวน (1–${maxSelect} อย่าง)`);
+        return;
+      }
+      tierPricing = prices.map((price, i) => ({ count: i + 1, price }));
+    }
+
     setSaving(true);
     try {
       if (editing) {
@@ -83,6 +136,8 @@ export default function ModifiersPage() {
           required: form.required,
           selectionType: form.selectionType,
           maxSelect: maxSelect ?? null,
+          pricingMode: tiered ? "tieredByCount" : "perOption",
+          tierPricing: tierPricing ?? null,
         });
       } else {
         await modifierGroupRepository.create({
@@ -91,6 +146,8 @@ export default function ModifiersPage() {
           required: form.required,
           selectionType: form.selectionType,
           maxSelect,
+          pricingMode: tiered ? "tieredByCount" : undefined,
+          tierPricing,
           active: true,
           sortOrder: groups.length,
           createdAt: Date.now(),
@@ -188,16 +245,84 @@ export default function ModifiersPage() {
 
             {form.selectionType === "multiple" ? (
               <div className="grid gap-2">
-                <Label htmlFor="group-max-select">จำกัดจำนวนที่เลือกได้ (ไม่บังคับ)</Label>
+                <Label htmlFor="group-max-select">
+                  จำกัดจำนวนที่เลือกได้ {form.pricingMode === "tieredByCount" ? "" : "(ไม่บังคับ)"}
+                </Label>
                 <Input
                   id="group-max-select"
                   type="number"
                   min={1}
                   step={1}
                   value={form.maxSelect}
-                  onChange={(e) => setForm((f) => ({ ...f, maxSelect: e.target.value }))}
+                  onChange={(e) => {
+                    const value = e.target.value;
+                    setForm((f) => {
+                      const n = Number(value.trim());
+                      return {
+                        ...f,
+                        maxSelect: value,
+                        tierPrices: Number.isInteger(n) && n > 0 ? resizeTierPrices(f.tierPrices, n) : f.tierPrices,
+                      };
+                    });
+                  }}
                   placeholder="ไม่จำกัด"
                 />
+              </div>
+            ) : null}
+
+            {form.selectionType === "multiple" ? (
+              <div className="grid gap-2">
+                <Label>รูปแบบราคา</Label>
+                <Select
+                  value={form.pricingMode}
+                  onValueChange={(v) => setForm((f) => ({ ...f, pricingMode: v as ModifierPricingMode }))}
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="perOption">บวกราคาต่อตัวเลือก (ค่าเริ่มต้น)</SelectItem>
+                    <SelectItem value="tieredByCount">ราคาตามจำนวนที่เลือก (เช่น 2 อย่าง 50, 3 อย่าง 60)</SelectItem>
+                  </SelectContent>
+                </Select>
+                {form.pricingMode === "tieredByCount" ? (
+                  <p className="text-xs text-muted-foreground">
+                    ราคาต่อตัวเลือกของแต่ละตัวเลือกในกลุ่มนี้จะไม่ถูกใช้ — คิดราคารวมตามจำนวนที่เลือกแทน
+                  </p>
+                ) : null}
+              </div>
+            ) : null}
+
+            {form.selectionType === "multiple" && form.pricingMode === "tieredByCount" ? (
+              <div className="grid gap-2">
+                <Label>ตั้งราคาตามจำนวนที่เลือก</Label>
+                {form.tierPrices.length === 0 ? (
+                  <p className="text-xs text-muted-foreground">
+                    กรอก &quot;จำกัดจำนวนที่เลือกได้&quot; ด้านบนก่อน เพื่อตั้งราคาแต่ละจำนวน
+                  </p>
+                ) : (
+                  <div className="grid gap-2">
+                    {form.tierPrices.map((price, i) => (
+                      <div key={i} className="flex items-center gap-2">
+                        <span className="w-20 shrink-0 text-sm text-muted-foreground">เลือก {i + 1} อย่าง</span>
+                        <Input
+                          type="number"
+                          min={0}
+                          step={1}
+                          value={price}
+                          onChange={(e) =>
+                            setForm((f) => ({
+                              ...f,
+                              tierPrices: f.tierPrices.map((p, idx) => (idx === i ? e.target.value : p)),
+                            }))
+                          }
+                          placeholder="0"
+                        />
+                        <span className="text-sm text-muted-foreground">บาท</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             ) : null}
 
