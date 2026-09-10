@@ -62,6 +62,7 @@ export function resolveCustomerOrderItem(
     );
     let chosen = selection.optionIds.filter((id) => validOptionIds.has(id));
     if (group.selectionType === "single") chosen = chosen.slice(0, 1);
+    else if (group.maxSelect) chosen = chosen.slice(0, group.maxSelect);
 
     if (group.required && chosen.length === 0) {
       return { ok: false, error: `กรุณาเลือก "${group.name}"` };

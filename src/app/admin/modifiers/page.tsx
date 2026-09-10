@@ -25,9 +25,12 @@ interface FormState {
   name: string;
   required: boolean;
   selectionType: ModifierSelectionType;
+  /** Text field state for `ModifierGroup.maxSelect` — empty string means unlimited. Only read
+   * when `selectionType === "multiple"`; kept as a string here purely for the `Input`'s value. */
+  maxSelect: string;
 }
 
-const EMPTY_FORM: FormState = { name: "", required: false, selectionType: "single" };
+const EMPTY_FORM: FormState = { name: "", required: false, selectionType: "single", maxSelect: "" };
 
 /**
  * Modifier Group + Option management (item 12). Groups here; each `GroupCard` expands to manage
@@ -53,13 +56,25 @@ export default function ModifiersPage() {
 
   function openEdit(group: ModifierGroup) {
     setEditing(group);
-    setForm({ name: group.name, required: group.required, selectionType: group.selectionType });
+    setForm({
+      name: group.name,
+      required: group.required,
+      selectionType: group.selectionType,
+      maxSelect: group.maxSelect ? String(group.maxSelect) : "",
+    });
     setDialogOpen(true);
   }
 
   async function handleSave() {
     const name = form.name.trim();
     if (!name) return;
+    // Meaningless for "single" (already capped at 1) — never persisted there even if a stray
+    // value is sitting in the form from before the selection type was switched.
+    const parsed = Number(form.maxSelect.trim());
+    const maxSelect =
+      form.selectionType === "multiple" && form.maxSelect.trim() && Number.isInteger(parsed) && parsed > 0
+        ? parsed
+        : undefined;
     setSaving(true);
     try {
       if (editing) {
@@ -67,6 +82,7 @@ export default function ModifiersPage() {
           name,
           required: form.required,
           selectionType: form.selectionType,
+          maxSelect: maxSelect ?? null,
         });
       } else {
         await modifierGroupRepository.create({
@@ -74,6 +90,7 @@ export default function ModifiersPage() {
           name,
           required: form.required,
           selectionType: form.selectionType,
+          maxSelect,
           active: true,
           sortOrder: groups.length,
           createdAt: Date.now(),
@@ -168,6 +185,21 @@ export default function ModifiersPage() {
                 </SelectContent>
               </Select>
             </div>
+
+            {form.selectionType === "multiple" ? (
+              <div className="grid gap-2">
+                <Label htmlFor="group-max-select">จำกัดจำนวนที่เลือกได้ (ไม่บังคับ)</Label>
+                <Input
+                  id="group-max-select"
+                  type="number"
+                  min={1}
+                  step={1}
+                  value={form.maxSelect}
+                  onChange={(e) => setForm((f) => ({ ...f, maxSelect: e.target.value }))}
+                  placeholder="ไม่จำกัด"
+                />
+              </div>
+            ) : null}
 
             <div className="grid gap-2">
               <Label>บังคับเลือกหรือไม่</Label>

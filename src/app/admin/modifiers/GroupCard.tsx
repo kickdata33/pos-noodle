@@ -97,7 +97,13 @@ export function GroupCard({
         >
           <span className="font-medium">{group.name}</span>
           <Badge variant="muted">{group.required ? "บังคับ" : "ไม่บังคับ"}</Badge>
-          <Badge variant="muted">{group.selectionType === "single" ? "เลือก 1" : "เลือกได้หลายอัน"}</Badge>
+          <Badge variant="muted">
+            {group.selectionType === "single"
+              ? "เลือก 1"
+              : group.maxSelect
+                ? `เลือกได้สูงสุด ${group.maxSelect}`
+                : "เลือกได้หลายอัน"}
+          </Badge>
           <Badge variant={group.active ? "success" : "muted"}>
             {group.active ? "เปิดใช้งาน" : "ปิดใช้งาน"}
           </Badge>

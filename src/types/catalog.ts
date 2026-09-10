@@ -39,6 +39,16 @@ export interface ModifierGroup extends WithId {
   name: string;
   required: boolean;
   selectionType: ModifierSelectionType;
+  /**
+   * Caps how many options a `"multiple"` group's customer can pick at once (e.g. "เพิ่มลูกชิ้น"
+   * capped at 3) — meaningless for `"single"` (already capped at 1 by `selectionType` itself) and
+   * left `undefined` there. `undefined` or `0` on a `"multiple"` group means unlimited, same as
+   * every group created before this field existed — every read must treat both the same as "no
+   * cap". Enforced in two places that must never drift apart: `ModifierPickerDialog` (blocks the
+   * tap once at the cap) and `resolveCustomerOrderItem` in `lib/pos/customerOrder.ts` (server-side
+   * truncation — the real backstop, since the QR order API trusts nothing the request body says).
+   */
+  maxSelect?: number | null;
   active: boolean;
   sortOrder: number;
   createdAt: EpochMillis;

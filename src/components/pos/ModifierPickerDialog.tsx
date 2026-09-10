@@ -71,6 +71,12 @@ export function ModifierPickerDialog({
         }
         return { ...prev, [group.id]: [optionId] };
       }
+      // Deselecting is always allowed; selecting a *new* one is blocked once `maxSelect` is
+      // already reached (e.g. "เพิ่มลูกชิ้น" capped at 3) — re-tapping an already-selected option
+      // still works fine since `current.includes(optionId)` takes the deselect branch below it.
+      if (!current.includes(optionId) && group.maxSelect && current.length >= group.maxSelect) {
+        return prev;
+      }
       const next = current.includes(optionId)
         ? current.filter((id) => id !== optionId)
         : [...current, optionId];
@@ -105,24 +111,33 @@ export function ModifierPickerDialog({
         </DialogHeader>
 
         <div className="grid gap-4">
-          {groups.map((group) => (
+          {groups.map((group) => {
+            const groupSelections = selections[group.id] ?? [];
+            const atCap = Boolean(group.maxSelect) && groupSelections.length >= group.maxSelect!;
+            return (
             <div key={group.id} className="grid gap-2">
               <p className="text-sm font-medium">
                 {group.name}
                 {group.required ? <span className="text-destructive"> *จำเป็น</span> : null}
+                {group.maxSelect ? (
+                  <span className="ml-2 font-normal text-muted-foreground">
+                    (เลือกได้สูงสุด {group.maxSelect} — เลือกแล้ว {groupSelections.length})
+                  </span>
+                ) : null}
               </p>
               <div className="grid gap-2">
                 {optionsFor(group.id).map((option) => {
-                  const selected = (selections[group.id] ?? []).includes(option.id);
+                  const selected = groupSelections.includes(option.id);
+                  const disabled = !option.active || (atCap && !selected);
                   return (
                     <button
                       key={option.id}
                       type="button"
-                      disabled={!option.active}
+                      disabled={disabled}
                       onClick={() => toggleOption(group, option.id)}
                       className={
                         "flex items-center justify-between rounded-lg border px-4 py-3 text-left " +
-                        (!option.active
+                        (disabled
                           ? "cursor-not-allowed border-border bg-muted/40 opacity-60"
                           : selected
                             ? "border-primary bg-primary/10"
@@ -142,7 +157,8 @@ export function ModifierPickerDialog({
                 })}
               </div>
             </div>
-          ))}
+            );
+          })}
 
           <div className="grid gap-2">
             <p className="text-sm font-medium">จำนวน</p>

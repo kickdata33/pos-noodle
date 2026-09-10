@@ -153,3 +153,42 @@ test("resolveCustomerOrderItem: no channel passed behaves exactly as before — 
   assert.equal(result.ok, true);
   if (result.ok) assert.equal(result.item.unitPrice, 60);
 });
+
+test("resolveCustomerOrderItem: a multi-select group truncates to maxSelect, even if the client sent more", () => {
+  const catalog: CustomerOrderCatalog = {
+    products: [product({ id: "p1", price: 50, modifierGroupIds: ["g1"] })],
+    modifierGroups: [group({ id: "g1", selectionType: "multiple", maxSelect: 2 })],
+    modifierOptions: [
+      option({ id: "o1", groupId: "g1", priceDelta: 5 }),
+      option({ id: "o2", groupId: "g1", priceDelta: 5 }),
+      option({ id: "o3", groupId: "g1", priceDelta: 5 }),
+    ],
+  };
+  const result = resolveCustomerOrderItem(
+    { productId: "p1", quantity: 1, optionIds: ["o1", "o2", "o3"], note: "" },
+    catalog
+  );
+  assert.equal(result.ok, true);
+  if (result.ok) {
+    assert.equal(result.item.modifiers.length, 2);
+    assert.equal(result.item.lineTotal, 60);
+  }
+});
+
+test("resolveCustomerOrderItem: a multi-select group with no maxSelect stays unlimited (backward-compatible)", () => {
+  const catalog: CustomerOrderCatalog = {
+    products: [product({ id: "p1", price: 50, modifierGroupIds: ["g1"] })],
+    modifierGroups: [group({ id: "g1", selectionType: "multiple" })],
+    modifierOptions: [
+      option({ id: "o1", groupId: "g1", priceDelta: 5 }),
+      option({ id: "o2", groupId: "g1", priceDelta: 5 }),
+      option({ id: "o3", groupId: "g1", priceDelta: 5 }),
+    ],
+  };
+  const result = resolveCustomerOrderItem(
+    { productId: "p1", quantity: 1, optionIds: ["o1", "o2", "o3"], note: "" },
+    catalog
+  );
+  assert.equal(result.ok, true);
+  if (result.ok) assert.equal(result.item.modifiers.length, 3);
+});
