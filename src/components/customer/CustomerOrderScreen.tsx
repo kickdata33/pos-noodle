@@ -79,6 +79,9 @@ export function CustomerOrderScreen({ tableId }: { tableId: string }) {
   const [activeCategoryId, setActiveCategoryId] = useState<string | null>(null);
   const [cart, setCart] = useState<CartLine[]>([]);
   const [pickerProduct, setPickerProduct] = useState<Product | null>(null);
+  // Set together with `pickerProduct` only when the picker was opened via "แก้ไข" on an existing
+  // cart line (Grab-style in-place edit) — `null` for the normal "tap a product, add fresh" flow.
+  const [editingLineKey, setEditingLineKey] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [justSubmitted, setJustSubmitted] = useState(false);
@@ -195,6 +198,7 @@ export function CustomerOrderScreen({ tableId }: { tableId: string }) {
   function handleProductTap(product: Product) {
     if (!product.active) return; // sold out — see the "ของหมด" rendering below
     if (product.modifierGroupIds.length > 0) {
+      setEditingLineKey(null);
       setPickerProduct(product);
     } else {
       addToCart(product, 1, [], "");
@@ -204,6 +208,36 @@ export function CustomerOrderScreen({ tableId }: { tableId: string }) {
   function removeFromCart(key: string) {
     setCart((prev) => prev.filter((line) => line.key !== key));
   }
+
+  // "แก้ไข" on a cart line reopens the same picker pre-filled with that line's current
+  // selections (item: Grab-style edit-in-place, not delete-and-re-add). Only reachable for
+  // products with modifier groups — a product with none has nothing to edit besides quantity,
+  // which stays a plain qty change if that's ever added; for now every cart line came from a
+  // product that's still in `menu.products` (the menu doesn't change mid-visit).
+  function handleEditLine(line: CartLine) {
+    const product = menu?.products.find((p) => p.id === line.productId);
+    if (!product) return;
+    setEditingLineKey(line.key);
+    setPickerProduct(product);
+  }
+
+  function updateCartLine(key: string, quantity: number, modifiers: OrderItemModifier[], note: string) {
+    setCart((prev) =>
+      prev.map((line) =>
+        line.key === key
+          ? {
+              ...line,
+              quantity,
+              modifiers,
+              note,
+              lineTotal: computeLineTotal(line.unitPrice, modifiers, quantity),
+            }
+          : line
+      )
+    );
+  }
+
+  const editingLine = editingLineKey ? cart.find((l) => l.key === editingLineKey) ?? null : null;
 
   const cartTotal = cart.reduce((sum, line) => sum + line.lineTotal, 0);
   const currency = menu?.currency ?? "THB";
@@ -370,27 +404,53 @@ export function CustomerOrderScreen({ tableId }: { tableId: string }) {
 
       {pickerProduct ? (
         <ModifierPickerDialog
-          key={pickerProduct.id}
+          key={`${pickerProduct.id}:${editingLineKey ?? "new"}`}
           product={pickerProduct}
           open={Boolean(pickerProduct)}
-          onOpenChange={(open) => !open && setPickerProduct(null)}
+          onOpenChange={(open) => {
+            if (!open) {
+              setPickerProduct(null);
+              setEditingLineKey(null);
+            }
+          }}
           modifierGroups={menu.modifierGroups}
           modifierOptions={menu.modifierOptions}
           currency={currency}
-          onConfirm={({ quantity, modifiers, note }) => addToCart(pickerProduct, quantity, modifiers, note)}
+          initialSelection={
+            editingLine
+              ? { quantity: editingLine.quantity, modifiers: editingLine.modifiers, note: editingLine.note }
+              : undefined
+          }
+          confirmLabel={editingLineKey ? "บันทึกการแก้ไข" : undefined}
+          onConfirm={({ quantity, modifiers, note }) =>
+            editingLineKey
+              ? updateCartLine(editingLineKey, quantity, modifiers, note)
+              : addToCart(pickerProduct, quantity, modifiers, note)
+          }
         />
       ) : null}
 
       {/* Cart + submit bar, fixed to the bottom so it's reachable one-handed on a phone. */}
       <div className="fixed inset-x-0 bottom-0 border-t border-border bg-card p-3 shadow-[0_-2px_8px_rgba(0,0,0,0.06)]">
         {cart.length > 0 && (
-          <ul className="mb-2 flex max-h-32 flex-col gap-1 overflow-y-auto text-sm">
+          <ul className="mb-2 flex max-h-56 flex-col gap-2 overflow-y-auto text-sm">
             {cart.map((line) => (
-              <li key={line.key} className="flex items-center justify-between gap-2">
-                <span className="min-w-0 truncate">
-                  {line.productName} x{line.quantity}
-                  {line.note ? <span className="text-muted-foreground"> ({line.note})</span> : null}
-                </span>
+              <li key={line.key} className="flex items-start justify-between gap-2 border-b border-border pb-2 last:border-0 last:pb-0">
+                <div className="min-w-0">
+                  <p className="font-medium">
+                    {line.productName} x{line.quantity}
+                  </p>
+                  {line.modifiers.map((m) => (
+                    <p key={m.optionId} className="text-xs text-muted-foreground">
+                      {m.optionName}
+                      {m.priceDelta !== 0 ? ` (+${formatCurrency(m.priceDelta, currency)})` : ""}
+                    </p>
+                  ))}
+                  {line.note ? <p className="text-xs text-muted-foreground">หมายเหตุ: {line.note}</p> : null}
+                  <button onClick={() => handleEditLine(line)} className="text-xs font-medium text-primary underline">
+                    แก้ไข
+                  </button>
+                </div>
                 <div className="flex shrink-0 items-center gap-2">
                   <span className="tabular-nums text-muted-foreground">{formatCurrency(line.lineTotal, currency)}</span>
                   <button onClick={() => removeFromCart(line.key)} className="text-destructive" aria-label="ลบ">

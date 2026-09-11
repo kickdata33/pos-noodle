@@ -23,6 +23,14 @@ interface Props {
   modifierOptions: ModifierOption[];
   currency: string;
   onConfirm: (result: { quantity: number; modifiers: OrderItemModifier[]; note: string }) => void;
+  /**
+   * Pre-fills the picker from an existing cart line instead of starting blank — used to edit a
+   * line already in the cart (Grab-style "แก้ไข") rather than only being able to remove it and
+   * re-add from scratch. Omitted entirely for the normal "add a new line" flow.
+   */
+  initialSelection?: { quantity: number; modifiers: OrderItemModifier[]; note: string };
+  /** "บันทึกการแก้ไข" when editing an existing line, vs the default "เพิ่มลงตะกร้า". */
+  confirmLabel?: string;
 }
 
 /**
@@ -38,13 +46,23 @@ export function ModifierPickerDialog({
   modifierOptions,
   currency,
   onConfirm,
+  initialSelection,
+  confirmLabel,
 }: Props) {
   // No reset effect needed: the parent only mounts this component while a product is picked
-  // (`{pickerProduct ? <ModifierPickerDialog key={pickerProduct.id} .../> : null}`), and keys
-  // it by product id, so React gives every open a fresh mount — state starts clean by construction.
-  const [selections, setSelections] = useState<Record<string, string[]>>({});
-  const [quantity, setQuantity] = useState(1);
-  const [note, setNote] = useState("");
+  // (`{pickerProduct ? <ModifierPickerDialog key={...}.../> }`), keyed by product id *and* by
+  // which cart line (if any) is being edited, so React gives every open a fresh mount — state
+  // starts clean (or pre-filled from `initialSelection`) by construction, never carried over
+  // from a previous open of this same dialog.
+  const [selections, setSelections] = useState<Record<string, string[]>>(() => {
+    const initial: Record<string, string[]> = {};
+    for (const m of initialSelection?.modifiers ?? []) {
+      initial[m.groupId] = [...(initial[m.groupId] ?? []), m.optionId];
+    }
+    return initial;
+  });
+  const [quantity, setQuantity] = useState(initialSelection?.quantity ?? 1);
+  const [note, setNote] = useState(initialSelection?.note ?? "");
 
   const groups = product.modifierGroupIds
     .map((id) => modifierGroups.find((g) => g.id === id))
@@ -223,7 +241,7 @@ export function ModifierPickerDialog({
             ยกเลิก
           </Button>
           <Button onClick={handleConfirm} disabled={missingRequired}>
-            เพิ่มลงตะกร้า
+            {confirmLabel ?? "เพิ่มลงตะกร้า"}
           </Button>
         </DialogFooter>
       </DialogContent>
