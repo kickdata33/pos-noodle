@@ -230,6 +230,30 @@ export function PickupOrderScreen() {
         <p className="text-lg">
           หมายเลขอ้างอิงของคุณคือ <span className="font-semibold">{result.customerLabel}</span>
         </p>
+        {/* What was actually ordered — the customer had no other confirmation of this before,
+            just the total. `cart` is never cleared after a successful submit (unlike
+            CustomerOrderScreen's dine-in flow, which folds it into a live "สั่งไปแล้ว" list
+            instead), so it's still exactly what was sent. */}
+        <div className="w-full max-w-xs rounded-lg border border-border p-3 text-left text-sm">
+          {cart.map((line) => (
+            <div key={line.key} className="mb-2 border-b border-border pb-2 last:mb-0 last:border-0 last:pb-0">
+              <div className="flex items-center justify-between gap-2">
+                <span className="font-medium">
+                  {line.quantity}x {line.productName}
+                </span>
+                <span className="tabular-nums text-muted-foreground">{formatCurrency(line.lineTotal, currency)}</span>
+              </div>
+              {line.modifiers.map((m) => (
+                <p key={m.optionId} className="text-xs text-muted-foreground">
+                  {m.optionName}
+                  {m.priceDelta !== 0 ? ` (+${formatCurrency(m.priceDelta, currency)})` : ""}
+                </p>
+              ))}
+              {line.note ? <p className="text-xs text-muted-foreground">หมายเหตุ: {line.note}</p> : null}
+            </div>
+          ))}
+        </div>
+
         <p className="text-muted-foreground">ยอดที่ต้องชำระ {formatCurrency(result.total, currency)}</p>
 
         {result.paymentIntent === "cash" ? (
