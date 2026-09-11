@@ -265,3 +265,50 @@ test("resolveCustomerOrderItem: a tieredByCount group's per-option priceDelta is
   assert.equal(result.ok, true);
   if (result.ok) assert.equal(result.item.lineTotal, 90); // 40 + 50, never 40 + 999
 });
+
+test("resolveCustomerOrderItem: an option restricted to specific products is only valid on those products", () => {
+  const catalog: CustomerOrderCatalog = {
+    products: [
+      product({ id: "kaoreaw", price: 50 }),
+      product({ id: "noodle", price: 40, modifierGroupIds: ["g1"] }),
+    ],
+    modifierGroups: [group({ id: "g1", name: "เนื้อสัตว์", selectionType: "multiple" })],
+    modifierOptions: [
+      option({ id: "moo", groupId: "g1", name: "หมูสด" }), // no restriction — shows everywhere
+      option({ id: "gai-krong", groupId: "g1", name: "โครงไก่", priceDelta: 20, restrictToProductIds: ["kaoreaw"] }),
+    ],
+  };
+
+  // "เกาเหลา" also lists g1 — โครงไก่ is explicitly allowed there.
+  const kaoreawWithGroup: CustomerOrderCatalog = {
+    ...catalog,
+    products: [{ ...catalog.products[0], modifierGroupIds: ["g1"] }, catalog.products[1]],
+  };
+  const onKaoreaw = resolveCustomerOrderItem(
+    { productId: "kaoreaw", quantity: 1, optionIds: ["moo", "gai-krong"], note: "" },
+    kaoreawWithGroup
+  );
+  assert.equal(onKaoreaw.ok, true);
+  if (onKaoreaw.ok) {
+    assert.deepEqual(
+      onKaoreaw.item.modifiers.map((m) => m.optionId),
+      ["moo", "gai-krong"]
+    );
+  }
+
+  // "ก๋วยเตี๋ยว" shares the same group g1, but โครงไก่ is restricted to เกาเหลา only — a request
+  // that sends its option id anyway (tampered or stale client state) gets it silently dropped,
+  // never priced in, exactly like an option id from a different product's group entirely.
+  const onNoodle = resolveCustomerOrderItem(
+    { productId: "noodle", quantity: 1, optionIds: ["moo", "gai-krong"], note: "" },
+    kaoreawWithGroup
+  );
+  assert.equal(onNoodle.ok, true);
+  if (onNoodle.ok) {
+    assert.deepEqual(
+      onNoodle.item.modifiers.map((m) => m.optionId),
+      ["moo"]
+    );
+    assert.equal(onNoodle.item.lineTotal, 40); // 40 + 0 (โครงไก่'s +20 never applied)
+  }
+});

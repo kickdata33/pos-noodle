@@ -88,6 +88,17 @@ export interface ModifierOption extends WithId {
   name: string;
   /** Added to the item's unit price when selected. 0 for free options like "ไม่งอก". */
   priceDelta: number;
+  /**
+   * Limits this one option to specific products, even though its group is shared by several
+   * (e.g. the shared "เนื้อสัตว์" group's "โครงไก่" option should only show on "เกาเหลา", not
+   * every other product — like "ก๋วยเตี๋ยว" — that also uses that group). `null`/`undefined`
+   * (the default, and every option created before this field existed) means "show on every
+   * product that offers this group", unchanged from before this feature. Enforced in the same
+   * two places `ModifierGroup.maxSelect` is, for the same reason: `ModifierPickerDialog` (hides
+   * the option from products it's not restricted to) and `resolveCustomerOrderItem` in
+   * `lib/pos/customerOrder.ts` (server-side backstop for customer/QR orders).
+   */
+  restrictToProductIds?: string[] | null;
   active: boolean;
   sortOrder: number;
   createdAt: EpochMillis;

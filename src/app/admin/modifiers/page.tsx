@@ -199,6 +199,7 @@ export default function ModifiersPage() {
           <GroupCard
             key={group.id}
             group={group}
+            products={products}
             onEdit={() => openEdit(group)}
             onToggleActive={() => toggleActive(group)}
             onDelete={() => handleDelete(group)}

@@ -5,11 +5,19 @@ import { useEffect, useState } from "react";
 import { SortButtons } from "@/components/admin/SortButtons";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { computeSwap } from "@/lib/admin/sortOrder";
 import { modifierOptionRepository } from "@/repositories/modifierRepository";
-import type { ModifierGroup, ModifierOption } from "@/types";
+import type { ModifierGroup, ModifierOption, Product } from "@/types";
 
 /**
  * One Modifier Group and its Options, expandable — matches item 12's shape: e.g. Group "เส้น"
@@ -21,6 +29,7 @@ import type { ModifierGroup, ModifierOption } from "@/types";
  */
 export function GroupCard({
   group,
+  products,
   onEdit,
   onToggleActive,
   onDelete,
@@ -29,6 +38,10 @@ export function GroupCard({
   disabledDown,
 }: {
   group: ModifierGroup;
+  /** Every product in the shop — filtered down here to just the ones that actually offer this
+   * group, since restricting an option to a product that doesn't even use this group would be
+   * meaningless (see `restrictDialogEligibleProducts`). */
+  products: Product[];
   onEdit: () => void;
   onToggleActive: () => void;
   onDelete: () => void;
@@ -47,6 +60,17 @@ export function GroupCard({
   // this one's draft. Only one option can be mid-edit at a time.
   const [editingPriceId, setEditingPriceId] = useState<string | null>(null);
   const [priceDraft, setPriceDraft] = useState("");
+  // The "จำกัดเมนู" dialog — which option it's open for (null = closed), whether restriction is
+  // turned on at all, and the draft set of product ids while it's open. Kept separate from
+  // `options`/the option's own `restrictToProductIds` for the same reason `priceDraft` is: a
+  // mid-edit toggle shouldn't get clobbered by the live subscription.
+  const [restrictOption, setRestrictOption] = useState<ModifierOption | null>(null);
+  const [restrictEnabled, setRestrictEnabled] = useState(false);
+  const [restrictDraft, setRestrictDraft] = useState<string[]>([]);
+
+  // Only products that actually offer this group are meaningful choices — restricting an option
+  // to a product that doesn't even list this group would just make it disappear everywhere.
+  const eligibleProducts = products.filter((p) => p.modifierGroupIds.includes(group.id));
 
   useEffect(() => {
     if (!expanded) return;
@@ -89,6 +113,26 @@ export function GroupCard({
     setEditingPriceId(null);
     if (priceDelta === option.priceDelta) return; // nothing actually changed, skip the write
     await modifierOptionRepository.update(option.id, { priceDelta });
+  }
+
+  function openRestrictDialog(option: ModifierOption) {
+    setRestrictOption(option);
+    setRestrictEnabled(Boolean(option.restrictToProductIds && option.restrictToProductIds.length > 0));
+    setRestrictDraft(option.restrictToProductIds ?? []);
+  }
+
+  function toggleRestrictProduct(productId: string) {
+    setRestrictDraft((prev) =>
+      prev.includes(productId) ? prev.filter((id) => id !== productId) : [...prev, productId]
+    );
+  }
+
+  async function saveRestrictDialog() {
+    if (!restrictOption) return;
+    await modifierOptionRepository.update(restrictOption.id, {
+      restrictToProductIds: restrictEnabled ? restrictDraft : null,
+    });
+    setRestrictOption(null);
   }
 
   async function deleteOption(option: ModifierOption) {
@@ -188,6 +232,18 @@ export function GroupCard({
                     </button>
                   )
                 ) : null}
+                {eligibleProducts.length > 1 ? (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => openRestrictDialog(option)}
+                    title="เลือกว่าตัวเลือกนี้ใช้ได้กับเมนูไหนบ้าง"
+                  >
+                    {option.restrictToProductIds && option.restrictToProductIds.length > 0
+                      ? `เฉพาะ ${option.restrictToProductIds.length} เมนู`
+                      : "ทุกเมนู"}
+                  </Button>
+                ) : null}
                 <Switch checked={option.active} onCheckedChange={() => toggleOptionActive(option)} />
                 <Button variant="destructive" size="sm" onClick={() => deleteOption(option)}>
                   ลบ
@@ -228,6 +284,49 @@ export function GroupCard({
           </div>
         </div>
       ) : null}
+
+      <Dialog open={restrictOption !== null} onOpenChange={(open) => !open && setRestrictOption(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>เมนูที่ใช้ตัวเลือก &quot;{restrictOption?.name}&quot;</DialogTitle>
+          </DialogHeader>
+          <div className="grid gap-4">
+            <div className="flex items-center justify-between rounded-lg border border-border p-3">
+              <div>
+                <p className="font-medium">จำกัดเฉพาะบางเมนู</p>
+                <p className="text-xs text-muted-foreground">
+                  ปิด = ใช้กับทุกเมนูที่มีกลุ่ม &quot;{group.name}&quot; (ค่าเริ่มต้น)
+                </p>
+              </div>
+              <Switch checked={restrictEnabled} onCheckedChange={setRestrictEnabled} />
+            </div>
+            {restrictEnabled ? (
+              <div className="grid gap-2 rounded-lg border border-border p-3">
+                {eligibleProducts.map((p) => (
+                  <label key={p.id} className="flex items-center gap-2 text-sm">
+                    <Checkbox
+                      checked={restrictDraft.includes(p.id)}
+                      onCheckedChange={() => toggleRestrictProduct(p.id)}
+                    />
+                    {p.name}
+                  </label>
+                ))}
+                {restrictDraft.length === 0 ? (
+                  <p className="text-xs text-destructive">
+                    ยังไม่ได้เลือกเมนู — ตัวเลือกนี้จะไม่ขึ้นในเมนูไหนเลยจนกว่าจะเลือกอย่างน้อย 1 เมนู
+                  </p>
+                ) : null}
+              </div>
+            ) : null}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setRestrictOption(null)}>
+              ยกเลิก
+            </Button>
+            <Button onClick={saveRestrictDialog}>บันทึก</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

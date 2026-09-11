@@ -52,9 +52,14 @@ export function ModifierPickerDialog({
 
   // Sold-out options (`active: false`, toggled from `/pos/stock`) still show — greyed out with
   // a "ของหมด" badge — rather than silently vanishing from the list (same reasoning as the
-  // product grid; see `CustomerOrderScreen`'s and this file's own comments on why).
+  // product grid; see `CustomerOrderScreen`'s and this file's own comments on why). An option
+  // restricted to specific products (`restrictToProductIds`) is filtered out entirely, not
+  // greyed out — it was never offered on this product to begin with, unlike "ของหมด" which is a
+  // temporary, product-agnostic state.
   function optionsFor(groupId: string): ModifierOption[] {
-    return modifierOptions.filter((o) => o.groupId === groupId);
+    return modifierOptions.filter(
+      (o) => o.groupId === groupId && (!o.restrictToProductIds || o.restrictToProductIds.includes(product.id))
+    );
   }
 
   function toggleOption(group: ModifierGroup, optionId: string) {

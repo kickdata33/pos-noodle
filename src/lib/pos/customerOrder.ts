@@ -57,8 +57,19 @@ export function resolveCustomerOrderItem(
 
   const modifiers: OrderItemModifier[] = [];
   for (const group of groups) {
+    // An option restricted to specific products (`restrictToProductIds`) is only valid here if
+    // this order's product is one of them — the server-side backstop for the same restriction
+    // `ModifierPickerDialog` applies client-side, so a tampered request can't smuggle in an
+    // option meant for a different product just because they share this group.
     const validOptionIds = new Set(
-      catalog.modifierOptions.filter((o) => o.groupId === group.id && o.active).map((o) => o.id)
+      catalog.modifierOptions
+        .filter(
+          (o) =>
+            o.groupId === group.id &&
+            o.active &&
+            (!o.restrictToProductIds || o.restrictToProductIds.includes(product.id))
+        )
+        .map((o) => o.id)
     );
     let chosen = selection.optionIds.filter((id) => validOptionIds.has(id));
     if (group.selectionType === "single") chosen = chosen.slice(0, 1);
