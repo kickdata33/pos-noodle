@@ -17,20 +17,25 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { useAuth } from "@/hooks/useAuth";
 import { computeSwap } from "@/lib/admin/sortOrder";
-import { DEFAULT_SHOP_ID } from "@/lib/firebase/config";
 import { paymentMethodRepository } from "@/repositories/paymentMethodRepository";
 import type { PaymentMethod } from "@/types";
 
 /** Payment Method CRUD (item 15) — เงินสด / QR / Delivery / อื่น ๆ, admin-editable, DB-backed. */
 export default function PaymentMethodsPage() {
+  const { appUser } = useAuth();
+  const shopId = appUser?.shopId;
   const [items, setItems] = useState<PaymentMethod[]>([]);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState<PaymentMethod | null>(null);
   const [name, setName] = useState("");
   const [saving, setSaving] = useState(false);
 
-  useEffect(() => paymentMethodRepository.subscribeForShop(DEFAULT_SHOP_ID, setItems), []);
+  useEffect(() => {
+    if (!shopId) return;
+    return paymentMethodRepository.subscribeForShop(shopId, setItems);
+  }, [shopId]);
 
   function openCreate() {
     setEditing(null);
@@ -46,14 +51,14 @@ export default function PaymentMethodsPage() {
 
   async function handleSave() {
     const trimmed = name.trim();
-    if (!trimmed) return;
+    if (!trimmed || !shopId) return;
     setSaving(true);
     try {
       if (editing) {
         await paymentMethodRepository.update(editing.id, { name: trimmed });
       } else {
         await paymentMethodRepository.create({
-          shopId: DEFAULT_SHOP_ID,
+          shopId,
           name: trimmed,
           code: null,
           active: true,

@@ -44,6 +44,9 @@ interface RequestBody {
  */
 export async function POST(request: NextRequest) {
   const db = getAdminDb();
+  // Still hardcoded to the one shop deliberately, not an oversight: a pickup order has no
+  // shop-identifying doc to derive a shopId from (no table, no login) — needs a shop
+  // slug/subdomain in the URL first (SaaS roadmap Phase 2). Out of scope for Phase 1.
   const shopId = DEFAULT_SHOP_ID;
 
   const body = (await request.json().catch(() => null)) as RequestBody | null;

@@ -10,7 +10,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
-import { DEFAULT_SHOP_ID } from "@/lib/firebase/config";
+import { useAuth } from "@/hooks/useAuth";
 import { printReceiptViaEpos } from "@/lib/pos/eposPrint";
 import { buildOrderReceipt } from "@/lib/pos/receipt";
 import { shopRepository } from "@/repositories/shopRepository";
@@ -23,6 +23,8 @@ import type { Order, ShopSettings } from "@/types";
  * — this page is the only place that value can change from here on.
  */
 export default function SettingsPage() {
+  const { appUser } = useAuth();
+  const shopId = appUser?.shopId;
   const [settings, setSettings] = useState<ShopSettings | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -32,7 +34,8 @@ export default function SettingsPage() {
   const [testPrintResult, setTestPrintResult] = useState<{ ok: boolean; message: string } | null>(null);
 
   useEffect(() => {
-    shopRepository.getSettings(DEFAULT_SHOP_ID).then((s) => {
+    if (!shopId) return;
+    shopRepository.getSettings(shopId).then((s) => {
       // Backfill for a settings doc saved before this feature existed — normalized here, at the
       // moment it enters local state, so an unrelated save elsewhere on this page never writes
       // back `undefined` for these fields (Firestore's client SDK rejects that outright).
@@ -48,7 +51,7 @@ export default function SettingsPage() {
       );
       setLoading(false);
     });
-  }, []);
+  }, [shopId]);
 
   function update<K extends keyof ShopSettings>(key: K, value: ShopSettings[K]) {
     setSettings((s) => (s ? { ...s, [key]: value } : s));
@@ -120,7 +123,7 @@ export default function SettingsPage() {
     try {
       const { id: _id, ...data } = settings;
       void _id;
-      await shopRepository.setSettings(DEFAULT_SHOP_ID, { ...data, updatedAt: Date.now() });
+      await shopRepository.setSettings(settings.shopId, { ...data, updatedAt: Date.now() });
       setSavedAt(Date.now());
     } finally {
       setSaving(false);

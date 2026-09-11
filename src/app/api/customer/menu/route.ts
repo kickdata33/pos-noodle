@@ -23,6 +23,11 @@ import type { Category, ModifierGroup, ModifierOption, Product, ShopSettings } f
  */
 export async function GET() {
   const db = getAdminDb();
+  // Still hardcoded to the one shop deliberately, not an oversight: this request carries no
+  // per-request identifier at all (called as a bare `fetch("/api/customer/menu")` with no
+  // params), so there's nothing to derive a shopId from yet. Making this endpoint multi-tenant
+  // needs a shop slug/subdomain in the URL first (SaaS roadmap Phase 2) — out of scope for the
+  // Phase 1 pass that scoped every other collection query by shopId.
   const shopId = DEFAULT_SHOP_ID;
 
   const [categoriesSnap, productsSnap, groupsSnap, optionsSnap, settingsSnap] = await Promise.all([

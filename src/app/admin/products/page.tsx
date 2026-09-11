@@ -19,8 +19,8 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { useAuth } from "@/hooks/useAuth";
 import { computeSwap } from "@/lib/admin/sortOrder";
-import { DEFAULT_SHOP_ID } from "@/lib/firebase/config";
 import { categoryRepository } from "@/repositories/categoryRepository";
 import { channelRepository } from "@/repositories/channelRepository";
 import { modifierGroupRepository } from "@/repositories/modifierRepository";
@@ -63,6 +63,8 @@ const EMPTY_FORM: FormState = {
  * shop asked for ("ทำให้สามารถลบรายการได้ด้วย").
  */
 export default function ProductsPage() {
+  const { appUser } = useAuth();
+  const shopId = appUser?.shopId;
   const [items, setItems] = useState<Product[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
   const [groups, setGroups] = useState<ModifierGroup[]>([]);
@@ -72,10 +74,22 @@ export default function ProductsPage() {
   const [form, setForm] = useState<FormState>(EMPTY_FORM);
   const [saving, setSaving] = useState(false);
 
-  useEffect(() => productRepository.subscribeForShop(DEFAULT_SHOP_ID, setItems), []);
-  useEffect(() => categoryRepository.subscribeForShop(DEFAULT_SHOP_ID, setCategories), []);
-  useEffect(() => modifierGroupRepository.subscribeForShop(DEFAULT_SHOP_ID, setGroups), []);
-  useEffect(() => channelRepository.subscribeForShop(DEFAULT_SHOP_ID, setChannels), []);
+  useEffect(() => {
+    if (!shopId) return;
+    return productRepository.subscribeForShop(shopId, setItems);
+  }, [shopId]);
+  useEffect(() => {
+    if (!shopId) return;
+    return categoryRepository.subscribeForShop(shopId, setCategories);
+  }, [shopId]);
+  useEffect(() => {
+    if (!shopId) return;
+    return modifierGroupRepository.subscribeForShop(shopId, setGroups);
+  }, [shopId]);
+  useEffect(() => {
+    if (!shopId) return;
+    return channelRepository.subscribeForShop(shopId, setChannels);
+  }, [shopId]);
 
   const categoryName = (id: string) => categories.find((c) => c.id === id)?.name ?? "—";
 
@@ -116,7 +130,7 @@ export default function ProductsPage() {
   async function handleSave() {
     const name = form.name.trim();
     const price = Number(form.price);
-    if (!name || !form.categoryId || !Number.isFinite(price) || price < 0) return;
+    if (!name || !form.categoryId || !Number.isFinite(price) || price < 0 || !shopId) return;
 
     // Blank input = no override for that channel; anything else must parse as a non-negative
     // number or the whole save is rejected (never silently drop a typo'd override).
@@ -144,7 +158,7 @@ export default function ProductsPage() {
         });
       } else {
         await productRepository.create({
-          shopId: DEFAULT_SHOP_ID,
+          shopId,
           name,
           categoryId: form.categoryId,
           price,

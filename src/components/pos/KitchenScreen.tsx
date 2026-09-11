@@ -3,8 +3,8 @@
 import { useEffect, useState } from "react";
 
 import { PosBackLink } from "@/components/pos/PosBackLink";
+import { usePosCatalog } from "@/components/pos/PosCatalogContext";
 import { formatTime } from "@/lib/format";
-import { DEFAULT_SHOP_ID } from "@/lib/firebase/config";
 import { orderRepository } from "@/repositories/orderRepository";
 import type { Order, OrderItem } from "@/types";
 
@@ -20,9 +20,10 @@ import type { Order, OrderItem } from "@/types";
  * one order — see the field's doc comment on `OrderItem`.
  */
 export function KitchenScreen() {
+  const { shopId } = usePosCatalog();
   const [openOrders, setOpenOrders] = useState<Order[]>([]);
 
-  useEffect(() => orderRepository.subscribeOpenForShop(DEFAULT_SHOP_ID, setOpenOrders), []);
+  useEffect(() => orderRepository.subscribeOpenForShop(shopId, setOpenOrders), [shopId]);
 
   const kitchenOrders = openOrders
     .filter((o) => o.items.some((item) => !item.prepared))

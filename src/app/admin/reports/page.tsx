@@ -11,7 +11,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { formatCurrency } from "@/lib/format";
-import { DEFAULT_SHOP_ID } from "@/lib/firebase/config";
+import { useAuth } from "@/hooks/useAuth";
 import { customRange, resolvePreset, type DateRange, type ReportPreset } from "@/lib/pos/dateRange";
 import {
   dailySales,
@@ -39,6 +39,8 @@ const PRESETS: { value: ReportPreset; label: string }[] = [
  * `lib/pos/reports.ts` so the numbers can never disagree with each other.
  */
 export default function ReportsPage() {
+  const { appUser } = useAuth();
+  const shopId = appUser?.shopId;
   const [preset, setPreset] = useState<ReportPreset | "custom">("thisWeek");
   const [customFrom, setCustomFrom] = useState("");
   const [customTo, setCustomTo] = useState("");
@@ -48,10 +50,11 @@ export default function ReportsPage() {
   const [loadError, setLoadError] = useState<string | null>(null);
 
   useEffect(() => {
-    shopRepository.getSettings(DEFAULT_SHOP_ID).then((settings) => {
+    if (!shopId) return;
+    shopRepository.getSettings(shopId).then((settings) => {
       if (settings) setCurrency(settings.currency);
     });
-  }, []);
+  }, [shopId]);
 
   const range: DateRange = useMemo(() => {
     if (preset === "custom") {
@@ -62,6 +65,7 @@ export default function ReportsPage() {
   }, [preset, customFrom, customTo]);
 
   useEffect(() => {
+    if (!shopId) return;
     let cancelled = false;
     // Range changed — kick off a fresh fetch and show the loading state immediately. This is a
     // one-shot fetch-on-dependency-change, not a subscription to an external system, so there's
@@ -70,7 +74,7 @@ export default function ReportsPage() {
     setLoading(true);
     setLoadError(null);
     orderRepository
-      .listPaidForShopInRange(DEFAULT_SHOP_ID, range.startMs, range.endMs)
+      .listPaidForShopInRange(shopId, range.startMs, range.endMs)
       .then((result) => {
         if (!cancelled) setOrders(result);
       })
@@ -97,7 +101,7 @@ export default function ReportsPage() {
     return () => {
       cancelled = true;
     };
-  }, [range.startMs, range.endMs]);
+  }, [shopId, range.startMs, range.endMs]);
 
   const summary = useMemo(() => summarizeOrders(orders), [orders]);
   const products = useMemo(() => topProducts(orders, 10), [orders]);

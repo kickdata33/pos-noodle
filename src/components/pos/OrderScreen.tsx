@@ -11,7 +11,6 @@ import { usePosCatalog } from "@/components/pos/PosCatalogContext";
 import { RemoveItemDialog } from "@/components/pos/RemoveItemDialog";
 import { Button } from "@/components/ui/button";
 import { formatCurrency, formatTime } from "@/lib/format";
-import { DEFAULT_SHOP_ID } from "@/lib/firebase/config";
 import { useAuth } from "@/hooks/useAuth";
 import { printReceiptViaEpos } from "@/lib/pos/eposPrint";
 import { computeLineTotal, computeOrderTotals, groupItemsByProduct, resolveChannelPrice } from "@/lib/pos/pricing";
@@ -43,8 +42,17 @@ export function OrderScreen({ orderId, initialTableId, initialChannelId }: Props
   // subscribe to all of it itself, meaning every tap into an order re-fetched all seven of these
   // from scratch. `settings` falls back to `DEFAULT_SETTINGS` until the provider's one-time fetch
   // resolves, same as this screen's own local state used to before the fallback existed here.
-  const { categories, products, modifierGroups, modifierOptions, channels, tables, paymentMethods, settings: catalogSettings } =
-    usePosCatalog();
+  const {
+    shopId,
+    categories,
+    products,
+    modifierGroups,
+    modifierOptions,
+    channels,
+    tables,
+    paymentMethods,
+    settings: catalogSettings,
+  } = usePosCatalog();
   const settings = catalogSettings ?? DEFAULT_SETTINGS;
 
   const [order, setOrder] = useState<DraftOrder | null>(null);
@@ -139,7 +147,7 @@ export function OrderScreen({ orderId, initialTableId, initialChannelId }: Props
     setOrder({
       id: null,
       orderNumber: "",
-      shopId: DEFAULT_SHOP_ID,
+      shopId,
       orderType: table ? "dineIn" : "other",
       channelId: channel.id,
       channelName: channel.name,
@@ -163,7 +171,7 @@ export function OrderScreen({ orderId, initialTableId, initialChannelId }: Props
       updatedAt: now,
       paidAt: null,
     });
-  }, [orderId, appUser, channels, tables, initialTableId, initialChannelId, order]);
+  }, [orderId, appUser, shopId, channels, tables, initialTableId, initialChannelId, order]);
 
   const totals = useMemo(
     () => (order ? computeOrderTotals(order.items, settings, order.discount) : null),
@@ -308,7 +316,7 @@ export function OrderScreen({ orderId, initialTableId, initialChannelId }: Props
     const target = removeTarget;
     await applyItems(current.items.filter((i) => i.id !== target.id));
     await auditLogRepository.create({
-      shopId: DEFAULT_SHOP_ID,
+      shopId,
       action: "ORDER_ITEM_REMOVED",
       orderId: current.id,
       description: `ลบ "${target.productName}" ออกจากออเดอร์ ${current.orderNumber}`,
@@ -334,7 +342,7 @@ export function OrderScreen({ orderId, initialTableId, initialChannelId }: Props
     const updatedAt = Date.now();
     await orderRepository.update(current.id, { status: "CANCELLED", updatedAt });
     await auditLogRepository.create({
-      shopId: DEFAULT_SHOP_ID,
+      shopId,
       action: "ORDER_CANCELLED",
       orderId: current.id,
       description: `ยกเลิกออเดอร์ ${current.orderNumber}`,
@@ -373,7 +381,7 @@ export function OrderScreen({ orderId, initialTableId, initialChannelId }: Props
 
     creatingRef.current = true;
     try {
-      const orderNumber = await generateOrderNumber(DEFAULT_SHOP_ID);
+      const orderNumber = await generateOrderNumber(shopId);
       // Re-read the ref right *now*, not the `current` snapshot from when this call started —
       // a fast follow-up edit (e.g. removing the very item that triggered this save) that
       // landed while `generateOrderNumber` was in flight must be reflected in what's persisted.
@@ -425,7 +433,7 @@ export function OrderScreen({ orderId, initialTableId, initialChannelId }: Props
       });
       await paymentRepository.create({
         orderId: id,
-        shopId: DEFAULT_SHOP_ID,
+        shopId,
         paymentMethodId: payment.paymentMethodId,
         paymentMethodName: payment.paymentMethodName,
         amount: totals.total,

@@ -17,7 +17,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { DEFAULT_SHOP_ID } from "@/lib/firebase/config";
+import { useAuth } from "@/hooks/useAuth";
 import { computeSwap } from "@/lib/admin/sortOrder";
 import { categoryRepository } from "@/repositories/categoryRepository";
 import { productRepository } from "@/repositories/productRepository";
@@ -31,6 +31,8 @@ import type { Category, Product } from "@/types";
  * where deleting is always safe: see that page's comment on `OrderItem` snapshotting).
  */
 export default function CategoriesPage() {
+  const { appUser } = useAuth();
+  const shopId = appUser?.shopId;
   const [items, setItems] = useState<Category[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -38,8 +40,17 @@ export default function CategoriesPage() {
   const [name, setName] = useState("");
   const [saving, setSaving] = useState(false);
 
-  useEffect(() => categoryRepository.subscribeForShop(DEFAULT_SHOP_ID, setItems), []);
-  useEffect(() => productRepository.subscribeForShop(DEFAULT_SHOP_ID, setProducts), []);
+  // `/admin` is already gated server-side to a signed-in admin (see the layout), but the client
+  // Firebase Auth listener behind `useAuth()` still needs its own moment to resolve on first
+  // mount — these subscriptions just wait for that rather than ever reading a wrong/default shop.
+  useEffect(() => {
+    if (!shopId) return;
+    return categoryRepository.subscribeForShop(shopId, setItems);
+  }, [shopId]);
+  useEffect(() => {
+    if (!shopId) return;
+    return productRepository.subscribeForShop(shopId, setProducts);
+  }, [shopId]);
 
   function openCreate() {
     setEditing(null);
@@ -55,14 +66,14 @@ export default function CategoriesPage() {
 
   async function handleSave() {
     const trimmed = name.trim();
-    if (!trimmed) return;
+    if (!trimmed || !shopId) return;
     setSaving(true);
     try {
       if (editing) {
         await categoryRepository.update(editing.id, { name: trimmed });
       } else {
         await categoryRepository.create({
-          shopId: DEFAULT_SHOP_ID,
+          shopId,
           name: trimmed,
           sortOrder: items.length,
           active: true,

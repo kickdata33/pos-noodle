@@ -14,7 +14,7 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { formatCurrency } from "@/lib/format";
-import { DEFAULT_SHOP_ID } from "@/lib/firebase/config";
+import { useAuth } from "@/hooks/useAuth";
 import { orderRepository } from "@/repositories/orderRepository";
 import { shopRepository } from "@/repositories/shopRepository";
 import type { Order, OrderStatus } from "@/types";
@@ -41,6 +41,8 @@ const STATUS_VARIANT: Record<OrderStatus, "default" | "success" | "muted" | "des
  * bill quickly far more often than a cook glancing at today's list does on the POS side.
  */
 export default function AdminOrdersPage() {
+  const { appUser } = useAuth();
+  const shopId = appUser?.shopId;
   const [orders, setOrders] = useState<Order[]>([]);
   const [currency, setCurrency] = useState("THB");
   const [selected, setSelected] = useState<Order | null>(null);
@@ -48,13 +50,15 @@ export default function AdminOrdersPage() {
   const [statusFilter, setStatusFilter] = useState<OrderStatus | "all">("all");
 
   useEffect(() => {
-    orderRepository.listForShop(DEFAULT_SHOP_ID).then(setOrders);
-  }, []);
+    if (!shopId) return;
+    orderRepository.listForShop(shopId).then(setOrders);
+  }, [shopId]);
   useEffect(() => {
-    shopRepository.getSettings(DEFAULT_SHOP_ID).then((s) => {
+    if (!shopId) return;
+    shopRepository.getSettings(shopId).then((s) => {
       if (s) setCurrency(s.currency);
     });
-  }, []);
+  }, [shopId]);
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();

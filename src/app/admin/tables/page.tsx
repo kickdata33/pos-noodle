@@ -18,8 +18,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { useAuth } from "@/hooks/useAuth";
 import { computeSwap } from "@/lib/admin/sortOrder";
-import { DEFAULT_SHOP_ID } from "@/lib/firebase/config";
 import { tableRepository } from "@/repositories/tableRepository";
 import type { Table as PosTable } from "@/types";
 
@@ -30,6 +30,8 @@ import type { Table as PosTable } from "@/types";
  * hardcoded (item 34) — this page is the only place table data comes from.
  */
 export default function TablesPage() {
+  const { appUser } = useAuth();
+  const shopId = appUser?.shopId;
   const [items, setItems] = useState<PosTable[]>([]);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState<PosTable | null>(null);
@@ -37,7 +39,10 @@ export default function TablesPage() {
   const [saving, setSaving] = useState(false);
   const [qrTable, setQrTable] = useState<PosTable | null>(null);
 
-  useEffect(() => tableRepository.subscribeForShop(DEFAULT_SHOP_ID, setItems), []);
+  useEffect(() => {
+    if (!shopId) return;
+    return tableRepository.subscribeForShop(shopId, setItems);
+  }, [shopId]);
 
   function openCreate() {
     setEditing(null);
@@ -53,14 +58,14 @@ export default function TablesPage() {
 
   async function handleSave() {
     const trimmed = name.trim();
-    if (!trimmed) return;
+    if (!trimmed || !shopId) return;
     setSaving(true);
     try {
       if (editing) {
         await tableRepository.update(editing.id, { name: trimmed });
       } else {
         await tableRepository.create({
-          shopId: DEFAULT_SHOP_ID,
+          shopId,
           name: trimmed,
           sortOrder: items.length,
           active: true,

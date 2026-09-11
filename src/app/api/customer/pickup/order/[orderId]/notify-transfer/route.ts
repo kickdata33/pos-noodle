@@ -22,6 +22,9 @@ export async function POST(_request: NextRequest, { params }: { params: Promise<
     return NextResponse.json({ error: "ไม่พบออเดอร์นี้" }, { status: 404 });
   }
   const order = snap.data() as Order;
+  // Still gated on DEFAULT_SHOP_ID deliberately: unlike the table-QR routes, a pickup order has
+  // no shop-identifying doc to derive a shopId from before this point (no table lookup) — needs
+  // a shop slug/subdomain in the URL first (SaaS roadmap Phase 2). Out of scope for Phase 1.
   if (order.shopId !== DEFAULT_SHOP_ID) {
     return NextResponse.json({ error: "ไม่พบออเดอร์นี้" }, { status: 404 });
   }

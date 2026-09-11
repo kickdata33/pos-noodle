@@ -32,6 +32,11 @@ function throttleKeyFor(request: NextRequest): string {
 }
 
 export async function POST(request: NextRequest) {
+  // Still hardcoded to DEFAULT_SHOP_ID deliberately, not an oversight: `UserSecret.pinLookup` is
+  // HMAC(`${shopId}:${pin}`), so shopId is an *input* to the lookup hash — a login attempt can't
+  // even form the right query without already knowing which shop the user belongs to. Proper
+  // multi-tenant PIN login needs a shop-identifying URL (slug/subdomain) resolved before the PIN
+  // is submitted (SaaS roadmap Phase 2). Out of scope for Phase 1's shopId-isolation pass.
   const { pin } = (await request.json()) as { pin?: string };
 
   if (!pin || !isValidPinFormat(pin)) {

@@ -4,7 +4,6 @@ import { NextResponse, type NextRequest } from "next/server";
 
 import { getAdminDb } from "@/lib/firebase/admin";
 import { COLLECTIONS } from "@/lib/firebase/collections";
-import { DEFAULT_SHOP_ID } from "@/lib/firebase/config";
 import { resolveCustomerOrder, type CustomerSelection } from "@/lib/pos/customerOrder";
 import { CUSTOMER_ORDER_MIN_INTERVAL_MS, isThrottled } from "@/lib/pos/customerThrottle";
 import { generateOrderNumberAdmin } from "@/lib/pos/orderNumberAdmin";
@@ -38,7 +37,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     return NextResponse.json({ error: "ไม่พบโต๊ะนี้" }, { status: 404 });
   }
   const table = { ...tableSnap.data(), id: tableSnap.id } as Table;
-  if (table.shopId !== DEFAULT_SHOP_ID || !table.active) {
+  if (!table.active) {
     return NextResponse.json({ error: "โต๊ะนี้ปิดใช้งานอยู่" }, { status: 404 });
   }
 
@@ -52,11 +51,11 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   }
 
   const [productsSnap, groupsSnap, optionsSnap, channelsSnap, settingsSnap] = await Promise.all([
-    db.collection(COLLECTIONS.products).where("shopId", "==", DEFAULT_SHOP_ID).where("active", "==", true).get(),
-    db.collection(COLLECTIONS.modifierGroups).where("shopId", "==", DEFAULT_SHOP_ID).where("active", "==", true).get(),
-    db.collection(COLLECTIONS.modifierOptions).where("shopId", "==", DEFAULT_SHOP_ID).where("active", "==", true).get(),
-    db.collection(COLLECTIONS.salesChannels).where("shopId", "==", DEFAULT_SHOP_ID).where("active", "==", true).get(),
-    db.collection(COLLECTIONS.shopSettings).doc(DEFAULT_SHOP_ID).get(),
+    db.collection(COLLECTIONS.products).where("shopId", "==", table.shopId).where("active", "==", true).get(),
+    db.collection(COLLECTIONS.modifierGroups).where("shopId", "==", table.shopId).where("active", "==", true).get(),
+    db.collection(COLLECTIONS.modifierOptions).where("shopId", "==", table.shopId).where("active", "==", true).get(),
+    db.collection(COLLECTIONS.salesChannels).where("shopId", "==", table.shopId).where("active", "==", true).get(),
+    db.collection(COLLECTIONS.shopSettings).doc(table.shopId).get(),
   ]);
 
   const catalog = {
@@ -85,7 +84,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   const throttleRef = db.collection(COLLECTIONS.customerOrderThrottle).doc(tableId);
   const ordersRef = db.collection(COLLECTIONS.orders);
   const openOrderQuery = ordersRef
-    .where("shopId", "==", DEFAULT_SHOP_ID)
+    .where("shopId", "==", table.shopId)
     .where("tableId", "==", tableId)
     .where("status", "==", "OPEN")
     .limit(1);
@@ -98,7 +97,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   // appends to that order instead and this pre-allocated number goes unused — a skipped sequence
   // number, same acceptable gap a voided order already leaves, never a duplicate order.
   const precheckSnap = await openOrderQuery.get();
-  const preAllocatedOrderNumber = precheckSnap.empty ? await generateOrderNumberAdmin(db, DEFAULT_SHOP_ID) : null;
+  const preAllocatedOrderNumber = precheckSnap.empty ? await generateOrderNumberAdmin(db, table.shopId) : null;
 
   try {
     const orderId = await db.runTransaction(async (tx) => {
@@ -127,8 +126,8 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       const orderData: Omit<Order, "id"> = {
         // Falls back to allocating on the spot in the rare case the precheck raced with another
         // request that also saw "no open order" — see the comment above `precheckSnap`.
-        orderNumber: preAllocatedOrderNumber ?? (await generateOrderNumberAdmin(db, DEFAULT_SHOP_ID)),
-        shopId: DEFAULT_SHOP_ID,
+        orderNumber: preAllocatedOrderNumber ?? (await generateOrderNumberAdmin(db, table.shopId)),
+        shopId: table.shopId,
         orderType: "dineIn",
         channelId: dineInChannel.id,
         channelName: dineInChannel.name,

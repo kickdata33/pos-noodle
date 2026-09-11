@@ -2,7 +2,6 @@ import { NextResponse, type NextRequest } from "next/server";
 
 import { getAdminDb } from "@/lib/firebase/admin";
 import { COLLECTIONS } from "@/lib/firebase/collections";
-import { DEFAULT_SHOP_ID } from "@/lib/firebase/config";
 import type { Order, Table } from "@/types";
 
 /**
@@ -21,13 +20,13 @@ export async function GET(_request: NextRequest, { params }: { params: Promise<{
     return NextResponse.json({ error: "ไม่พบโต๊ะนี้" }, { status: 404 });
   }
   const table = { ...tableSnap.data(), id: tableSnap.id } as Table;
-  if (table.shopId !== DEFAULT_SHOP_ID || !table.active) {
+  if (!table.active) {
     return NextResponse.json({ error: "โต๊ะนี้ปิดใช้งานอยู่" }, { status: 404 });
   }
 
   const openOrderSnap = await db
     .collection(COLLECTIONS.orders)
-    .where("shopId", "==", DEFAULT_SHOP_ID)
+    .where("shopId", "==", table.shopId)
     .where("tableId", "==", tableId)
     .where("status", "==", "OPEN")
     .limit(1)

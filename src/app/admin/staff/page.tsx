@@ -17,7 +17,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { DEFAULT_SHOP_ID } from "@/lib/firebase/config";
+import { useAuth } from "@/hooks/useAuth";
 import { userRepository } from "@/repositories/userRepository";
 import type { AppUser, UserRole } from "@/types";
 
@@ -28,6 +28,8 @@ import type { AppUser, UserRole } from "@/types";
  * (name/role/active) is a plain client write, already scoped to `isAdmin()` by `firestore.rules`.
  */
 export default function StaffPage() {
+  const { appUser } = useAuth();
+  const shopId = appUser?.shopId;
   const [items, setItems] = useState<AppUser[]>([]);
   const [createOpen, setCreateOpen] = useState(false);
   const [name, setName] = useState("");
@@ -41,11 +43,13 @@ export default function StaffPage() {
   const [resetError, setResetError] = useState<string | null>(null);
 
   useEffect(() => {
-    userRepository.listForShop(DEFAULT_SHOP_ID).then(setItems);
-  }, []);
+    if (!shopId) return;
+    userRepository.listForShop(shopId).then(setItems);
+  }, [shopId]);
 
   function refresh() {
-    userRepository.listForShop(DEFAULT_SHOP_ID).then(setItems);
+    if (!shopId) return;
+    userRepository.listForShop(shopId).then(setItems);
   }
 
   function openCreate() {

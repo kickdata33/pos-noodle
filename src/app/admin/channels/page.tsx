@@ -18,8 +18,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { useAuth } from "@/hooks/useAuth";
 import { computeSwap } from "@/lib/admin/sortOrder";
-import { DEFAULT_SHOP_ID } from "@/lib/firebase/config";
 import { channelRepository } from "@/repositories/channelRepository";
 import type { SalesChannel } from "@/types";
 
@@ -32,6 +32,8 @@ const DEFAULT_COLOR = "#16a34a";
  * beyond what's already isolated to the seed script.
  */
 export default function ChannelsPage() {
+  const { appUser } = useAuth();
+  const shopId = appUser?.shopId;
   const [items, setItems] = useState<SalesChannel[]>([]);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState<SalesChannel | null>(null);
@@ -41,7 +43,10 @@ export default function ChannelsPage() {
   const [markupPercent, setMarkupPercent] = useState("0");
   const [saving, setSaving] = useState(false);
 
-  useEffect(() => channelRepository.subscribeForShop(DEFAULT_SHOP_ID, setItems), []);
+  useEffect(() => {
+    if (!shopId) return;
+    return channelRepository.subscribeForShop(shopId, setItems);
+  }, [shopId]);
 
   function openCreate() {
     setEditing(null);
@@ -64,14 +69,14 @@ export default function ChannelsPage() {
   async function handleSave() {
     const trimmed = name.trim();
     const markup = Number(markupPercent);
-    if (!trimmed || !Number.isFinite(markup) || markup < 0) return;
+    if (!trimmed || !Number.isFinite(markup) || markup < 0 || !shopId) return;
     setSaving(true);
     try {
       if (editing) {
         await channelRepository.update(editing.id, { name: trimmed, color, requiresTable, markupPercent: markup });
       } else {
         await channelRepository.create({
-          shopId: DEFAULT_SHOP_ID,
+          shopId,
           name: trimmed,
           code: null,
           requiresTable,

@@ -17,7 +17,7 @@ export default async function PosLayout({ children }: { children: ReactNode }) {
   if (!session) redirect("/login");
 
   return (
-    <PosCatalogProvider>
+    <PosCatalogProvider shopId={session.appUser.shopId}>
       <div className="flex min-h-full flex-col">
         <header className="flex items-center justify-between border-b border-border bg-card px-4 py-3">
           <p className="font-medium">{session.appUser.name}</p>

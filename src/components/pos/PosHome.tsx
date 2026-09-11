@@ -5,7 +5,6 @@ import { useEffect, useRef, useState } from "react";
 
 import { Badge } from "@/components/ui/badge";
 import { formatCurrency } from "@/lib/format";
-import { DEFAULT_SHOP_ID } from "@/lib/firebase/config";
 import { playOrderAlertSound } from "@/lib/pos/notificationSound";
 import { orderRepository } from "@/repositories/orderRepository";
 import type { Order } from "@/types";
@@ -19,7 +18,7 @@ import { usePosCatalog } from "./PosCatalogContext";
  * Milestone 3 plan: "table occupancy is derived, not stored").
  */
 export function PosHome() {
-  const { tables, channels, settings } = usePosCatalog();
+  const { shopId, tables, channels, settings } = usePosCatalog();
   const [openOrders, setOpenOrders] = useState<Order[]>([]);
   const currency = settings?.currency ?? "THB";
 
@@ -31,7 +30,7 @@ export function PosHome() {
   const seenPendingIdsRef = useRef<Set<string> | null>(null);
   useEffect(
     () =>
-      orderRepository.subscribeOpenForShop(DEFAULT_SHOP_ID, (orders) => {
+      orderRepository.subscribeOpenForShop(shopId, (orders) => {
         const pendingIds = new Set(orders.filter((o) => o.pendingReview).map((o) => o.id));
         if (seenPendingIdsRef.current !== null) {
           const isNewlyPending = [...pendingIds].some((id) => !seenPendingIdsRef.current!.has(id));
@@ -40,7 +39,7 @@ export function PosHome() {
         seenPendingIdsRef.current = pendingIds;
         setOpenOrders(orders);
       }),
-    []
+    [shopId]
   );
 
   const activeTables = tables.filter((t) => t.active);

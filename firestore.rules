@@ -1,7 +1,14 @@
 rules_version = '2';
 
-// Role-based access per spec item 29. No collection is left open to public read/write —
+// Role-based access per spec item 29, now also scoped per-shop (multi-tenant SaaS prep — item
+// 36) so one shop's staff can never read or write another shop's data even though every shop's
+// documents live in the same collections. No collection is left open to public read/write —
 // anything not explicitly allowed below is denied by Firestore's default-deny.
+//
+// The customer-facing QR/pickup flow never reaches these rules at all — every write there goes
+// through the Admin SDK from a server route (`/api/customer/*`), which bypasses Security Rules
+// by design (see those routes' own comments). Everything below governs only the authenticated
+// staff/admin client SDK.
 service cloud.firestore {
   match /databases/{database}/documents {
 
@@ -24,59 +31,102 @@ service cloud.firestore {
       return isActiveUser() && userDoc().role == 'admin';
     }
 
-    // --- Catalog & shop config: everyone active can read (needed to run the POS screen),
-    //     only Admin can write (item 10: staff never edits menu/prices/settings). ---
+    // The requesting user's own shop. Only meaningful once `isActiveUser()` is already true —
+    // every rule below checks that first, so `userDoc()` here is always resolving a real,
+    // active account.
+    function myShopId() {
+      return userDoc().shopId;
+    }
+
+    // The document as it currently exists on the server belongs to the caller's own shop. Used
+    // on read/update/delete — `resource` doesn't exist yet on `create`, so this can't be used
+    // there (see `ownsIncoming()`).
+    function ownsExisting() {
+      return resource.data.shopId == myShopId();
+    }
+
+    // The document as it will exist *after* this write belongs to the caller's own shop. Used
+    // on create (there's nothing to compare against yet) and, combined with `ownsExisting()`, on
+    // update — so an update can never reassign a document from one shop to another by changing
+    // its `shopId` field.
+    function ownsIncoming() {
+      return request.resource.data.shopId == myShopId();
+    }
+
+    // --- Catalog & shop config: everyone active can read their own shop's copy (needed to run
+    //     the POS screen), only Admin can write it (item 10: staff never edits menu/prices/
+    //     settings), and only for their own shop either way. ---
     match /shops/{shopId} {
-      allow read: if isActiveUser();
-      allow write: if isAdmin();
+      allow read: if isActiveUser() && shopId == myShopId();
+      allow write: if isAdmin() && shopId == myShopId();
     }
 
     match /shopSettings/{shopId} {
-      allow read: if isActiveUser();
-      allow write: if isAdmin();
+      allow read: if isActiveUser() && shopId == myShopId();
+      allow write: if isAdmin() && shopId == myShopId();
     }
 
     match /tables/{tableId} {
-      allow read: if isActiveUser();
-      allow write: if isAdmin();
+      allow read: if isActiveUser() && ownsExisting();
+      allow create: if isAdmin() && ownsIncoming();
+      allow update: if isAdmin() && ownsExisting() && ownsIncoming();
+      allow delete: if isAdmin() && ownsExisting();
     }
 
     match /categories/{categoryId} {
-      allow read: if isActiveUser();
-      allow write: if isAdmin();
+      allow read: if isActiveUser() && ownsExisting();
+      allow create: if isAdmin() && ownsIncoming();
+      allow update: if isAdmin() && ownsExisting() && ownsIncoming();
+      allow delete: if isAdmin() && ownsExisting();
     }
 
     match /products/{productId} {
-      allow read: if isActiveUser();
-      allow write: if isAdmin();
+      allow read: if isActiveUser() && ownsExisting();
+      allow create: if isAdmin() && ownsIncoming();
+      allow update: if isAdmin() && ownsExisting() && ownsIncoming();
+      allow delete: if isAdmin() && ownsExisting();
     }
 
     match /modifierGroups/{groupId} {
-      allow read: if isActiveUser();
-      allow write: if isAdmin();
+      allow read: if isActiveUser() && ownsExisting();
+      allow create: if isAdmin() && ownsIncoming();
+      allow update: if isAdmin() && ownsExisting() && ownsIncoming();
+      allow delete: if isAdmin() && ownsExisting();
     }
 
     match /modifierOptions/{optionId} {
-      allow read: if isActiveUser();
-      allow write: if isAdmin();
+      allow read: if isActiveUser() && ownsExisting();
+      allow create: if isAdmin() && ownsIncoming();
+      allow update: if isAdmin() && ownsExisting() && ownsIncoming();
+      allow delete: if isAdmin() && ownsExisting();
     }
 
     match /salesChannels/{channelId} {
-      allow read: if isActiveUser();
-      allow write: if isAdmin();
+      allow read: if isActiveUser() && ownsExisting();
+      allow create: if isAdmin() && ownsIncoming();
+      allow update: if isAdmin() && ownsExisting() && ownsIncoming();
+      allow delete: if isAdmin() && ownsExisting();
     }
 
     match /paymentMethods/{methodId} {
-      allow read: if isActiveUser();
-      allow write: if isAdmin();
+      allow read: if isActiveUser() && ownsExisting();
+      allow create: if isAdmin() && ownsIncoming();
+      allow update: if isAdmin() && ownsExisting() && ownsIncoming();
+      allow delete: if isAdmin() && ownsExisting();
     }
 
     // --- Users: everyone can read their own doc (needed at login to resolve role/active);
-    //     Admin can read/write all of them (item 11 staff management). No one edits their own
-    //     role or active flag. ---
+    //     Admin can read every user *in their own shop* (item 11 staff management) — never
+    //     another shop's staff list. No one edits their own role/active/shopId. Creation always
+    //     goes through `/api/admin/staff` (Admin SDK — needs to also create the Firebase Auth
+    //     user and PIN material, which the client SDK can't do), so the `create` rule below is
+    //     really just defense in depth, not a path anything in this app actually uses. ---
     match /users/{userId} {
-      allow read: if isAdmin() || (isSignedIn() && request.auth.uid == userId);
-      allow write: if isAdmin();
+      allow read: if isAdmin() && ownsExisting()
+        || (isSignedIn() && request.auth.uid == userId);
+      allow create: if isAdmin() && ownsIncoming();
+      allow update: if isAdmin() && ownsExisting() && ownsIncoming();
+      allow delete: if false; // staff are deactivated (`active: false`), never deleted
     }
 
     // --- PIN material and failed-attempt counters: no client may read or write these, not even
@@ -91,36 +141,38 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
-    // --- Orders: any active user can open/read/update orders (item 5-9: staff runs the whole
-    //     order lifecycle). Deleting an order document is never allowed — removing a line item
-    //     or cancelling/voiding an order is an *update* plus an auditLogs entry (item 19),
-    //     never a Firestore delete. ---
+    // --- Orders: any active user can open/read/update orders for their own shop (item 5-9:
+    //     staff runs the whole order lifecycle) — never another shop's orders. Deleting an order
+    //     document is never allowed — removing a line item or cancelling/voiding an order is an
+    //     *update* plus an auditLogs entry (item 19), never a Firestore delete. ---
     match /orders/{orderId} {
-      allow read: if isActiveUser();
-      allow create: if isActiveUser();
-      allow update: if isActiveUser();
+      allow read: if isActiveUser() && ownsExisting();
+      allow create: if isActiveUser() && ownsIncoming();
+      allow update: if isActiveUser() && ownsExisting() && ownsIncoming();
       allow delete: if false;
     }
 
     // --- Order counters: one doc per shop, holds the daily order-number sequence. Same trust
-    //     level as orders/payments — any active user already runs the whole order lifecycle. ---
+    //     level as orders/payments — any active user already runs the whole order lifecycle for
+    //     their own shop, but never another shop's counter. ---
     match /orderCounters/{shopId} {
-      allow read, write: if isActiveUser();
+      allow read, write: if isActiveUser() && shopId == myShopId();
     }
 
-    // --- Payments: append-only record of completed payments. ---
+    // --- Payments: append-only record of completed payments, scoped to the caller's own shop. ---
     match /payments/{paymentId} {
-      allow read: if isActiveUser();
-      allow create: if isActiveUser();
+      allow read: if isActiveUser() && ownsExisting();
+      allow create: if isActiveUser() && ownsIncoming();
       allow update: if false;
       allow delete: if false;
     }
 
-    // --- Audit log: any active user can create an entry (they're the ones performing the
-    //     logged action), but only Admin can read the log back (item 18). Immutable once written. ---
+    // --- Audit log: any active user can create an entry for their own shop (they're the ones
+    //     performing the logged action), but only that shop's Admin can read the log back (item
+    //     18). Immutable once written. ---
     match /auditLogs/{logId} {
-      allow read: if isAdmin();
-      allow create: if isActiveUser();
+      allow read: if isAdmin() && ownsExisting();
+      allow create: if isActiveUser() && ownsIncoming();
       allow update: if false;
       allow delete: if false;
     }

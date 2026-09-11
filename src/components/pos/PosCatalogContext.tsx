@@ -2,7 +2,6 @@
 
 import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
 
-import { DEFAULT_SHOP_ID } from "@/lib/firebase/config";
 import { categoryRepository } from "@/repositories/categoryRepository";
 import { channelRepository } from "@/repositories/channelRepository";
 import { modifierGroupRepository, modifierOptionRepository } from "@/repositories/modifierRepository";
@@ -22,6 +21,12 @@ import type {
 } from "@/types";
 
 interface PosCatalog {
+  /** The signed-in staff member's own shop (from `PosLayout`'s already-verified server session)
+   * — every /pos/* screen that needs to write a new doc (a new order, an audit log entry, etc.)
+   * should read it from here rather than importing `DEFAULT_SHOP_ID` (item 36: multi-tenant
+   * prep — a doc created with the wrong shop's id is exactly the kind of cross-shop leak the
+   * Firestore rules are meant to catch, so this should never be wrong in the first place). */
+  shopId: string;
   categories: Category[];
   products: Product[];
   modifierGroups: ModifierGroup[];
@@ -49,7 +54,7 @@ const PosCatalogContext = createContext<PosCatalog | null>(null);
  * `shopRepository` — it's a single small doc, not worth adding one for), matching every prior
  * caller's behavior; `null` until it resolves, same as those callers' local fallback state did.
  */
-export function PosCatalogProvider({ children }: { children: ReactNode }) {
+export function PosCatalogProvider({ shopId, children }: { shopId: string; children: ReactNode }) {
   const [categories, setCategories] = useState<Category[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
   const [modifierGroups, setModifierGroups] = useState<ModifierGroup[]>([]);
@@ -59,20 +64,25 @@ export function PosCatalogProvider({ children }: { children: ReactNode }) {
   const [paymentMethods, setPaymentMethods] = useState<PaymentMethod[]>([]);
   const [settings, setSettings] = useState<ShopSettings | null>(null);
 
-  useEffect(() => categoryRepository.subscribeForShop(DEFAULT_SHOP_ID, setCategories), []);
-  useEffect(() => productRepository.subscribeForShop(DEFAULT_SHOP_ID, setProducts), []);
-  useEffect(() => modifierGroupRepository.subscribeForShop(DEFAULT_SHOP_ID, setModifierGroups), []);
-  useEffect(() => modifierOptionRepository.subscribeForShop(DEFAULT_SHOP_ID, setModifierOptions), []);
-  useEffect(() => channelRepository.subscribeForShop(DEFAULT_SHOP_ID, setChannels), []);
-  useEffect(() => tableRepository.subscribeForShop(DEFAULT_SHOP_ID, setTables), []);
-  useEffect(() => paymentMethodRepository.subscribeForShop(DEFAULT_SHOP_ID, setPaymentMethods), []);
+  // `shopId` comes from `PosLayout`'s already-verified server session and is never expected to
+  // change during one signed-in visit (it isn't reactive UI state, it's an identity), but every
+  // effect below still depends on it rather than hardcoding `[]` — the correct, unsurprising
+  // thing to do for a value the effect actually reads, and it costs nothing since it never
+  // changes in practice.
+  useEffect(() => categoryRepository.subscribeForShop(shopId, setCategories), [shopId]);
+  useEffect(() => productRepository.subscribeForShop(shopId, setProducts), [shopId]);
+  useEffect(() => modifierGroupRepository.subscribeForShop(shopId, setModifierGroups), [shopId]);
+  useEffect(() => modifierOptionRepository.subscribeForShop(shopId, setModifierOptions), [shopId]);
+  useEffect(() => channelRepository.subscribeForShop(shopId, setChannels), [shopId]);
+  useEffect(() => tableRepository.subscribeForShop(shopId, setTables), [shopId]);
+  useEffect(() => paymentMethodRepository.subscribeForShop(shopId, setPaymentMethods), [shopId]);
   useEffect(() => {
-    shopRepository.getSettings(DEFAULT_SHOP_ID).then(setSettings);
-  }, []);
+    shopRepository.getSettings(shopId).then(setSettings);
+  }, [shopId]);
 
   return (
     <PosCatalogContext.Provider
-      value={{ categories, products, modifierGroups, modifierOptions, channels, tables, paymentMethods, settings }}
+      value={{ shopId, categories, products, modifierGroups, modifierOptions, channels, tables, paymentMethods, settings }}
     >
       {children}
     </PosCatalogContext.Provider>

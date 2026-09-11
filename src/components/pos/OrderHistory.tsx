@@ -12,7 +12,6 @@ import {
 } from "@/components/ui/dialog";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { formatCurrency } from "@/lib/format";
-import { DEFAULT_SHOP_ID } from "@/lib/firebase/config";
 import { printReceiptViaEpos } from "@/lib/pos/eposPrint";
 import { buildOrderReceipt } from "@/lib/pos/receipt";
 import { orderRepository } from "@/repositories/orderRepository";
@@ -20,6 +19,7 @@ import { shopRepository } from "@/repositories/shopRepository";
 import type { Order, OrderStatus, ShopSettings } from "@/types";
 
 import { PosBackLink } from "./PosBackLink";
+import { usePosCatalog } from "./PosCatalogContext";
 
 const STATUS_LABEL: Record<OrderStatus, string> = {
   OPEN: "เปิดอยู่",
@@ -37,6 +37,7 @@ const STATUS_VARIANT: Record<OrderStatus, "default" | "success" | "muted" | "des
 
 /** Read-only order list (item 19), open to staff and admin alike — no editing here. */
 export function OrderHistory() {
+  const { shopId } = usePosCatalog();
   const [orders, setOrders] = useState<Order[]>([]);
   const [settings, setSettings] = useState<ShopSettings | null>(null);
   const [selected, setSelected] = useState<Order | null>(null);
@@ -45,11 +46,11 @@ export function OrderHistory() {
   const currency = settings?.currency ?? "THB";
 
   useEffect(() => {
-    orderRepository.listForShop(DEFAULT_SHOP_ID).then(setOrders);
-  }, []);
+    orderRepository.listForShop(shopId).then(setOrders);
+  }, [shopId]);
   useEffect(() => {
-    shopRepository.getSettings(DEFAULT_SHOP_ID).then(setSettings);
-  }, []);
+    shopRepository.getSettings(shopId).then(setSettings);
+  }, [shopId]);
 
   /** Reprint (item: the shop's only printing path is auto-print-on-checkout, so this is the
    * fallback when that failed — printer was off, out of paper, briefly unreachable, etc. — or

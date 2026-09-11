@@ -14,8 +14,8 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { useAuth } from "@/hooks/useAuth";
 import { computeSwap } from "@/lib/admin/sortOrder";
-import { DEFAULT_SHOP_ID } from "@/lib/firebase/config";
 import { modifierGroupRepository, modifierOptionRepository } from "@/repositories/modifierRepository";
 import { productRepository } from "@/repositories/productRepository";
 import type { ModifierGroup, ModifierPricingMode, ModifierSelectionType, Product } from "@/types";
@@ -63,6 +63,8 @@ function resizeTierPrices(tierPrices: string[], maxSelect: number): string[] {
  * "เพิ่มเติม" (optional/multi, priced options).
  */
 export default function ModifiersPage() {
+  const { appUser } = useAuth();
+  const shopId = appUser?.shopId;
   const [groups, setGroups] = useState<ModifierGroup[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -70,8 +72,14 @@ export default function ModifiersPage() {
   const [form, setForm] = useState<FormState>(EMPTY_FORM);
   const [saving, setSaving] = useState(false);
 
-  useEffect(() => modifierGroupRepository.subscribeForShop(DEFAULT_SHOP_ID, setGroups), []);
-  useEffect(() => productRepository.subscribeForShop(DEFAULT_SHOP_ID, setProducts), []);
+  useEffect(() => {
+    if (!shopId) return;
+    return modifierGroupRepository.subscribeForShop(shopId, setGroups);
+  }, [shopId]);
+  useEffect(() => {
+    if (!shopId) return;
+    return productRepository.subscribeForShop(shopId, setProducts);
+  }, [shopId]);
 
   function openCreate() {
     setEditing(null);
@@ -99,7 +107,7 @@ export default function ModifiersPage() {
 
   async function handleSave() {
     const name = form.name.trim();
-    if (!name) return;
+    if (!name || !shopId) return;
     // Meaningless for "single" (already capped at 1) — never persisted there even if a stray
     // value is sitting in the form from before the selection type was switched.
     const parsedMaxSelect = Number(form.maxSelect.trim());
@@ -144,7 +152,7 @@ export default function ModifiersPage() {
         // that's simply absent), so `maxSelect`/`pricingMode`/`tierPricing` are only spread in
         // here when they actually have a value — never passed through as a literal `undefined`.
         await modifierGroupRepository.create({
-          shopId: DEFAULT_SHOP_ID,
+          shopId,
           name,
           required: form.required,
           selectionType: form.selectionType,
