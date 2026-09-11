@@ -140,14 +140,16 @@ export default function ModifiersPage() {
           tierPricing: tierPricing ?? null,
         });
       } else {
+        // The Firestore client SDK throws on a field explicitly set to `undefined` (unlike a key
+        // that's simply absent), so `maxSelect`/`pricingMode`/`tierPricing` are only spread in
+        // here when they actually have a value — never passed through as a literal `undefined`.
         await modifierGroupRepository.create({
           shopId: DEFAULT_SHOP_ID,
           name,
           required: form.required,
           selectionType: form.selectionType,
-          maxSelect,
-          pricingMode: tiered ? "tieredByCount" : undefined,
-          tierPricing,
+          ...(maxSelect !== undefined ? { maxSelect } : {}),
+          ...(tiered ? { pricingMode: "tieredByCount" as const, tierPricing } : {}),
           active: true,
           sortOrder: groups.length,
           createdAt: Date.now(),
