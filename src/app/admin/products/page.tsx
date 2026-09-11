@@ -31,6 +31,9 @@ interface FormState {
   name: string;
   categoryId: string;
   price: string;
+  /** Text field state for `Product.imageUrl` — blank means no photo, same convention as
+   * `ShopSettings.logoUrl`'s own form field. */
+  imageUrl: string;
   modifierGroupIds: string[];
   /** One string per channel id — blank means "no override, use the channel's automatic markup
    * (or plain price)". Kept as strings in form state the same way `price` is, converted to
@@ -38,7 +41,14 @@ interface FormState {
   channelPrices: Record<string, string>;
 }
 
-const EMPTY_FORM: FormState = { name: "", categoryId: "", price: "", modifierGroupIds: [], channelPrices: {} };
+const EMPTY_FORM: FormState = {
+  name: "",
+  categoryId: "",
+  price: "",
+  imageUrl: "",
+  modifierGroupIds: [],
+  channelPrices: {},
+};
 
 /**
  * Product CRUD (item 11). Admin picks a category and any modifier groups this dish offers
@@ -81,6 +91,7 @@ export default function ProductsPage() {
       name: product.name,
       categoryId: product.categoryId,
       price: String(product.price),
+      imageUrl: product.imageUrl ?? "",
       modifierGroupIds: product.modifierGroupIds,
       channelPrices: Object.fromEntries(
         Object.entries(product.channelPrices ?? {}).map(([channelId, p]) => [channelId, String(p)])
@@ -117,6 +128,8 @@ export default function ProductsPage() {
       channelPrices[channelId] = value;
     }
 
+    const imageUrl = form.imageUrl.trim() || null;
+
     setSaving(true);
     try {
       if (editing) {
@@ -124,6 +137,7 @@ export default function ProductsPage() {
           name,
           categoryId: form.categoryId,
           price,
+          imageUrl,
           modifierGroupIds: form.modifierGroupIds,
           channelPrices,
           updatedAt: Date.now(),
@@ -134,6 +148,7 @@ export default function ProductsPage() {
           name,
           categoryId: form.categoryId,
           price,
+          imageUrl,
           modifierGroupIds: form.modifierGroupIds,
           channelPrices,
           active: true,
@@ -280,6 +295,31 @@ export default function ProductsPage() {
                 onChange={(e) => setForm((f) => ({ ...f, price: e.target.value }))}
                 placeholder="0"
               />
+            </div>
+
+            <div className="grid gap-2">
+              <Label htmlFor="product-image">รูปเมนู (ไม่บังคับ)</Label>
+              <Input
+                id="product-image"
+                value={form.imageUrl}
+                onChange={(e) => setForm((f) => ({ ...f, imageUrl: e.target.value }))}
+                placeholder="https://..."
+              />
+              <p className="text-xs text-muted-foreground">
+                อัปโหลดไฟล์โดยตรงยังไม่รองรับในเวอร์ชันนี้ — ใส่ลิงก์รูปที่มีอยู่แล้วแทน (แสดงเฉพาะหน้าสั่งของลูกค้า
+                ไม่ขึ้นในหน้า POS ของพนักงาน)
+              </p>
+              {form.imageUrl.trim() ? (
+                // Arbitrary admin-pasted URL from any host, same as ShopSettings.logoUrl;
+                // next/image would need every possible host allow-listed in next.config.ts ahead
+                // of time, which defeats the point of a free-text "paste any link" field.
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  src={form.imageUrl.trim()}
+                  alt="ตัวอย่างรูปเมนู"
+                  className="h-24 w-24 rounded-lg border border-border object-cover"
+                />
+              ) : null}
             </div>
 
             {groups.length > 0 ? (

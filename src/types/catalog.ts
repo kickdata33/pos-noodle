@@ -22,6 +22,15 @@ export interface Product extends WithId {
   name: string;
   /** Base price in the shop's currency's smallest *display* unit (baht, not satang). */
   price: number;
+  /**
+   * A link to a photo of this menu item — pasted in by Admin, same "URL, not upload" approach as
+   * `ShopSettings.logoUrl` (this codebase has no file-upload/storage feature yet). Shown only on
+   * the customer-facing self-order screens (`CustomerOrderScreen`, `PickupOrderScreen`) per the
+   * shop's request — never on the staff POS grid, which stays as text-only as before. `null`/
+   * `undefined` (every product from before this field existed, and any product with no photo)
+   * just shows no image, same as today.
+   */
+  imageUrl?: string | null;
   channelPrices?: ChannelPrices;
   /** Modifier groups this product offers, e.g. [เส้น, เพิ่มเติม]. Order = display order. */
   modifierGroupIds: string[];

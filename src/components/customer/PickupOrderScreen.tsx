@@ -294,6 +294,16 @@ export function PickupOrderScreen() {
                 : "cursor-not-allowed border-border bg-muted/40 opacity-60")
             }
           >
+            {product.imageUrl ? (
+              // Admin-pasted URL from any host (see Product.imageUrl's doc comment); next/image
+              // would need every host allow-listed ahead of time.
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={product.imageUrl}
+                alt={product.name}
+                className={"h-20 w-full rounded-md object-cover" + (product.active ? "" : " opacity-60 grayscale")}
+              />
+            ) : null}
             <span className={"font-medium" + (product.active ? "" : " line-through")}>{product.name}</span>
             {product.active ? (
               <span className="text-sm text-muted-foreground">{formatCurrency(product.price, currency)}</span>
