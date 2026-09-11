@@ -41,6 +41,12 @@ export function GroupCard({
   const [addingName, setAddingName] = useState("");
   const [addingPrice, setAddingPrice] = useState("0");
   const [saving, setSaving] = useState(false);
+  // Which option's price is being edited inline right now, and its in-progress text — kept
+  // separate from `options` (the live Firestore subscription) so a keystroke mid-edit is never
+  // clobbered by that subscription firing, and so unrelated options re-rendering doesn't reset
+  // this one's draft. Only one option can be mid-edit at a time.
+  const [editingPriceId, setEditingPriceId] = useState<string | null>(null);
+  const [priceDraft, setPriceDraft] = useState("");
 
   useEffect(() => {
     if (!expanded) return;
@@ -71,6 +77,18 @@ export function GroupCard({
 
   async function toggleOptionActive(option: ModifierOption) {
     await modifierOptionRepository.update(option.id, { active: !option.active });
+  }
+
+  function startEditingPrice(option: ModifierOption) {
+    setEditingPriceId(option.id);
+    setPriceDraft(String(option.priceDelta));
+  }
+
+  async function commitPriceEdit(option: ModifierOption) {
+    const priceDelta = Number(priceDraft) || 0;
+    setEditingPriceId(null);
+    if (priceDelta === option.priceDelta) return; // nothing actually changed, skip the write
+    await modifierOptionRepository.update(option.id, { priceDelta });
   }
 
   async function deleteOption(option: ModifierOption) {
@@ -146,9 +164,29 @@ export function GroupCard({
                 />
                 <span className="flex-1 text-sm">{option.name}</span>
                 {group.pricingMode !== "tieredByCount" ? (
-                  <span className="text-sm text-muted-foreground">
-                    {option.priceDelta > 0 ? `+${option.priceDelta}` : option.priceDelta} บาท
-                  </span>
+                  editingPriceId === option.id ? (
+                    <Input
+                      type="number"
+                      autoFocus
+                      className="h-8 w-24"
+                      value={priceDraft}
+                      onChange={(e) => setPriceDraft(e.target.value)}
+                      onBlur={() => commitPriceEdit(option)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") e.currentTarget.blur(); // blur triggers the commit above
+                        if (e.key === "Escape") setEditingPriceId(null); // discard, no write
+                      }}
+                    />
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => startEditingPrice(option)}
+                      className="rounded-md px-2 py-1 text-sm text-muted-foreground underline decoration-dotted hover:bg-accent"
+                      title="กดเพื่อแก้ไขราคา"
+                    >
+                      {option.priceDelta > 0 ? `+${option.priceDelta}` : option.priceDelta} บาท
+                    </button>
+                  )
                 ) : null}
                 <Switch checked={option.active} onCheckedChange={() => toggleOptionActive(option)} />
                 <Button variant="destructive" size="sm" onClick={() => deleteOption(option)}>
