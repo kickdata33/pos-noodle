@@ -13,7 +13,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import { formatCurrency } from "@/lib/format";
+import { formatCurrency, formatTime } from "@/lib/format";
 import { computeLineTotal } from "@/lib/pos/pricing";
 import type { Category, ModifierGroup, ModifierOption, OrderItemModifier, Product } from "@/types";
 
@@ -36,6 +36,10 @@ interface CartLine {
   modifiers: OrderItemModifier[];
   note: string;
   lineTotal: number;
+  /** When this line was first added to the cart — shown so the customer can tell which item
+   * they ordered first vs. later (item: "อยากให้มี เวลาสั่งด้วยจะได้รู้ว่า อันไหนมาก่อนมาหลัง").
+   * Never changed by `updateCartLine` — editing a line isn't a new order. */
+  addedAt: number;
 }
 
 interface SubmitResult {
@@ -134,6 +138,7 @@ export function PickupOrderScreen() {
         modifiers,
         note,
         lineTotal: computeLineTotal(product.price, modifiers, quantity),
+        addedAt: Date.now(),
       },
     ]);
   }
@@ -271,6 +276,7 @@ export function PickupOrderScreen() {
               <div className="flex items-center justify-between gap-2">
                 <span className="font-medium">
                   {line.quantity}x {line.productName}
+                  <span className="ml-2 font-normal text-muted-foreground">{formatTime(line.addedAt)}</span>
                 </span>
                 <span className="tabular-nums text-muted-foreground">{formatCurrency(line.lineTotal, currency)}</span>
               </div>
@@ -408,6 +414,7 @@ export function PickupOrderScreen() {
                 <div className="min-w-0">
                   <p className="font-medium">
                     {line.productName} x{line.quantity}
+                    <span className="ml-2 font-normal text-muted-foreground">{formatTime(line.addedAt)}</span>
                   </p>
                   {line.modifiers.map((m) => (
                     <p key={m.optionId} className="text-xs text-muted-foreground">

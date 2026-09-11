@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 
 import { ModifierPickerDialog } from "@/components/pos/ModifierPickerDialog";
 import { Button } from "@/components/ui/button";
-import { formatCurrency } from "@/lib/format";
+import { formatCurrency, formatTime } from "@/lib/format";
 import { computeLineTotal, groupItemsByProduct } from "@/lib/pos/pricing";
 import type { Category, ModifierGroup, ModifierOption, OrderItem, OrderItemModifier, Product } from "@/types";
 
@@ -33,6 +33,11 @@ interface CartLine {
   modifiers: OrderItemModifier[];
   note: string;
   lineTotal: number;
+  /** When this line was first added to the cart — shown so the customer can tell which item
+   * they ordered first vs. later while still adding more (item: "อยากให้มี เวลาสั่งด้วยจะได้รู้ว่า
+   * อันไหนมาก่อนมาหลัง"). Never changed by `updateCartLine` — editing a line's quantity/options
+   * isn't a new order, so its place in the sequence stays put. */
+  addedAt: number;
 }
 
 type Status = "loading" | "ready" | "closed" | "not-found" | "error";
@@ -191,6 +196,7 @@ export function CustomerOrderScreen({ tableId }: { tableId: string }) {
         modifiers,
         note,
         lineTotal: computeLineTotal(product.price, modifiers, quantity),
+        addedAt: Date.now(),
       },
     ]);
   }
@@ -439,6 +445,7 @@ export function CustomerOrderScreen({ tableId }: { tableId: string }) {
                 <div className="min-w-0">
                   <p className="font-medium">
                     {line.productName} x{line.quantity}
+                    <span className="ml-2 font-normal text-muted-foreground">{formatTime(line.addedAt)}</span>
                   </p>
                   {line.modifiers.map((m) => (
                     <p key={m.optionId} className="text-xs text-muted-foreground">
