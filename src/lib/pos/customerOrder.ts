@@ -113,6 +113,7 @@ export function resolveCustomerOrderItem(
       modifiers,
       note,
       lineTotal,
+      addedAt: Date.now(),
     },
   };
 }

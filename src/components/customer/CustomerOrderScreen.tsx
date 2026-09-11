@@ -354,6 +354,9 @@ export function CustomerOrderScreen({ tableId }: { tableId: string }) {
                 <div className="flex items-center justify-between gap-2">
                   <span className="font-medium">
                     {item.productName} x{item.quantity}
+                    {item.addedAt ? (
+                      <span className="ml-2 font-normal text-muted-foreground">{formatTime(item.addedAt)}</span>
+                    ) : null}
                   </span>
                   <span className="tabular-nums text-muted-foreground">
                     {formatCurrency(item.lineTotal, currency)}

@@ -255,6 +255,7 @@ export function OrderScreen({ orderId, initialTableId, initialChannelId }: Props
       modifiers,
       note,
       lineTotal,
+      addedAt: Date.now(),
     };
     applyItems([...current.items, item]);
   }
@@ -539,16 +540,23 @@ export function OrderScreen({ orderId, initialTableId, initialChannelId }: Props
                       <div>
                         {/* Grouped (2+ lines of the same product): the header above already shows
                             the name, so each sub-line only needs to show what makes it different —
-                            its own note/modifiers — otherwise the product name repeats as usual. */}
+                            its own note/modifiers — otherwise the product name repeats as usual.
+                            The added-at time shows either way, since it differs per line even
+                            when the product name doesn't. */}
                         {group.items.length === 1 ? (
                           <p className="font-medium">
                             {item.productName}
+                            {item.addedAt ? (
+                              <span className="ml-2 font-normal text-muted-foreground">{formatTime(item.addedAt)}</span>
+                            ) : null}
                             {highlightedItemIds.has(item.id) ? (
                               <span className="ml-2 rounded-full bg-success/20 px-2 py-0.5 text-xs font-medium text-success">
                                 ใหม่
                               </span>
                             ) : null}
                           </p>
+                        ) : item.addedAt ? (
+                          <p className="text-xs text-muted-foreground">{formatTime(item.addedAt)}</p>
                         ) : null}
                         {item.modifiers.map((m) => (
                           <p key={m.optionId} className="text-xs text-muted-foreground">

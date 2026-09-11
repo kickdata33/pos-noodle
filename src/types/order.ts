@@ -42,6 +42,18 @@ export interface OrderItem extends WithId {
    * until the kitchen taps it — every read must treat `undefined` the same as `false`.
    */
   prepared?: boolean;
+  /**
+   * When this line was first added — lets staff (and, on the customer screens, the customer
+   * themself) tell which item was ordered first vs. later within the same bill, not just the
+   * order-level `Order.createdAt` (item: "อยากมีเวลาสั่งด้วยจะได้รู้ว่าอันไหนมาก่อนมาหลัง", asked
+   * again for the staff order screen after being added to the customer cart bar). Set once at
+   * add-time by whichever path created the item (`OrderScreen.addItemToCart` for staff,
+   * `resolveCustomerOrderItem` for QR/pickup orders) and never touched again — editing a line's
+   * quantity/note/modifiers isn't a new order, so its place in the sequence doesn't move.
+   * Absent on every item added before this field existed — every read must just skip showing a
+   * time rather than treat a missing value as "now" or "unknown but recent".
+   */
+  addedAt?: number;
 }
 
 /**
