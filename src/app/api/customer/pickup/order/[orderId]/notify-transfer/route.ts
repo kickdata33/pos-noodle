@@ -2,7 +2,7 @@ import { NextResponse, type NextRequest } from "next/server";
 
 import { getAdminDb } from "@/lib/firebase/admin";
 import { COLLECTIONS } from "@/lib/firebase/collections";
-import { DEFAULT_SHOP_ID } from "@/lib/firebase/config";
+import { resolveShopIdFromHost } from "@/lib/shop/shopLookupAdmin";
 import type { Order } from "@/types";
 
 /**
@@ -13,19 +13,24 @@ import type { Order } from "@/types";
  * as the rest of the customer surface — worst case of a guessed/leaked order id here is a
  * misleading nudge on one order, never money moving or anything staff wouldn't double-check anyway.
  */
-export async function POST(_request: NextRequest, { params }: { params: Promise<{ orderId: string }> }) {
+export async function POST(request: NextRequest, { params }: { params: Promise<{ orderId: string }> }) {
   const { orderId } = await params;
   const db = getAdminDb();
+
+  const shopId = await resolveShopIdFromHost(db, request.headers);
+  if (!shopId) {
+    return NextResponse.json({ error: "ไม่พบร้านนี้" }, { status: 404 });
+  }
 
   const snap = await db.collection(COLLECTIONS.orders).doc(orderId).get();
   if (!snap.exists) {
     return NextResponse.json({ error: "ไม่พบออเดอร์นี้" }, { status: 404 });
   }
   const order = snap.data() as Order;
-  // Still gated on DEFAULT_SHOP_ID deliberately: unlike the table-QR routes, a pickup order has
-  // no shop-identifying doc to derive a shopId from before this point (no table lookup) — needs
-  // a shop slug/subdomain in the URL first (SaaS roadmap Phase 2). Out of scope for Phase 1.
-  if (order.shopId !== DEFAULT_SHOP_ID) {
+  // Compared against the shop resolved from this request's own Host header (SaaS roadmap
+  // Phase 2), not trusted from the order id alone — a guessed/leaked order id from another
+  // shop's pickup flow must not be actionable from here.
+  if (order.shopId !== shopId) {
     return NextResponse.json({ error: "ไม่พบออเดอร์นี้" }, { status: 404 });
   }
 

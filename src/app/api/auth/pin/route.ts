@@ -10,7 +10,7 @@ import {
 } from "@/lib/auth/pin";
 import { getAdminAuth, getAdminDb } from "@/lib/firebase/admin";
 import { COLLECTIONS } from "@/lib/firebase/collections";
-import { DEFAULT_SHOP_ID } from "@/lib/firebase/config";
+import { resolveShopIdFromHost } from "@/lib/shop/shopLookupAdmin";
 import type { AppUser } from "@/types";
 
 /**
@@ -32,11 +32,6 @@ function throttleKeyFor(request: NextRequest): string {
 }
 
 export async function POST(request: NextRequest) {
-  // Still hardcoded to DEFAULT_SHOP_ID deliberately, not an oversight: `UserSecret.pinLookup` is
-  // HMAC(`${shopId}:${pin}`), so shopId is an *input* to the lookup hash — a login attempt can't
-  // even form the right query without already knowing which shop the user belongs to. Proper
-  // multi-tenant PIN login needs a shop-identifying URL (slug/subdomain) resolved before the PIN
-  // is submitted (SaaS roadmap Phase 2). Out of scope for Phase 1's shopId-isolation pass.
   const { pin } = (await request.json()) as { pin?: string };
 
   if (!pin || !isValidPinFormat(pin)) {
@@ -44,6 +39,18 @@ export async function POST(request: NextRequest) {
   }
 
   const db = getAdminDb();
+
+  // `UserSecret.pinLookup` is HMAC(`${shopId}:${pin}`) — shopId is an *input* to the lookup
+  // hash, so it must be known before the PIN is even submitted. Resolved from the request's own
+  // Host header (SaaS roadmap Phase 2, `src/proxy.ts` + `resolveShopIdFromHost`), never trusted
+  // from anything the client sends in the body. `null` means a subdomain was presented that
+  // doesn't match any shop — a distinct, real "not found", never silently treated as the default
+  // shop (that would let a mistyped/stale subdomain probe the wrong shop's PINs).
+  const shopId = await resolveShopIdFromHost(db, request.headers);
+  if (!shopId) {
+    return NextResponse.json({ error: "ไม่พบร้านนี้" }, { status: 404 });
+  }
+
   const now = Date.now();
   const throttleRef = db.collection(COLLECTIONS.pinAttempts).doc(throttleKeyFor(request));
 
@@ -59,10 +66,10 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  const lookup = computePinLookup(pin, DEFAULT_SHOP_ID);
+  const lookup = computePinLookup(pin, shopId);
   const secretSnap = await db
     .collection(COLLECTIONS.userSecrets)
-    .where("shopId", "==", DEFAULT_SHOP_ID)
+    .where("shopId", "==", shopId)
     .where("pinLookup", "==", lookup)
     .limit(1)
     .get();

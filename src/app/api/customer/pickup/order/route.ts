@@ -4,12 +4,12 @@ import { NextResponse, type NextRequest } from "next/server";
 
 import { getAdminDb } from "@/lib/firebase/admin";
 import { COLLECTIONS } from "@/lib/firebase/collections";
-import { DEFAULT_SHOP_ID } from "@/lib/firebase/config";
 import { resolveCustomerOrder, type CustomerSelection } from "@/lib/pos/customerOrder";
 import { generateOrderNumberAdmin } from "@/lib/pos/orderNumberAdmin";
 import { computeOrderTotals } from "@/lib/pos/pricing";
 import { generatePromptPayPayload } from "@/lib/pos/promptpay";
 import { generateQueueNumberAdmin } from "@/lib/pos/queueNumberAdmin";
+import { resolveShopIdFromHost } from "@/lib/shop/shopLookupAdmin";
 import type {
   ModifierGroup,
   ModifierOption,
@@ -44,10 +44,12 @@ interface RequestBody {
  */
 export async function POST(request: NextRequest) {
   const db = getAdminDb();
-  // Still hardcoded to the one shop deliberately, not an oversight: a pickup order has no
-  // shop-identifying doc to derive a shopId from (no table, no login) — needs a shop
-  // slug/subdomain in the URL first (SaaS roadmap Phase 2). Out of scope for Phase 1.
-  const shopId = DEFAULT_SHOP_ID;
+  // A pickup order has no shop-identifying doc to derive a shopId from (no table, no login) —
+  // resolved from the request's own Host header instead (SaaS roadmap Phase 2).
+  const shopId = await resolveShopIdFromHost(db, request.headers);
+  if (!shopId) {
+    return NextResponse.json({ error: "ไม่พบร้านนี้" }, { status: 404 });
+  }
 
   const body = (await request.json().catch(() => null)) as RequestBody | null;
   const selections = body?.items;

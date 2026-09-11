@@ -1,8 +1,8 @@
-import { NextResponse } from "next/server";
+import { NextResponse, type NextRequest } from "next/server";
 
 import { getAdminDb } from "@/lib/firebase/admin";
 import { COLLECTIONS } from "@/lib/firebase/collections";
-import { DEFAULT_SHOP_ID } from "@/lib/firebase/config";
+import { resolveShopIdFromHost } from "@/lib/shop/shopLookupAdmin";
 import type { Category, ModifierGroup, ModifierOption, Product, ShopSettings } from "@/types";
 
 /**
@@ -21,14 +21,15 @@ import type { Category, ModifierGroup, ModifierOption, Product, ShopSettings } f
  * disabled "ของหมด" row; nothing a customer shouldn't see (channel prices, sortOrder internals
  * beyond ordering) is exposed either way.
  */
-export async function GET() {
+export async function GET(request: NextRequest) {
   const db = getAdminDb();
-  // Still hardcoded to the one shop deliberately, not an oversight: this request carries no
-  // per-request identifier at all (called as a bare `fetch("/api/customer/menu")` with no
-  // params), so there's nothing to derive a shopId from yet. Making this endpoint multi-tenant
-  // needs a shop slug/subdomain in the URL first (SaaS roadmap Phase 2) — out of scope for the
-  // Phase 1 pass that scoped every other collection query by shopId.
-  const shopId = DEFAULT_SHOP_ID;
+  // Called as a bare `fetch("/api/customer/menu")` with no params — the shop is resolved from
+  // the request's own Host header instead (SaaS roadmap Phase 2, `src/proxy.ts` +
+  // `resolveShopIdFromHost`), same as `/api/auth/pin` now does.
+  const shopId = await resolveShopIdFromHost(db, request.headers);
+  if (!shopId) {
+    return NextResponse.json({ error: "ไม่พบร้านนี้" }, { status: 404 });
+  }
 
   const [categoriesSnap, productsSnap, groupsSnap, optionsSnap, settingsSnap] = await Promise.all([
     db.collection(COLLECTIONS.categories).where("shopId", "==", shopId).where("active", "==", true).get(),
