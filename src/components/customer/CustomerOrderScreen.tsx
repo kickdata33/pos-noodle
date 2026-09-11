@@ -5,7 +5,7 @@ import { useEffect, useMemo, useState } from "react";
 import { ModifierPickerDialog } from "@/components/pos/ModifierPickerDialog";
 import { Button } from "@/components/ui/button";
 import { formatCurrency, formatTime } from "@/lib/format";
-import { computeLineTotal, groupItemsByProduct } from "@/lib/pos/pricing";
+import { computeLineTotal } from "@/lib/pos/pricing";
 import type { Category, ModifierGroup, ModifierOption, OrderItem, OrderItemModifier, Product } from "@/types";
 
 interface MenuResponse {
@@ -333,7 +333,10 @@ export function CustomerOrderScreen({ tableId }: { tableId: string }) {
     );
   }
 
-  const orderedGroups = groupItemsByProduct(tableInfo.existingItems);
+  // Each already-submitted line shown individually (not grouped by product) so two lines of the
+  // same product with different modifiers/notes don't get flattened into one — plus a grand
+  // total, since "สั่งไปแล้ว" previously showed quantities with no price or detail at all.
+  const orderedTotal = tableInfo.existingItems.reduce((sum, item) => sum + item.lineTotal, 0);
 
   return (
     <div className="flex min-h-dvh flex-col pb-40">
@@ -342,18 +345,34 @@ export function CustomerOrderScreen({ tableId }: { tableId: string }) {
         <p className="text-xl font-semibold">{tableInfo.table.name}</p>
       </header>
 
-      {orderedGroups.length > 0 && (
+      {tableInfo.existingItems.length > 0 && (
         <section className="border-b border-border bg-muted/40 p-4">
           <p className="mb-2 text-sm font-medium text-muted-foreground">สั่งไปแล้ว</p>
-          <ul className="flex flex-col gap-1 text-sm">
-            {orderedGroups.map((g) => (
-              <li key={g.productId} className="flex justify-between">
-                <span>
-                  {g.productName} x{g.totalQty}
-                </span>
+          <ul className="flex flex-col gap-2 text-sm">
+            {tableInfo.existingItems.map((item) => (
+              <li key={item.id} className="border-b border-border/60 pb-2 last:border-0 last:pb-0">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="font-medium">
+                    {item.productName} x{item.quantity}
+                  </span>
+                  <span className="tabular-nums text-muted-foreground">
+                    {formatCurrency(item.lineTotal, currency)}
+                  </span>
+                </div>
+                {item.modifiers.map((m) => (
+                  <p key={m.optionId} className="text-xs text-muted-foreground">
+                    {m.optionName}
+                    {m.priceDelta !== 0 ? ` (+${formatCurrency(m.priceDelta, currency)})` : ""}
+                  </p>
+                ))}
+                {item.note ? <p className="text-xs text-muted-foreground">หมายเหตุ: {item.note}</p> : null}
               </li>
             ))}
           </ul>
+          <div className="mt-2 flex justify-between border-t border-border pt-2 text-sm font-medium">
+            <span>รวม</span>
+            <span className="tabular-nums">{formatCurrency(orderedTotal, currency)}</span>
+          </div>
         </section>
       )}
 
