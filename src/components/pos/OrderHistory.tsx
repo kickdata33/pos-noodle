@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import {
   Dialog,
   DialogContent,
@@ -12,9 +13,11 @@ import {
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { formatCurrency } from "@/lib/format";
 import { DEFAULT_SHOP_ID } from "@/lib/firebase/config";
+import { printReceiptViaEpos } from "@/lib/pos/eposPrint";
+import { buildOrderReceipt } from "@/lib/pos/receipt";
 import { orderRepository } from "@/repositories/orderRepository";
 import { shopRepository } from "@/repositories/shopRepository";
-import type { Order, OrderStatus } from "@/types";
+import type { Order, OrderStatus, ShopSettings } from "@/types";
 
 import { PosBackLink } from "./PosBackLink";
 
@@ -35,17 +38,34 @@ const STATUS_VARIANT: Record<OrderStatus, "default" | "success" | "muted" | "des
 /** Read-only order list (item 19), open to staff and admin alike — no editing here. */
 export function OrderHistory() {
   const [orders, setOrders] = useState<Order[]>([]);
-  const [currency, setCurrency] = useState("THB");
+  const [settings, setSettings] = useState<ShopSettings | null>(null);
   const [selected, setSelected] = useState<Order | null>(null);
+  const [reprinting, setReprinting] = useState(false);
+  const [reprintResult, setReprintResult] = useState<string | null>(null);
+  const currency = settings?.currency ?? "THB";
 
   useEffect(() => {
     orderRepository.listForShop(DEFAULT_SHOP_ID).then(setOrders);
   }, []);
   useEffect(() => {
-    shopRepository.getSettings(DEFAULT_SHOP_ID).then((s) => {
-      if (s) setCurrency(s.currency);
-    });
+    shopRepository.getSettings(DEFAULT_SHOP_ID).then(setSettings);
   }, []);
+
+  /** Reprint (item: the shop's only printing path is auto-print-on-checkout, so this is the
+   * fallback when that failed — printer was off, out of paper, briefly unreachable, etc. — or
+   * when a copy is wanted after the fact). Only ever offered for a `PAID` order, since an OPEN
+   * or CANCELLED one has no completed sale to print a receipt for. */
+  async function handleReprint(order: Order) {
+    if (!settings?.receiptPrinterIp) return;
+    setReprinting(true);
+    setReprintResult(null);
+    try {
+      const result = await printReceiptViaEpos(settings.receiptPrinterIp, buildOrderReceipt(order, settings));
+      setReprintResult(result.ok ? "ส่งพิมพ์แล้ว" : result.error ?? "พิมพ์ไม่สำเร็จ");
+    } finally {
+      setReprinting(false);
+    }
+  }
 
   return (
     <main className="mx-auto max-w-4xl p-4 sm:p-6">
@@ -89,7 +109,15 @@ export function OrderHistory() {
         </Table>
       </div>
 
-      <Dialog open={selected !== null} onOpenChange={(open) => !open && setSelected(null)}>
+      <Dialog
+        open={selected !== null}
+        onOpenChange={(open) => {
+          if (!open) {
+            setSelected(null);
+            setReprintResult(null);
+          }
+        }}
+      >
         <DialogContent>
           <DialogHeader>
             <DialogTitle>
@@ -122,6 +150,14 @@ export function OrderHistory() {
                 {selected.paymentMethodName ? (
                   <p className="text-muted-foreground">ชำระโดย {selected.paymentMethodName}</p>
                 ) : null}
+              </div>
+            ) : null}
+            {selected?.status === "PAID" && settings?.receiptPrinterIp ? (
+              <div className="flex items-center gap-3">
+                <Button variant="outline" size="sm" onClick={() => handleReprint(selected)} disabled={reprinting}>
+                  {reprinting ? "กำลังพิมพ์..." : "พิมพ์ใบเสร็จ"}
+                </Button>
+                {reprintResult ? <span className="text-sm text-muted-foreground">{reprintResult}</span> : null}
               </div>
             ) : null}
           </div>

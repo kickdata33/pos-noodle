@@ -43,5 +43,14 @@ export interface ShopSettings extends WithId {
    * time; neither is "more correct", shops just call orders out differently.
    */
   pickupIdentificationMode: "queue" | "name";
+  /**
+   * IP address (or hostname) of a network/LAN thermal receipt printer that speaks Epson's
+   * ePOS-Print protocol (e.g. TM-m30II, TM-T82III with Ethernet/WiFi) — printed to directly over
+   * HTTP from whatever device is running the POS (`lib/pos/eposPrint.ts`), no separate print
+   * server/agent PC needed. `null`/`undefined` (every shop before this field existed, and any
+   * shop that hasn't set one up) means auto-print-on-checkout is simply skipped — checkout must
+   * never fail or block just because no printer is configured yet.
+   */
+  receiptPrinterIp?: string | null;
   updatedAt: EpochMillis;
 }

@@ -11,8 +11,10 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { DEFAULT_SHOP_ID } from "@/lib/firebase/config";
+import { printReceiptViaEpos } from "@/lib/pos/eposPrint";
+import { buildOrderReceipt } from "@/lib/pos/receipt";
 import { shopRepository } from "@/repositories/shopRepository";
-import type { ShopSettings } from "@/types";
+import type { Order, ShopSettings } from "@/types";
 
 /**
  * Shop Settings (item 16) — every field an Admin should be able to change without touching
@@ -26,6 +28,8 @@ export default function SettingsPage() {
   const [saving, setSaving] = useState(false);
   const [savedAt, setSavedAt] = useState<number | null>(null);
   const [pickupQrOpen, setPickupQrOpen] = useState(false);
+  const [testPrinting, setTestPrinting] = useState(false);
+  const [testPrintResult, setTestPrintResult] = useState<{ ok: boolean; message: string } | null>(null);
 
   useEffect(() => {
     shopRepository.getSettings(DEFAULT_SHOP_ID).then((s) => {
@@ -33,7 +37,14 @@ export default function SettingsPage() {
       // moment it enters local state, so an unrelated save elsewhere on this page never writes
       // back `undefined` for these fields (Firestore's client SDK rejects that outright).
       setSettings(
-        s ? { ...s, promptPayId: s.promptPayId ?? null, pickupIdentificationMode: s.pickupIdentificationMode ?? "queue" } : s
+        s
+          ? {
+              ...s,
+              promptPayId: s.promptPayId ?? null,
+              pickupIdentificationMode: s.pickupIdentificationMode ?? "queue",
+              receiptPrinterIp: s.receiptPrinterIp ?? null,
+            }
+          : s
       );
       setLoading(false);
     });
@@ -41,6 +52,66 @@ export default function SettingsPage() {
 
   function update<K extends keyof ShopSettings>(key: K, value: ShopSettings[K]) {
     setSettings((s) => (s ? { ...s, [key]: value } : s));
+  }
+
+  /**
+   * Sends a sample receipt straight to the configured printer — the fastest way to confirm the
+   * IP/network setup actually works before relying on it at checkout (item: this shop hasn't
+   * bought its printer yet, so this is also the first real smoke test of `eposPrint.ts` once
+   * they do). Builds a fake `Order` locally rather than requiring a real one just to test
+   * connectivity.
+   */
+  async function handleTestPrint() {
+    if (!settings?.receiptPrinterIp) return;
+    setTestPrinting(true);
+    setTestPrintResult(null);
+    try {
+      const now = Date.now();
+      const sampleOrder: Order = {
+        id: "test",
+        orderNumber: "TEST-0000",
+        shopId: settings.shopId,
+        orderType: "dineIn",
+        channelId: "test",
+        channelName: "ทดสอบ",
+        tableId: "test",
+        tableName: "ทดสอบ",
+        status: "PAID",
+        items: [
+          {
+            id: "test-item",
+            productId: "test-product",
+            productName: "รายการทดสอบ",
+            quantity: 1,
+            unitPrice: 10,
+            modifiers: [],
+            note: "",
+            lineTotal: 10,
+          },
+        ],
+        subtotal: 10,
+        discount: 0,
+        serviceCharge: 0,
+        tax: 0,
+        total: 10,
+        paymentStatus: "PAID",
+        paymentMethodId: "test",
+        paymentMethodName: "ทดสอบ",
+        cashReceived: 10,
+        changeDue: 0,
+        createdBy: "test",
+        createdByName: "ทดสอบระบบ",
+        createdAt: now,
+        updatedAt: now,
+        paidAt: now,
+      };
+      const result = await printReceiptViaEpos(settings.receiptPrinterIp, buildOrderReceipt(sampleOrder, settings));
+      setTestPrintResult(
+        result.ok ? { ok: true, message: "ส่งงานพิมพ์แล้ว — เช็คที่เครื่องพิมพ์" } : { ok: false, message: result.error ?? "พิมพ์ไม่สำเร็จ" }
+      );
+    } finally {
+      setTestPrinting(false);
+    }
   }
 
   async function handleSave() {
@@ -122,6 +193,36 @@ export default function SettingsPage() {
             onChange={(e) => update("receiptFooterText", e.target.value)}
             placeholder="เช่น ขอบคุณที่อุดหนุนครับ"
           />
+        </div>
+
+        <div className="grid gap-2">
+          <Label htmlFor="s-printer-ip">IP เครื่องพิมพ์ใบเสร็จ (เครือข่าย/LAN)</Label>
+          <div className="flex gap-2">
+            <Input
+              id="s-printer-ip"
+              value={settings.receiptPrinterIp ?? ""}
+              onChange={(e) => update("receiptPrinterIp", e.target.value.trim() || null)}
+              placeholder="เช่น 192.168.1.50"
+              className="max-w-xs"
+            />
+            <Button
+              type="button"
+              variant="outline"
+              onClick={handleTestPrint}
+              disabled={!settings.receiptPrinterIp || testPrinting}
+            >
+              {testPrinting ? "กำลังพิมพ์..." : "ทดสอบพิมพ์"}
+            </Button>
+          </div>
+          <p className="text-xs text-muted-foreground">
+            รองรับเครื่องพิมพ์ที่มี ePOS-Print (เช่น EPSON TM-m30II / TM-T82III รุ่น Ethernet/WiFi) — ตั้ง IP ให้เครื่องพิมพ์คงที่แล้วใส่ที่นี่
+            ใบเสร็จจะพิมพ์อัตโนมัติทุกครั้งที่กด &quot;คิดเงิน&quot; เสร็จ ถ้าเว้นว่างจะไม่พิมพ์
+          </p>
+          {testPrintResult ? (
+            <p className={"text-sm " + (testPrintResult.ok ? "text-success" : "text-destructive")}>
+              {testPrintResult.message}
+            </p>
+          ) : null}
         </div>
 
         <div className="grid gap-2">

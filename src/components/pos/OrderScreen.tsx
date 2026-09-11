@@ -13,8 +13,10 @@ import { Button } from "@/components/ui/button";
 import { formatCurrency, formatTime } from "@/lib/format";
 import { DEFAULT_SHOP_ID } from "@/lib/firebase/config";
 import { useAuth } from "@/hooks/useAuth";
+import { printReceiptViaEpos } from "@/lib/pos/eposPrint";
 import { computeLineTotal, computeOrderTotals, groupItemsByProduct, resolveChannelPrice } from "@/lib/pos/pricing";
 import { generateOrderNumber } from "@/lib/pos/orderNumber";
+import { buildOrderReceipt } from "@/lib/pos/receipt";
 import { auditLogRepository } from "@/repositories/auditLogRepository";
 import { orderRepository } from "@/repositories/orderRepository";
 import { paymentRepository } from "@/repositories/paymentRepository";
@@ -432,6 +434,27 @@ export function OrderScreen({ orderId, initialTableId, initialChannelId }: Props
         createdBy: appUser!.id,
         createdAt: paidAt,
       });
+      // Auto-print the receipt once checkout succeeds — fire-and-forget, deliberately not
+      // awaited before navigating away: an unreachable/offline printer has no fetch timeout
+      // worth blocking staff on, and the sale itself already went through regardless of whether
+      // the receipt actually came out. `catalogSettings` (the real live settings), not the
+      // `settings` local fallback above, since `DEFAULT_SETTINGS` has no `receiptPrinterIp` to
+      // read. Skipped entirely (not an error) when no printer is configured yet.
+      if (catalogSettings?.receiptPrinterIp) {
+        const receiptOrder: Order = {
+          ...order,
+          id,
+          status: "PAID",
+          paymentStatus: "PAID",
+          paymentMethodId: payment.paymentMethodId,
+          paymentMethodName: payment.paymentMethodName,
+          cashReceived: payment.cashReceived,
+          changeDue: payment.changeDue,
+          paidAt,
+          updatedAt: paidAt,
+        };
+        void printReceiptViaEpos(catalogSettings.receiptPrinterIp, buildOrderReceipt(receiptOrder, catalogSettings));
+      }
       router.push("/pos");
     } catch {
       setError("ชำระเงินไม่สำเร็จ ลองอีกครั้ง");
