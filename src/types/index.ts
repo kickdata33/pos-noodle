@@ -1,5 +1,6 @@
 export * from "./common";
 export * from "./shop";
+export * from "./shopSignupRequest";
 export * from "./table";
 export * from "./catalog";
 export * from "./channel";

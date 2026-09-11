@@ -176,5 +176,17 @@ service cloud.firestore {
       allow update: if false;
       allow delete: if false;
     }
+
+    // --- SaaS Phase 2: shop signup applications and their submission throttle. No client, not
+    //     even an admin, ever reads or writes these directly — submission goes through
+    //     `/api/signup` and review/provisioning through `/api/superadmin/*`, both Admin SDK
+    //     (which bypasses these rules by design, same as every `/api/customer/*` route). ---
+    match /shopSignupRequests/{requestId} {
+      allow read, write: if false;
+    }
+
+    match /signupThrottle/{throttleKey} {
+      allow read, write: if false;
+    }
   }
 }

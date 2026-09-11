@@ -26,4 +26,11 @@ export const COLLECTIONS = {
    * `lib/pos/queueNumberAdmin.ts`. Denied to every client — only the customer pickup-order API
    * route (Admin SDK) ever touches this. */
   pickupQueueCounters: "pickupQueueCounters",
+  /** Server-only: prospective shops' signup applications (SaaS roadmap Phase 2). Denied to
+   * every client — written by `/api/signup` and reviewed/approved by `/api/superadmin/*`,
+   * both Admin SDK. */
+  shopSignupRequests: "shopSignupRequests",
+  /** Server-only: last-submitted-at per hashed IP, throttling the public `/signup` form against
+   * spam the same way `customerOrderThrottle` throttles QR orders. Denied to every client. */
+  signupThrottle: "signupThrottle",
 } as const;

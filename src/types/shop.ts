@@ -3,6 +3,14 @@ import type { EpochMillis, WithId } from "./common";
 /** A tenant. One `Shop` doc per business — lets this codebase serve more than one shop later (item 36). */
 export interface Shop extends WithId {
   name: string;
+  /**
+   * URL-safe, unique, lowercase identifier used to route a shop's own subdomain
+   * (e.g. `champnoodles-bonkai` → `champnoodles-bonkai.<app domain>`) — see `lib/shop/slug.ts`
+   * for the format rules and `lib/shop/shopLookupAdmin.ts` for how a request resolves this back
+   * to a `shopId` (SaaS roadmap Phase 2). Every shop has exactly one, assigned at provisioning
+   * time and not meant to change casually since it's baked into the shop's public URL/QR codes.
+   */
+  slug: string;
   createdAt: EpochMillis;
 }
 
