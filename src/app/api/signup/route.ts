@@ -106,6 +106,9 @@ export async function POST(request: NextRequest) {
     reviewedAt: null,
     approvedShopId: null,
     rejectionReason: null,
+    finalSlug: null,
+    assignedAdminUid: null,
+    assignedAdminName: null,
   };
 
   await db.collection(COLLECTIONS.shopSignupRequests).add(requestData);

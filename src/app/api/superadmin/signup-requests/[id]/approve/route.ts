@@ -135,6 +135,9 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     status: "approved",
     reviewedAt: now,
     approvedShopId: shopId,
+    finalSlug,
+    assignedAdminUid: created.uid,
+    assignedAdminName: adminName,
   });
 
   return NextResponse.json({ ok: true, shopId, slug: finalSlug, adminName, pin });

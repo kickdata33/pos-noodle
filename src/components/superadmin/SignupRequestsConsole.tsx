@@ -33,6 +33,14 @@ function randomPin(): string {
   return String(Math.floor(Math.random() * 1_000_000)).padStart(6, "0");
 }
 
+/** Public env var, safe to inline into the client bundle (see `.env.example`) — falls back to
+ * a placeholder only in the unlikely case a shop got approved before the domain was set. */
+const APP_DOMAIN = process.env.NEXT_PUBLIC_APP_DOMAIN || "<โดเมนของคุณ>";
+
+function shopUrl(slug: string): string {
+  return `https://${slug}.${APP_DOMAIN}`;
+}
+
 export function SignupRequestsConsole({ requests }: { requests: ShopSignupRequest[] }) {
   const router = useRouter();
   const [approving, setApproving] = useState<ShopSignupRequest | null>(null);
@@ -42,6 +50,12 @@ export function SignupRequestsConsole({ requests }: { requests: ShopSignupReques
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [summary, setSummary] = useState<{ slug: string; adminName: string; pin: string } | null>(null);
+
+  const [resetting, setResetting] = useState<ShopSignupRequest | null>(null);
+  const [resetPin, setResetPin] = useState("");
+  const [resetSubmitting, setResetSubmitting] = useState(false);
+  const [resetError, setResetError] = useState<string | null>(null);
+  const [resetDone, setResetDone] = useState(false);
 
   function openApprove(req: ShopSignupRequest) {
     setApproving(req);
@@ -73,6 +87,36 @@ export function SignupRequestsConsole({ requests }: { requests: ShopSignupReques
       setError("อนุมัติไม่สำเร็จ กรุณาลองใหม่");
     } finally {
       setSubmitting(false);
+    }
+  }
+
+  function openReset(req: ShopSignupRequest) {
+    setResetting(req);
+    setResetPin(randomPin());
+    setResetError(null);
+    setResetDone(false);
+  }
+
+  async function submitReset() {
+    if (!resetting) return;
+    setResetSubmitting(true);
+    setResetError(null);
+    try {
+      const res = await fetch(`/api/superadmin/signup-requests/${resetting.id}/reset-admin-pin`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ pin: resetPin }),
+      });
+      const data = (await res.json()) as { ok?: boolean; error?: string };
+      if (!res.ok || !data.ok) {
+        setResetError(data.error ?? "รีเซ็ต PIN ไม่สำเร็จ");
+        return;
+      }
+      setResetDone(true);
+    } catch {
+      setResetError("รีเซ็ต PIN ไม่สำเร็จ กรุณาลองใหม่");
+    } finally {
+      setResetSubmitting(false);
     }
   }
 
@@ -114,6 +158,25 @@ export function SignupRequestsConsole({ requests }: { requests: ShopSignupReques
                 </Button>
               </div>
             ) : null}
+
+            {req.status === "approved" && req.finalSlug ? (
+              <div className="mt-2 rounded-md border border-border bg-secondary/50 p-3 text-sm">
+                <p>
+                  ลิงก์ร้าน:{" "}
+                  <a href={shopUrl(req.finalSlug)} target="_blank" rel="noreferrer" className="text-primary underline">
+                    {shopUrl(req.finalSlug)}
+                  </a>
+                </p>
+                {req.assignedAdminName ? <p>ชื่อแอดมิน: {req.assignedAdminName}</p> : null}
+                <p className="mt-1 text-xs text-muted-foreground">
+                  PIN เดิมแสดงครั้งเดียวตอนอนุมัติเท่านั้น (ไม่เก็บไว้ในระบบ) — ถ้าพลาดไม่ได้
+                  จดไว้ กดรีเซ็ตเพื่อออก PIN ใหม่ได้
+                </p>
+                <Button size="sm" variant="outline" className="mt-2" onClick={() => openReset(req)}>
+                  รีเซ็ต PIN แอดมิน
+                </Button>
+              </div>
+            ) : null}
           </CardContent>
         </Card>
       ))}
@@ -130,7 +193,7 @@ export function SignupRequestsConsole({ requests }: { requests: ShopSignupReques
             <div className="grid gap-2 text-sm">
               <p>สร้างร้านสำเร็จ — ส่งข้อมูลนี้ให้เจ้าของร้าน:</p>
               <p>
-                ลิงก์ร้าน: <strong>{summary.slug}</strong>.&lt;โดเมนของคุณ&gt;
+                ลิงก์ร้าน: <strong>{shopUrl(summary.slug)}</strong>
               </p>
               <p>
                 ชื่อแอดมิน: <strong>{summary.adminName}</strong>
@@ -168,6 +231,46 @@ export function SignupRequestsConsole({ requests }: { requests: ShopSignupReques
             ) : (
               <Button onClick={submitApprove} disabled={submitting}>
                 {submitting ? "กำลังสร้าง..." : "ยืนยันอนุมัติ"}
+              </Button>
+            )}
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={resetting !== null} onOpenChange={(open) => !open && setResetting(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>รีเซ็ต PIN แอดมิน: {resetting?.shopName}</DialogTitle>
+          </DialogHeader>
+
+          {resetDone ? (
+            <div className="grid gap-2 text-sm">
+              <p>ตั้ง PIN ใหม่สำเร็จ — ส่ง PIN นี้ให้เจ้าของร้าน:</p>
+              <p>
+                PIN เข้าใช้งาน: <strong>{resetPin}</strong>
+              </p>
+            </div>
+          ) : (
+            <div className="grid gap-4">
+              <div className="grid gap-1.5">
+                <Label htmlFor="resetPin">PIN 6 หลักใหม่</Label>
+                <div className="flex gap-2">
+                  <Input id="resetPin" value={resetPin} onChange={(e) => setResetPin(e.target.value)} />
+                  <Button type="button" variant="outline" onClick={() => setResetPin(randomPin())}>
+                    สุ่ม
+                  </Button>
+                </div>
+              </div>
+              {resetError ? <p className="text-sm text-destructive">{resetError}</p> : null}
+            </div>
+          )}
+
+          <DialogFooter>
+            {resetDone ? (
+              <Button onClick={() => setResetting(null)}>ปิด</Button>
+            ) : (
+              <Button onClick={submitReset} disabled={resetSubmitting}>
+                {resetSubmitting ? "กำลังตั้งค่า..." : "ยืนยันรีเซ็ต"}
               </Button>
             )}
           </DialogFooter>
