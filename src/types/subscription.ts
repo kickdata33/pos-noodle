@@ -50,6 +50,17 @@ export interface Subscription extends WithId {
   lastChargeError: string | null;
   /** Set on a failed charge (now + 3 days); cleared on the next successful charge. */
   graceEndsAt: EpochMillis | null;
+  /**
+   * Superadmin-scheduled overrides (requested for abuse cases — e.g. "let this trial run until
+   * a specific date, then cut it off" — separate from the automatic trial/grace machinery
+   * above). The daily cron (`runBillingCron`) checks both once a day, same cadence as
+   * everything else in this file; there is no minute-level precision. Set via
+   * `/api/superadmin/subscriptions/[shopId]/schedule`, cleared once acted on.
+   */
+  scheduledSuspendAt: EpochMillis | null;
+  /** Auto-reactivate a suspended shop on this date (e.g. a manually-agreed extension) without
+   * the superadmin having to remember to come back and click "ปลดระงับ" themselves. */
+  scheduledReactivateAt: EpochMillis | null;
   createdAt: EpochMillis;
   updatedAt: EpochMillis;
 }

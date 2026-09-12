@@ -24,6 +24,12 @@ const STATUS_VARIANT: Record<Subscription["status"], "default" | "success" | "mu
   canceled: "muted",
 };
 
+/** `<input type="date">` wants "YYYY-MM-DD"; empty string leaves the field blank (no date set). */
+function toDateInputValue(ms: number | null): string {
+  if (ms === null) return "";
+  return new Date(ms).toISOString().slice(0, 10);
+}
+
 export interface SubscriptionRow {
   subscription: Subscription;
   shop: Shop | null;
@@ -44,6 +50,47 @@ export function SubscriptionsConsole({ rows }: { rows: SubscriptionRow[] }) {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body ?? {}),
+      });
+      router.refresh();
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  async function deleteShop(shopId: string, shopName: string) {
+    const typed = window.prompt(
+      `พิมพ์ชื่อร้าน "${shopName}" ให้ตรงเป๊ะเพื่อยืนยันการลบถาวร — ลบแล้วกู้คืนไม่ได้ ข้อมูลออเดอร์/พนักงาน/บิลทั้งหมดของร้านนี้จะหายหมด`
+    );
+    if (typed !== shopName) {
+      if (typed !== null) window.alert("ชื่อไม่ตรง ยกเลิกการลบ");
+      return;
+    }
+    setBusyId(shopId);
+    try {
+      const res = await fetch(`/api/superadmin/subscriptions/${shopId}/delete`, { method: "POST" });
+      const data = (await res.json()) as { ok?: boolean; error?: string };
+      if (!res.ok || !data.ok) {
+        window.alert(data.error ?? "ลบไม่สำเร็จ");
+        return;
+      }
+      router.refresh();
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  async function saveSchedule(shopId: string) {
+    const suspendInput = document.getElementById(`suspend-${shopId}`) as HTMLInputElement | null;
+    const reactivateInput = document.getElementById(`reactivate-${shopId}`) as HTMLInputElement | null;
+    const scheduledSuspendAt = suspendInput?.value ? new Date(suspendInput.value).getTime() : null;
+    const scheduledReactivateAt = reactivateInput?.value ? new Date(reactivateInput.value).getTime() : null;
+
+    setBusyId(shopId);
+    try {
+      await fetch(`/api/superadmin/subscriptions/${shopId}/schedule`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ scheduledSuspendAt, scheduledReactivateAt }),
       });
       router.refresh();
     } finally {
@@ -175,6 +222,54 @@ export function SubscriptionsConsole({ rows }: { rows: SubscriptionRow[] }) {
                   ระงับการใช้งาน
                 </Button>
               )}
+            </div>
+
+            <div className="mt-3 rounded-md border border-border p-3 text-sm">
+              <p className="mb-2 font-medium">ตั้งเวลาอัตโนมัติ (เช็คทุกวัน ไม่ใช่นาทีต่อนาที)</p>
+              <div className="grid gap-2 sm:grid-cols-2">
+                <div className="grid gap-1">
+                  <label htmlFor={`suspend-${subscription.shopId}`} className="text-xs text-muted-foreground">
+                    ระงับอัตโนมัติวันที่
+                  </label>
+                  <input
+                    id={`suspend-${subscription.shopId}`}
+                    type="date"
+                    defaultValue={toDateInputValue(subscription.scheduledSuspendAt ?? null)}
+                    className="h-10 rounded-md border border-input bg-card px-2 text-sm"
+                  />
+                </div>
+                <div className="grid gap-1">
+                  <label htmlFor={`reactivate-${subscription.shopId}`} className="text-xs text-muted-foreground">
+                    เปิดใช้งานอัตโนมัติวันที่
+                  </label>
+                  <input
+                    id={`reactivate-${subscription.shopId}`}
+                    type="date"
+                    defaultValue={toDateInputValue(subscription.scheduledReactivateAt ?? null)}
+                    className="h-10 rounded-md border border-input bg-card px-2 text-sm"
+                  />
+                </div>
+              </div>
+              <Button
+                size="sm"
+                variant="outline"
+                className="mt-2"
+                disabled={busyId === subscription.shopId}
+                onClick={() => saveSchedule(subscription.shopId)}
+              >
+                บันทึกเวลาที่ตั้ง
+              </Button>
+            </div>
+
+            <div className="mt-3">
+              <Button
+                size="sm"
+                variant="destructive"
+                disabled={busyId === subscription.shopId}
+                onClick={() => deleteShop(subscription.shopId, shop?.name ?? subscription.shopId)}
+              >
+                ลบร้านถาวร
+              </Button>
             </div>
           </CardContent>
         </Card>

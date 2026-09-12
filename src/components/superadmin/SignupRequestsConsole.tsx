@@ -41,7 +41,16 @@ function shopUrl(slug: string): string {
   return `https://${slug}.${APP_DOMAIN}`;
 }
 
-export function SignupRequestsConsole({ requests }: { requests: ShopSignupRequest[] }) {
+export function SignupRequestsConsole({
+  requests,
+  phoneCounts,
+}: {
+  requests: ShopSignupRequest[];
+  /** How many signup requests (any status, this list) share each phone number — requested
+   * abuse-resistance: flag a repeat free-trial applicant without auto-blocking anything, the
+   * superadmin still decides case by case. Keyed by phone since email is optional. */
+  phoneCounts: Record<string, number>;
+}) {
   const router = useRouter();
   const [approving, setApproving] = useState<ShopSignupRequest | null>(null);
   const [finalSlug, setFinalSlug] = useState("");
@@ -130,6 +139,17 @@ export function SignupRequestsConsole({ requests }: { requests: ShopSignupReques
     router.refresh();
   }
 
+  async function deleteRequest(req: ShopSignupRequest) {
+    if (!window.confirm(`ลบคำขอของ "${req.shopName}" ทิ้งถาวร?`)) return;
+    const res = await fetch(`/api/superadmin/signup-requests/${req.id}/delete`, { method: "POST" });
+    const data = (await res.json()) as { ok?: boolean; error?: string };
+    if (!res.ok || !data.ok) {
+      window.alert(data.error ?? "ลบไม่สำเร็จ");
+      return;
+    }
+    router.refresh();
+  }
+
   return (
     <div className="grid gap-4">
       {requests.map((req) => (
@@ -148,6 +168,13 @@ export function SignupRequestsConsole({ requests }: { requests: ShopSignupReques
             {req.note ? <p className="text-muted-foreground">หมายเหตุ: {req.note}</p> : null}
             <p className="text-muted-foreground">ส่งเมื่อ {new Date(req.createdAt).toLocaleString("th-TH")}</p>
 
+            {(phoneCounts[req.phone] ?? 0) > 1 ? (
+              <p className="text-xs font-medium text-destructive">
+                ⚠️ เบอร์นี้เคยส่งคำขอมาแล้ว {phoneCounts[req.phone]} ครั้ง — ตรวจสอบก่อนอนุมัติ
+                (อาจเป็นการสมัครทดลองซ้ำ)
+              </p>
+            ) : null}
+
             {req.status === "pending" ? (
               <div className="mt-3 flex gap-2">
                 <Button size="sm" onClick={() => openApprove(req)}>
@@ -155,6 +182,14 @@ export function SignupRequestsConsole({ requests }: { requests: ShopSignupReques
                 </Button>
                 <Button size="sm" variant="outline" onClick={() => reject(req)}>
                   ปฏิเสธ
+                </Button>
+              </div>
+            ) : null}
+
+            {req.status !== "pending" && !(req.status === "approved" && req.approvedShopId) ? (
+              <div className="mt-2">
+                <Button size="sm" variant="ghost" onClick={() => deleteRequest(req)}>
+                  ลบคำขอนี้ทิ้ง
                 </Button>
               </div>
             ) : null}

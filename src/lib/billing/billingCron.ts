@@ -14,6 +14,8 @@ export interface BillingCronResult {
   chargesSucceeded: number;
   chargesFailed: number;
   suspendedGraceExpired: number;
+  suspendedScheduled: number;
+  reactivatedScheduled: number;
 }
 
 /**
@@ -36,6 +38,8 @@ export async function runBillingCron(db: Firestore, nowMs: number = Date.now()):
     chargesSucceeded: 0,
     chargesFailed: 0,
     suspendedGraceExpired: 0,
+    suspendedScheduled: 0,
+    reactivatedScheduled: 0,
   };
 
   const subscriptions = db.collection(COLLECTIONS.subscriptions);
@@ -76,6 +80,36 @@ export async function runBillingCron(db: Firestore, nowMs: number = Date.now()):
       await doc.ref.update({ status: "suspended", updatedAt: nowMs });
       result.suspendedGraceExpired++;
     }
+  }
+
+  // 4. Superadmin-scheduled suspend date reached — any status except one already terminal.
+  const scheduledSuspendSnap = await subscriptions.where("scheduledSuspendAt", "<=", nowMs).get();
+  for (const doc of scheduledSuspendSnap.docs) {
+    const subscription = doc.data() as Omit<Subscription, "id">;
+    if (subscription.status === "suspended" || subscription.status === "canceled") {
+      await doc.ref.update({ scheduledSuspendAt: null, updatedAt: nowMs });
+      continue;
+    }
+    await doc.ref.update({ status: "suspended", scheduledSuspendAt: null, updatedAt: nowMs });
+    result.suspendedScheduled++;
+  }
+
+  // 5. Superadmin-scheduled reactivation date reached — only meaningful while still suspended.
+  const scheduledReactivateSnap = await subscriptions.where("scheduledReactivateAt", "<=", nowMs).get();
+  for (const doc of scheduledReactivateSnap.docs) {
+    const subscription = { id: doc.id, ...(doc.data() as Omit<Subscription, "id">) };
+    if (subscription.status !== "suspended") {
+      await doc.ref.update({ scheduledReactivateAt: null, updatedAt: nowMs });
+      continue;
+    }
+    await doc.ref.update({
+      status: subscription.trialEndsAt > nowMs ? "trialing" : "active",
+      graceEndsAt: null,
+      lastChargeError: null,
+      scheduledReactivateAt: null,
+      updatedAt: nowMs,
+    });
+    result.reactivatedScheduled++;
   }
 
   return result;

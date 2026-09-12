@@ -101,6 +101,8 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     lastChargeAt: null,
     lastChargeError: null,
     graceEndsAt: null,
+    scheduledSuspendAt: null,
+    scheduledReactivateAt: null,
     createdAt: now,
     updatedAt: now,
   });

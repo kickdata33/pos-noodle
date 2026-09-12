@@ -21,10 +21,18 @@ export default async function SuperadminPage() {
     .get();
   const requests = snap.docs.map((d) => ({ ...d.data(), id: d.id }) as ShopSignupRequest);
 
+  // Repeat-phone counter (requested abuse-resistance: flag a phone number that keeps applying
+  // for a fresh free trial, without auto-blocking anything — the superadmin still decides). A
+  // simple in-memory count over the same list already fetched above, not a separate query.
+  const phoneCounts = new Map<string, number>();
+  for (const req of requests) {
+    phoneCounts.set(req.phone, (phoneCounts.get(req.phone) ?? 0) + 1);
+  }
+
   return (
     <main className="mx-auto max-w-2xl p-4 sm:p-6">
       <h1 className="mb-4 text-lg font-semibold">คำขอสมัครร้านใหม่</h1>
-      <SignupRequestsConsole requests={requests} />
+      <SignupRequestsConsole requests={requests} phoneCounts={Object.fromEntries(phoneCounts)} />
     </main>
   );
 }
