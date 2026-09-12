@@ -11,7 +11,8 @@
     "migrate-shop-slug": "tsx --conditions=react-server --env-file=.env.local scripts/migrateShopSlug.ts",
     "test:pin": "tsx --test scripts/pin.test.ts",
     "test:pos": "tsx --test scripts/orderNumber.test.ts scripts/pricing.test.ts scripts/reports.test.ts scripts/customerOrder.test.ts scripts/receipt.test.ts scripts/eposPrint.test.ts",
-    "test:shop": "tsx --test scripts/hostname.test.ts scripts/slug.test.ts"
+    "test:shop": "tsx --test scripts/hostname.test.ts scripts/slug.test.ts",
+    "test:billing": "tsx --test scripts/subscriptionState.test.ts"
   },
   "dependencies": {
     "@radix-ui/react-checkbox": "^1.3.11",
