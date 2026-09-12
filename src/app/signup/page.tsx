@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 
 import { Button } from "@/components/ui/button";
@@ -100,10 +101,13 @@ export default function SignupPage() {
           <CardHeader>
             <CardTitle>ส่งคำขอเรียบร้อยแล้ว</CardTitle>
           </CardHeader>
-          <CardContent>
+          <CardContent className="grid gap-4">
             <p className="text-muted-foreground">
               ทีมงานจะตรวจสอบและติดต่อกลับทางเบอร์โทรหรืออีเมลที่ให้ไว้ ภายใน 1-2 วันทำการ
             </p>
+            <Button asChild variant="outline">
+              <Link href="/">กลับหน้าหลัก</Link>
+            </Button>
           </CardContent>
         </Card>
       </main>
