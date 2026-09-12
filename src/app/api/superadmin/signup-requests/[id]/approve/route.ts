@@ -1,6 +1,8 @@
 import { NextResponse, type NextRequest } from "next/server";
 
 import { InvalidPinError, PinConflictError, assignPin } from "@/lib/auth/pinAssignment";
+import { getBillingConfig } from "@/lib/billing/billingConfig";
+import { computeTrialEnd } from "@/lib/billing/subscriptionState";
 import { getAdminAuth, getAdminDb } from "@/lib/firebase/admin";
 import { COLLECTIONS } from "@/lib/firebase/collections";
 import { getShopBySlug } from "@/lib/shop/shopLookupAdmin";
@@ -83,16 +85,37 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     updatedAt: now,
   });
 
+  // SaaS Phase 3: every new shop starts on a free trial, no card required yet — the shop's
+  // own admin adds one later at `/billing` (or the trial ends with no card and the shop is
+  // auto-suspended by the daily cron, see `lib/billing/billingCron.ts`).
+  const billingConfig = await getBillingConfig(db);
+  await db.collection(COLLECTIONS.subscriptions).doc(shopId).set({
+    shopId,
+    status: "trialing",
+    trialEndsAt: computeTrialEnd(now, billingConfig.trialDays),
+    nextBillingDate: null,
+    priceThb: billingConfig.monthlyPriceThb,
+    omiseCustomerId: null,
+    omiseCardId: null,
+    lastChargeStatus: "none",
+    lastChargeAt: null,
+    lastChargeError: null,
+    graceEndsAt: null,
+    createdAt: now,
+    updatedAt: now,
+  });
+
   const created = await getAdminAuth().createUser({ displayName: adminName });
   try {
     await assignPin(db, shopId, created.uid, pin);
   } catch (error) {
     // Same rollback discipline as `/api/admin/staff` — never leave an orphaned Auth user with no
     // way to log in, and never leave a half-provisioned shop with no admin either, so also
-    // clean up the shop/settings docs just created above.
+    // clean up the shop/settings/subscription docs just created above.
     await getAdminAuth().deleteUser(created.uid);
     await shopRef.delete();
     await db.collection(COLLECTIONS.shopSettings).doc(shopId).delete();
+    await db.collection(COLLECTIONS.subscriptions).doc(shopId).delete();
     if (error instanceof PinConflictError || error instanceof InvalidPinError) {
       return NextResponse.json({ error: error.message }, { status: 409 });
     }
