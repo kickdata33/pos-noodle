@@ -3,6 +3,7 @@ export * from "./shop";
 export * from "./shopSignupRequest";
 export * from "./subscription";
 export * from "./billingConfig";
+export * from "./paymentSlip";
 export * from "./table";
 export * from "./catalog";
 export * from "./channel";

@@ -15,6 +15,10 @@ export const BILLING_CONFIG_DOC_ID = "default";
 const FALLBACK_CONFIG: Omit<BillingConfig, "id"> = {
   trialDays: 14,
   monthlyPriceThb: 299,
+  bankAccountName: "",
+  bankName: "",
+  bankAccountNumber: "",
+  qrCodeImage: null,
   updatedAt: 0,
 };
 

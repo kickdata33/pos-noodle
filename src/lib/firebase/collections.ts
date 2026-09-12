@@ -42,4 +42,9 @@ export const COLLECTIONS = {
    * config, editable at runtime from `/superadmin/billing-config` without a redeploy. Denied to
    * every client. */
   billingConfig: "billingConfig",
+  /** Server-only: a shop's manual bank-transfer/PromptPay payment submissions (SaaS roadmap
+   * Phase 3 bank-transfer alternative to Omise). Written by `/api/billing/slip`, reviewed via
+   * `/api/superadmin/subscriptions/[shopId]/slips/[slipId]/*`, all Admin SDK. Denied to every
+   * client. */
+  paymentSlips: "paymentSlips",
 } as const;

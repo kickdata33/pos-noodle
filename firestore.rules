@@ -201,5 +201,13 @@ service cloud.firestore {
     match /billingConfig/{docId} {
       allow read, write: if false;
     }
+
+    // --- SaaS Phase 3 (bank-transfer alternative): a shop's uploaded transfer slips. No
+    //     client, not even the shop's own admin, ever reads/writes these directly — submission
+    //     goes through `/api/billing/slip`, review through `/api/superadmin/subscriptions/*`,
+    //     both Admin SDK (bypasses these rules by design, same trust model as `subscriptions`). ---
+    match /paymentSlips/{slipId} {
+      allow read, write: if false;
+    }
   }
 }
