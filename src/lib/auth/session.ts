@@ -4,7 +4,7 @@ import { cookies } from "next/headers";
 
 import { getAdminAuth, getAdminDb } from "@/lib/firebase/admin";
 import { COLLECTIONS } from "@/lib/firebase/collections";
-import type { AppUser } from "@/types";
+import type { AppUser, Subscription } from "@/types";
 
 export const SESSION_COOKIE_NAME = "session";
 /** 5 days, matches the max Firebase session cookie lifetime we request in the API route. */
@@ -13,6 +13,14 @@ export const SESSION_MAX_AGE_SECONDS = 60 * 60 * 24 * 5;
 export interface ServerSession {
   uid: string;
   appUser: AppUser;
+  /**
+   * The shop's platform billing state (SaaS roadmap Phase 3) — `null` only if the
+   * `subscriptions/{shopId}` doc is somehow missing (shouldn't happen for any shop provisioned
+   * after Phase 3 shipped; treated as "not suspended" by every caller so a missing doc never
+   * itself locks a shop out). `/admin` and `/pos` layouts read `subscription.status` to gate
+   * access; nothing before Phase 3 needs this field.
+   */
+  subscription: Subscription | null;
 }
 
 /**
@@ -47,7 +55,12 @@ export async function getServerSession(): Promise<ServerSession | null> {
     const appUser = { id: userSnap.id, ...userSnap.data() } as AppUser;
     if (!appUser.active) return null;
 
-    return { uid: decoded.uid, appUser };
+    const subSnap = await getAdminDb().collection(COLLECTIONS.subscriptions).doc(appUser.shopId).get();
+    const subscription = subSnap.exists
+      ? ({ id: subSnap.id, ...(subSnap.data() as Omit<Subscription, "id">) } as Subscription)
+      : null;
+
+    return { uid: decoded.uid, appUser, subscription };
   } catch {
     // Expired or malformed cookie — treat the same as logged out.
     return null;
