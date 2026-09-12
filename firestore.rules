@@ -188,5 +188,18 @@ service cloud.firestore {
     match /signupThrottle/{throttleKey} {
       allow read, write: if false;
     }
+
+    // --- SaaS Phase 3: platform billing state and its runtime-editable pricing config. No
+    //     client, not even a shop's own admin, ever reads or writes these directly — the shop's
+    //     admin manages their own billing through `/api/billing/*`, the superadmin through
+    //     `/api/superadmin/*`, and the daily sweep through `/api/cron/billing`, all Admin SDK
+    //     (bypasses these rules by design, same trust model as `shopSignupRequests`). ---
+    match /subscriptions/{shopId} {
+      allow read, write: if false;
+    }
+
+    match /billingConfig/{docId} {
+      allow read, write: if false;
+    }
   }
 }

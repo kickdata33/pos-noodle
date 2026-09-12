@@ -33,4 +33,13 @@ export const COLLECTIONS = {
   /** Server-only: last-submitted-at per hashed IP, throttling the public `/signup` form against
    * spam the same way `customerOrderThrottle` throttles QR orders. Denied to every client. */
   signupThrottle: "signupThrottle",
+  /** Server-only: one doc per shop, the platform billing state (SaaS roadmap Phase 3 — trial/
+   * active/past_due/suspended, Omise customer/card ids). Denied to every client, not even the
+   * shop's own admin — read/written only via `/api/billing/*`, `/api/superadmin/*`, and
+   * `/api/cron/billing`, all Admin SDK. */
+  subscriptions: "subscriptions",
+  /** Server-only: singleton doc (id "default") holding the platform's trial-days/monthly-price
+   * config, editable at runtime from `/superadmin/billing-config` without a redeploy. Denied to
+   * every client. */
+  billingConfig: "billingConfig",
 } as const;
