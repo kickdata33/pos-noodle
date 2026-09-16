@@ -2,8 +2,8 @@
 
 import { signInWithCustomToken, signOut } from "firebase/auth";
 import { Delete } from "lucide-react";
-import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { Suspense, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { auth } from "@/lib/firebase/client";
@@ -20,8 +20,27 @@ import { cn } from "@/lib/utils";
  */
 const KEYS = ["1", "2", "3", "4", "5", "6", "7", "8", "9"];
 
-export default function LoginPage() {
+/**
+ * Where to send someone right after a successful login. `next` is the page `src/proxy.ts`
+ * bounced them from before they even reached this screen (e.g. an admin who opened `/pos`
+ * directly while logged out used to always land back on `/admin` afterwards, no matter which
+ * page they actually wanted — this is the fix). Deliberately narrow: only ever returns `/admin`
+ * or `/pos` (with an optional sub-path), never anything else, so a crafted `?next=` query param
+ * can't be used to redirect a freshly-authenticated session to an arbitrary URL. Staff never get
+ * sent to `/admin` even if `next` says so — `role === "admin"` (item 17) still applies, and
+ * `/admin/layout.tsx`'s own gate would just bounce them right back out anyway.
+ */
+function resolveRedirect(next: string | null, role: "admin" | "staff"): string {
+  const allowedPrefix = role === "admin" ? ["/admin", "/pos"] : ["/pos"];
+  if (next && allowedPrefix.some((prefix) => next === prefix || next.startsWith(`${prefix}/`))) {
+    return next;
+  }
+  return role === "admin" ? "/admin" : "/pos";
+}
+
+function LoginPageInner() {
   const router = useRouter();
+  const next = useSearchParams().get("next");
   const [pin, setPin] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -65,7 +84,7 @@ export default function LoginPage() {
         return;
       }
 
-      router.push(data.role === "admin" ? "/admin" : "/pos");
+      router.push(resolveRedirect(next, data.role === "admin" ? "admin" : "staff"));
       router.refresh();
     } catch {
       setError("เชื่อมต่อไม่ได้ กรุณาลองใหม่");
@@ -158,5 +177,16 @@ export default function LoginPage() {
         </div>
       </div>
     </main>
+  );
+}
+
+// `useSearchParams` requires a Suspense boundary (Next.js would otherwise fail the static-export
+// build for this page) — the fallback is invisible in practice since the PIN keypad itself is
+// tiny and client-only anyway.
+export default function LoginPage() {
+  return (
+    <Suspense fallback={null}>
+      <LoginPageInner />
+    </Suspense>
   );
 }
