@@ -74,8 +74,8 @@ export function GroupCard({
 
   useEffect(() => {
     if (!expanded) return;
-    return modifierOptionRepository.subscribeForGroup(group.id, setOptions);
-  }, [expanded, group.id]);
+    return modifierOptionRepository.subscribeForGroup(group.shopId, group.id, setOptions);
+  }, [expanded, group.id, group.shopId]);
 
   async function addOption() {
     const name = addingName.trim();

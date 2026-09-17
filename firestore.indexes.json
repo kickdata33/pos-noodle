@@ -28,6 +28,7 @@
       "collectionGroup": "modifierOptions",
       "queryScope": "COLLECTION",
       "fields": [
+        { "fieldPath": "shopId", "order": "ASCENDING" },
         { "fieldPath": "groupId", "order": "ASCENDING" },
         { "fieldPath": "sortOrder", "order": "ASCENDING" }
       ]

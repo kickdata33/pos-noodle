@@ -23,12 +23,28 @@ class ModifierOptionRepository extends FirestoreRepository<ModifierOption> {
     super(COLLECTIONS.modifierOptions);
   }
 
-  listForGroup(groupId: string): Promise<ModifierOption[]> {
-    return this.list(where("groupId", "==", groupId), orderBy("sortOrder", "asc"));
+  // `firestore.rules`' `ownsExisting()` check on this collection reads `resource.data.shopId` —
+  // for a `list`/query request (unlike a single `get`), Firestore requires the query itself to
+  // carry an equality filter on that exact same field, or the whole query is rejected up front
+  // with "Missing or insufficient permissions" (no partial results, no per-document filtering).
+  // A bare `where("groupId", ...)` satisfied this before the shop-scoped rules rewrite added the
+  // `shopId` check to every collection; it silently broke afterward since nothing here changed
+  // to match. Always pass `shopId` alongside `groupId` so the query keeps matching the rule.
+  listForGroup(shopId: string, groupId: string): Promise<ModifierOption[]> {
+    return this.list(
+      where("shopId", "==", shopId),
+      where("groupId", "==", groupId),
+      orderBy("sortOrder", "asc")
+    );
   }
 
-  subscribeForGroup(groupId: string, onChange: (options: ModifierOption[]) => void): Unsubscribe {
-    return this.subscribe(onChange, where("groupId", "==", groupId), orderBy("sortOrder", "asc"));
+  subscribeForGroup(shopId: string, groupId: string, onChange: (options: ModifierOption[]) => void): Unsubscribe {
+    return this.subscribe(
+      onChange,
+      where("shopId", "==", shopId),
+      where("groupId", "==", groupId),
+      orderBy("sortOrder", "asc")
+    );
   }
 
   /**

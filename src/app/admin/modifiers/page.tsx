@@ -190,7 +190,7 @@ export default function ModifiersPage() {
     if (!confirm(`ลบกลุ่ม Modifier "${group.name}" ใช่หรือไม่? ลบแล้วกู้คืนไม่ได้ (ตัวเลือกในกลุ่มจะถูกลบไปด้วย)`)) return;
     // Cascade: an option with no parent group left is unreachable dead data (nothing lists
     // options outside their group's own subscription), never useful to leave behind.
-    const orphanedOptions = await modifierOptionRepository.listForGroup(group.id);
+    const orphanedOptions = await modifierOptionRepository.listForGroup(group.shopId, group.id);
     await Promise.all(orphanedOptions.map((o) => modifierOptionRepository.remove(o.id)));
     await modifierGroupRepository.remove(group.id);
   }
