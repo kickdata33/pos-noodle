@@ -1,11 +1,10 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 
 import { Badge } from "@/components/ui/badge";
 import { formatCurrency } from "@/lib/format";
-import { playOrderAlertSound } from "@/lib/pos/notificationSound";
 import { orderRepository } from "@/repositories/orderRepository";
 import type { Order } from "@/types";
 
@@ -22,25 +21,10 @@ export function PosHome() {
   const [openOrders, setOpenOrders] = useState<Order[]>([]);
   const currency = settings?.currency ?? "THB";
 
-  // Tracks which orders were already flagged `pendingReview` as of the *previous* snapshot, so
-  // the alert sound only ever fires for a QR order that newly arrived while this screen was open
-  // — never on first load (a table already awaiting review when staff opens `/pos` shouldn't
-  // make every device chime at once) and never again for a table staff hasn't acknowledged yet
-  // (the badge itself already says "still waiting", repeating the sound would just be noise).
-  const seenPendingIdsRef = useRef<Set<string> | null>(null);
-  useEffect(
-    () =>
-      orderRepository.subscribeOpenForShop(shopId, (orders) => {
-        const pendingIds = new Set(orders.filter((o) => o.pendingReview).map((o) => o.id));
-        if (seenPendingIdsRef.current !== null) {
-          const isNewlyPending = [...pendingIds].some((id) => !seenPendingIdsRef.current!.has(id));
-          if (isNewlyPending) playOrderAlertSound();
-        }
-        seenPendingIdsRef.current = pendingIds;
-        setOpenOrders(orders);
-      }),
-    [shopId]
-  );
+  // The new-order chime itself is handled by `PosOrderAlertListener`, mounted once in
+  // `pos/layout.tsx` so it fires on every `/pos/*` screen, not only this one — this subscription
+  // is just for the table grid's own live list.
+  useEffect(() => orderRepository.subscribeOpenForShop(shopId, setOpenOrders), [shopId]);
 
   const activeTables = tables.filter((t) => t.active);
   const otherChannels = channels.filter((c) => c.active && !c.requiresTable);

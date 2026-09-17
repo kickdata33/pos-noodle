@@ -165,10 +165,12 @@ function playAttentionTone(): void {
 
     const now = ctx.currentTime;
     // E5, G5, C6 — a rising major triad, each note overlapping the last slightly (0.16s apart,
-    // 0.9s decay) so they blend into one warm chime rather than three separate blips.
-    playNote(659.25, now, 0.22);
-    playNote(783.99, now + 0.16, 0.2);
-    playNote(1046.5, now + 0.32, 0.22);
+    // 0.9s decay) so they blend into one warm chime rather than three separate blips. Gain
+    // doubled from the original 0.2-ish values — shop asked for it louder ("อยากให้เสียงดังๆ"),
+    // this is close to the loudest a Web Audio sine chime can go before clipping/distorting.
+    playNote(659.25, now, 0.45);
+    playNote(783.99, now + 0.16, 0.42);
+    playNote(1046.5, now + 0.32, 0.45);
 
     // Release the audio context after the longest note's tail finishes — this fires rarely
     // enough (a new QR order) that leaving one open per call would leak them over a long shift.

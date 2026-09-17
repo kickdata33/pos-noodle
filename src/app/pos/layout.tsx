@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import type { ReactNode } from "react";
 
 import { PosCatalogProvider } from "@/components/pos/PosCatalogContext";
+import { PosOrderAlertListener } from "@/components/pos/PosOrderAlertListener";
 import { SignOutButton } from "@/components/shared/SignOutButton";
 import { SuspensionBanner } from "@/components/shared/SuspensionBanner";
 import { getServerSession } from "@/lib/auth/session";
@@ -28,6 +29,7 @@ export default async function PosLayout({ children }: { children: ReactNode }) {
 
   return (
     <PosCatalogProvider shopId={session.appUser.shopId}>
+      <PosOrderAlertListener />
       <div className="flex min-h-full flex-col">
         {session.subscription?.status === "past_due" && (
           <SuspensionBanner daysLeft={graceDaysLeft} />
