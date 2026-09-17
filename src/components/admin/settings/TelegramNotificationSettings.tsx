@@ -5,7 +5,10 @@ import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
+
+const HOURS = Array.from({ length: 24 }, (_, h) => h);
 
 /**
  * Self-contained (own fetch/save, not part of `ShopSettings`) because the bot token lives in the
@@ -24,6 +27,7 @@ export function TelegramNotificationSettings() {
   const [notifyPending, setNotifyPending] = useState(true);
   const [notifyCancelled, setNotifyCancelled] = useState(true);
   const [notifyDailySummary, setNotifyDailySummary] = useState(true);
+  const [dailySummaryHour, setDailySummaryHour] = useState(4);
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
   const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
@@ -40,6 +44,7 @@ export function TelegramNotificationSettings() {
           notifyPending: boolean;
           notifyCancelled: boolean;
           notifyDailySummary: boolean;
+          dailySummaryHour: number;
         }) => {
           setEnabled(data.enabled);
           setChatId(data.telegramChatId);
@@ -48,6 +53,7 @@ export function TelegramNotificationSettings() {
           setNotifyPending(data.notifyPending);
           setNotifyCancelled(data.notifyCancelled);
           setNotifyDailySummary(data.notifyDailySummary);
+          setDailySummaryHour(data.dailySummaryHour);
           setLoading(false);
         }
       );
@@ -68,6 +74,7 @@ export function TelegramNotificationSettings() {
           notifyPending,
           notifyCancelled,
           notifyDailySummary,
+          dailySummaryHour,
         }),
       });
       if (tokenInput) {
@@ -103,7 +110,7 @@ export function TelegramNotificationSettings() {
       <div className="mb-3 flex items-center justify-between">
         <div>
           <p className="font-medium">แจ้งเตือนผ่าน Telegram</p>
-          <p className="text-sm text-muted-foreground">บิลชำระเงินแล้ว บิลรอตรวจสอบ บิลยกเลิก และสรุปยอดทุกตี 4</p>
+          <p className="text-sm text-muted-foreground">บิลชำระเงินแล้ว บิลรอตรวจสอบ บิลยกเลิก และสรุปยอดรายวัน (เลือกเวลาได้)</p>
         </div>
         <Switch checked={enabled} onCheckedChange={setEnabled} />
       </div>
@@ -153,9 +160,28 @@ export function TelegramNotificationSettings() {
             <Switch checked={notifyCancelled} onCheckedChange={setNotifyCancelled} />
           </div>
           <div className="flex items-center justify-between">
-            <span className="text-sm">สรุปยอดรายวัน (ตี 4, สินค้าขายดี 10 อันดับ)</span>
+            <span className="text-sm">สรุปยอดรายวัน (สินค้าขายดี 10 อันดับ)</span>
             <Switch checked={notifyDailySummary} onCheckedChange={setNotifyDailySummary} />
           </div>
+          {notifyDailySummary ? (
+            <div className="flex items-center justify-between pl-4">
+              <Label htmlFor="tg-summary-hour" className="text-sm text-muted-foreground">
+                ส่งเวลา
+              </Label>
+              <Select value={String(dailySummaryHour)} onValueChange={(v) => setDailySummaryHour(Number(v))}>
+                <SelectTrigger id="tg-summary-hour" className="w-28">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {HOURS.map((h) => (
+                    <SelectItem key={h} value={String(h)}>
+                      {String(h).padStart(2, "0")}:00
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          ) : null}
         </div>
 
         {message ? (

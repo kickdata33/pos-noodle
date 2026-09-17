@@ -32,6 +32,7 @@ export async function GET() {
     notifyPending: settings?.notifyPending ?? true,
     notifyCancelled: settings?.notifyCancelled ?? true,
     notifyDailySummary: settings?.notifyDailySummary ?? true,
+    dailySummaryHour: settings?.dailySummaryHour ?? 4,
   });
 }
 
@@ -49,6 +50,7 @@ export async function POST(request: NextRequest) {
     notifyPending?: boolean;
     notifyCancelled?: boolean;
     notifyDailySummary?: boolean;
+    dailySummaryHour?: number;
   };
 
   const db = getAdminDb();
@@ -62,6 +64,10 @@ export async function POST(request: NextRequest) {
     notifyPending: Boolean(body.notifyPending),
     notifyCancelled: Boolean(body.notifyCancelled),
     notifyDailySummary: Boolean(body.notifyDailySummary),
+    dailySummaryHour:
+      Number.isInteger(body.dailySummaryHour) && body.dailySummaryHour! >= 0 && body.dailySummaryHour! <= 23
+        ? body.dailySummaryHour
+        : 4,
   };
   // Only overwrite the token when a new non-empty value was actually submitted — see the
   // function comment above.

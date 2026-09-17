@@ -6,7 +6,8 @@ import { getAdminDb } from "@/lib/firebase/admin";
 import { runDailySummaryCron } from "@/lib/notifications/dailySummaryCron";
 
 /**
- * Daily 04:00 Bangkok (21:00 UTC — see `vercel.json`) sales-summary sweep, same auth pattern as
+ * Runs every hour on the hour (see `vercel.json`) — each shop picks its own send hour now, so
+ * `runDailySummaryCron` itself decides who's actually due this run. Same auth pattern as
  * `/api/cron/billing`: Vercel Cron sends `Authorization: Bearer $CRON_SECRET` automatically.
  * Also callable manually for testing:
  *   curl -H "Authorization: Bearer $CRON_SECRET" https://<domain>/api/cron/daily-summary

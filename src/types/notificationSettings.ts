@@ -27,4 +27,19 @@ export interface NotificationSettings {
   notifyPending?: boolean;
   notifyCancelled?: boolean;
   notifyDailySummary?: boolean;
+  /**
+   * Hour of day (0-23, Bangkok local time) to send the daily summary — requested
+   * ("สามารถเลือกเวลาสรุปบิลรายวันได้") after it shipped hardcoded to 04:00. `undefined` means
+   * 4 (the original default), same "missing = prior behavior" reasoning as the notify* switches
+   * above. The cron itself now runs every hour and only actually sends when this hour matches.
+   */
+  dailySummaryHour?: number;
+  /**
+   * The Bangkok-local "YYYY-MM-DD" date this shop's summary was last sent for — set right after
+   * sending. Since the cron now runs hourly rather than once a day, this is what stops a second
+   * run within the same hour (a retry, a manual curl, clock skew) from sending the same day's
+   * summary twice; comparing against `undefined` on a shop's very first send is always false, so
+   * nothing needs backfilling here.
+   */
+  lastDailySummaryDateKey?: string;
 }
