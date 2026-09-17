@@ -1,0 +1,33 @@
+name: Hourly daily-summary trigger
+
+# Vercel's own Cron feature (see vercel.json) is capped at once-per-day on the Hobby plan — a
+# cron entry that fires more than once a day fails the whole deployment outright (see commit
+# "Make the daily Telegram summary's send time configurable per shop", which briefly set
+# vercel.json's daily-summary cron to "0 * * * *" and broke every deploy after it). But
+# `runDailySummaryCron` (src/lib/notifications/dailySummaryCron.ts) is written to be called any
+# number of times a day — it looks at each shop's own `NotificationSettings.dailySummaryHour`
+# and only actually sends once that shop's local hour matches, guarded by
+# `lastDailySummaryDateKey` against double-sends. So per-shop custom send times only work if
+# something calls the endpoint every hour — GitHub Actions has no such once-a-day limit, so this
+# workflow is that hourly caller instead of a second Vercel Cron.
+#
+# Requires two repo secrets (Settings → Secrets and variables → Actions):
+#   CRON_TARGET_URL — e.g. https://pos-noodle.vercel.app (no trailing slash)
+#   CRON_SECRET     — must match the CRON_SECRET env var set in Vercel
+on:
+  schedule:
+    - cron: "5 * * * *"
+  workflow_dispatch:
+
+jobs:
+  trigger:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Call /api/cron/daily-summary
+        run: |
+          curl --fail-with-body -sS \
+            -H "Authorization: Bearer $CRON_SECRET" \
+            "$CRON_TARGET_URL/api/cron/daily-summary"
+        env:
+          CRON_TARGET_URL: ${{ secrets.CRON_TARGET_URL }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
