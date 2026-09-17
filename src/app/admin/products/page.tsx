@@ -23,9 +23,10 @@ import { useAuth } from "@/hooks/useAuth";
 import { computeSwap } from "@/lib/admin/sortOrder";
 import { categoryRepository } from "@/repositories/categoryRepository";
 import { channelRepository } from "@/repositories/channelRepository";
-import { modifierGroupRepository } from "@/repositories/modifierRepository";
+import { modifierGroupRepository, modifierOptionRepository } from "@/repositories/modifierRepository";
 import { productRepository } from "@/repositories/productRepository";
-import type { Category, ModifierGroup, Product, SalesChannel } from "@/types";
+import type { Category, ModifierGroup, ModifierOption, Product, ProductQuickPreset, SalesChannel } from "@/types";
+import { QuickPresetEditor } from "./QuickPresetEditor";
 
 interface FormState {
   name: string;
@@ -39,6 +40,8 @@ interface FormState {
    * (or plain price)". Kept as strings in form state the same way `price` is, converted to
    * numbers only on save. */
   channelPrices: Record<string, string>;
+  /** See `Product.posQuickPresets`. */
+  presets: ProductQuickPreset[];
 }
 
 const EMPTY_FORM: FormState = {
@@ -48,6 +51,7 @@ const EMPTY_FORM: FormState = {
   imageUrl: "",
   modifierGroupIds: [],
   channelPrices: {},
+  presets: [],
 };
 
 /**
@@ -68,6 +72,7 @@ export default function ProductsPage() {
   const [items, setItems] = useState<Product[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
   const [groups, setGroups] = useState<ModifierGroup[]>([]);
+  const [modifierOptions, setModifierOptions] = useState<ModifierOption[]>([]);
   const [channels, setChannels] = useState<SalesChannel[]>([]);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState<Product | null>(null);
@@ -85,6 +90,10 @@ export default function ProductsPage() {
   useEffect(() => {
     if (!shopId) return;
     return modifierGroupRepository.subscribeForShop(shopId, setGroups);
+  }, [shopId]);
+  useEffect(() => {
+    if (!shopId) return;
+    return modifierOptionRepository.subscribeForShop(shopId, setModifierOptions);
   }, [shopId]);
   useEffect(() => {
     if (!shopId) return;
@@ -110,6 +119,7 @@ export default function ProductsPage() {
       channelPrices: Object.fromEntries(
         Object.entries(product.channelPrices ?? {}).map(([channelId, p]) => [channelId, String(p)])
       ),
+      presets: product.posQuickPresets ?? [],
     });
     setDialogOpen(true);
   }
@@ -144,6 +154,17 @@ export default function ProductsPage() {
 
     const imageUrl = form.imageUrl.trim() || null;
 
+    // A preset only saves if it has a label and a selection for every currently-required group
+    // on this product — same check `QuickPresetEditor` shows inline, enforced again here so a
+    // half-filled preset (e.g. abandoned mid-edit) never silently reaches the POS grid as a
+    // button that would fail to add a valid item.
+    const activeGroups = form.modifierGroupIds
+      .map((id) => groups.find((g) => g.id === id))
+      .filter((g): g is ModifierGroup => Boolean(g));
+    const presets = form.presets.filter(
+      (p) => p.label.trim() && !activeGroups.some((g) => g.required && (p.selections[g.id] ?? []).length === 0)
+    );
+
     setSaving(true);
     try {
       if (editing) {
@@ -154,6 +175,7 @@ export default function ProductsPage() {
           imageUrl,
           modifierGroupIds: form.modifierGroupIds,
           channelPrices,
+          posQuickPresets: presets,
           updatedAt: Date.now(),
         });
       } else {
@@ -165,6 +187,7 @@ export default function ProductsPage() {
           imageUrl,
           modifierGroupIds: form.modifierGroupIds,
           channelPrices,
+          posQuickPresets: presets,
           active: true,
           sortOrder: items.length,
           createdAt: Date.now(),
@@ -354,6 +377,24 @@ export default function ProductsPage() {
                     </label>
                   ))}
                 </div>
+              </div>
+            ) : null}
+
+            {form.modifierGroupIds.length > 0 ? (
+              <div className="grid gap-2">
+                <Label>ปุ่มลัดหน้า POS (ไม่บังคับ)</Label>
+                <p className="text-xs text-muted-foreground">
+                  สร้างปุ่มที่กดครั้งเดียวแล้วเลือก Modifier ให้เลย ไม่ต้องเปิด popup — เช่น ปุ่ม
+                  &quot;ก๋วยเตี๋ยวพิเศษ&quot; ที่เลือก &quot;เนื้อสัตว์: พิเศษ&quot; ไว้ล่วงหน้า เฉพาะหน้า POS
+                  พนักงานเท่านั้น หน้าสั่งของลูกค้ายังขึ้นให้เลือกเองตามปกติ
+                </p>
+                <QuickPresetEditor
+                  groups={groups.filter((g) => form.modifierGroupIds.includes(g.id))}
+                  modifierOptions={modifierOptions}
+                  productId={editing?.id ?? ""}
+                  presets={form.presets}
+                  onChange={(presets) => setForm((f) => ({ ...f, presets }))}
+                />
               </div>
             ) : null}
 

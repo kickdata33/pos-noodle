@@ -13,7 +13,13 @@ import { Button } from "@/components/ui/button";
 import { formatCurrency, formatTime } from "@/lib/format";
 import { useAuth } from "@/hooks/useAuth";
 import { printReceiptViaEpos } from "@/lib/pos/eposPrint";
-import { computeLineTotal, computeOrderTotals, groupItemsByProduct, resolveChannelPrice } from "@/lib/pos/pricing";
+import {
+  computeLineTotal,
+  computeOrderTotals,
+  groupItemsByProduct,
+  resolveChannelPrice,
+  resolveModifiersFromSelections,
+} from "@/lib/pos/pricing";
 import { generateOrderNumber } from "@/lib/pos/orderNumber";
 import { buildOrderReceipt } from "@/lib/pos/receipt";
 import { auditLogRepository } from "@/repositories/auditLogRepository";
@@ -262,6 +268,21 @@ export function OrderScreen({ orderId, initialTableId, initialChannelId }: Props
       return;
     }
     addItemToCart(product, 1, [], "");
+  }
+
+  /**
+   * Staff-only one-tap shortcut (item request: "อยากให้คลิ๊กง่ายที่สุด") — adds the item straight
+   * to the cart with `preset.selections` already resolved into modifiers, skipping
+   * `ModifierPickerDialog` entirely. Customer-facing self-order screens never call this; they
+   * don't read `posQuickPresets` at all, so they keep showing the full picker unchanged.
+   */
+  function handleAddPreset(product: Product, preset: NonNullable<Product["posQuickPresets"]>[number]) {
+    if (!product.active) return;
+    const groups = product.modifierGroupIds
+      .map((id) => modifierGroups.find((g) => g.id === id))
+      .filter((g): g is (typeof modifierGroups)[number] => Boolean(g && g.active));
+    const modifiers = resolveModifiersFromSelections(groups, preset.selections, modifierOptions, product.id);
+    addItemToCart(product, 1, modifiers, "");
   }
 
   function addItemToCart(
@@ -518,26 +539,52 @@ export function OrderScreen({ orderId, initialTableId, initialChannelId }: Props
         </div>
         <div className="grid flex-1 auto-rows-min grid-cols-2 gap-3 overflow-y-auto p-3 sm:grid-cols-3">
           {visibleProducts.map((product) => (
-            <button
+            <div
               key={product.id}
-              disabled={!product.active}
-              onClick={() => handleAddProduct(product)}
               className={
-                "flex flex-col items-start gap-1 rounded-lg border p-3 text-left " +
-                (product.active
-                  ? "border-border bg-card hover:bg-accent"
-                  : "cursor-not-allowed border-border bg-muted/40 opacity-60")
+                "flex flex-col gap-1.5 rounded-lg border p-3 " +
+                (product.active ? "border-border bg-card" : "border-border bg-muted/40 opacity-60")
               }
             >
-              <span className={"font-medium" + (product.active ? "" : " line-through")}>{product.name}</span>
-              {product.active ? (
-                <span className="text-sm text-muted-foreground">
-                  {formatCurrency(resolveChannelPrice(product, currentChannel), settings.currency)}
-                </span>
-              ) : (
-                <span className="text-sm font-medium text-destructive">ของหมด</span>
-              )}
-            </button>
+              <button
+                disabled={!product.active}
+                onClick={() => handleAddProduct(product)}
+                className={"flex flex-col items-start gap-1 text-left " + (product.active ? "hover:opacity-80" : "cursor-not-allowed")}
+              >
+                <span className={"font-medium" + (product.active ? "" : " line-through")}>{product.name}</span>
+                {product.active ? (
+                  <span className="text-sm text-muted-foreground">
+                    {formatCurrency(resolveChannelPrice(product, currentChannel), settings.currency)}
+                  </span>
+                ) : (
+                  <span className="text-sm font-medium text-destructive">ของหมด</span>
+                )}
+              </button>
+              {/* Staff-only quick-add shortcuts (Product.posQuickPresets) — one tap adds the item
+                  with its modifiers already picked, no popup. Never shown on the customer-facing
+                  self-order screens, which don't read this field at all. */}
+              {product.active && product.posQuickPresets && product.posQuickPresets.length > 0 ? (
+                <div className="flex flex-wrap gap-1">
+                  {product.posQuickPresets.map((preset) => {
+                    const groups = product.modifierGroupIds
+                      .map((id) => modifierGroups.find((g) => g.id === id))
+                      .filter((g): g is (typeof modifierGroups)[number] => Boolean(g && g.active));
+                    const modifiers = resolveModifiersFromSelections(groups, preset.selections, modifierOptions, product.id);
+                    const presetPrice =
+                      resolveChannelPrice(product, currentChannel) + modifiers.reduce((sum, m) => sum + m.priceDelta, 0);
+                    return (
+                      <button
+                        key={preset.id}
+                        onClick={() => handleAddPreset(product, preset)}
+                        className="rounded-full border border-primary/40 bg-primary/5 px-2.5 py-1 text-xs font-medium text-primary hover:bg-primary/10"
+                      >
+                        {preset.label} · {formatCurrency(presetPrice, settings.currency)}
+                      </button>
+                    );
+                  })}
+                </div>
+              ) : null}
+            </div>
           ))}
           {visibleProducts.length === 0 ? (
             <p className="col-span-full text-sm text-muted-foreground">ยังไม่มีเมนูในหมวดนี้</p>

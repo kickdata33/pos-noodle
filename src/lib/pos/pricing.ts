@@ -1,4 +1,13 @@
-import type { ModifierTier, OrderItem, OrderItemModifier, Product, SalesChannel, ShopSettings } from "@/types";
+import type {
+  ModifierGroup,
+  ModifierOption,
+  ModifierTier,
+  OrderItem,
+  OrderItemModifier,
+  Product,
+  SalesChannel,
+  ShopSettings,
+} from "@/types";
 
 /** (unitPrice + sum of modifier priceDelta) * quantity — item 21/22. */
 export function computeLineTotal(
@@ -39,6 +48,50 @@ export function resolveTieredGroupPrice(tierPricing: ModifierTier[] | null | und
  */
 export function distributeTieredPriceDeltas(count: number, totalPrice: number): number[] {
   return Array.from({ length: count }, (_, i) => (i === count - 1 ? totalPrice : 0));
+}
+
+/**
+ * Turns a `groupId -> optionId[]` selection map into the flattened `OrderItemModifier[]` the
+ * cart actually stores — the one place this logic lives, shared by `ModifierPickerDialog`'s
+ * manual picker and a product's `posQuickPresets` quick-add shortcuts, so a preset can never
+ * price a combo differently than picking the exact same options by hand would. `groups` should
+ * already be filtered to the product's own `modifierGroupIds` (active groups only); options not
+ * offered on `productId` (via `restrictToProductIds`) or no longer found are silently skipped
+ * rather than throwing, since a preset baked in weeks ago may reference an option an admin has
+ * since deleted.
+ */
+export function resolveModifiersFromSelections(
+  groups: ModifierGroup[],
+  selections: Record<string, string[]>,
+  modifierOptions: ModifierOption[],
+  productId: string
+): OrderItemModifier[] {
+  return groups.flatMap((group) => {
+    const chosenIds = selections[group.id] ?? [];
+    const groupOptions = modifierOptions.filter(
+      (o) => o.groupId === group.id && (!o.restrictToProductIds || o.restrictToProductIds.includes(productId))
+    );
+    // Tiered groups price by *how many* were chosen, not which ones — see
+    // `distributeTieredPriceDeltas`'s doc comment. Every other group keeps each option's own
+    // `priceDelta`, unchanged from before this feature.
+    const tieredDeltas =
+      group.pricingMode === "tieredByCount"
+        ? distributeTieredPriceDeltas(chosenIds.length, resolveTieredGroupPrice(group.tierPricing, chosenIds.length))
+        : null;
+    return chosenIds.flatMap((optionId, index) => {
+      const option = groupOptions.find((o) => o.id === optionId);
+      if (!option) return [];
+      return [
+        {
+          groupId: group.id,
+          groupName: group.name,
+          optionId: option.id,
+          optionName: option.name,
+          priceDelta: tieredDeltas ? tieredDeltas[index] : option.priceDelta,
+        },
+      ];
+    });
+  });
 }
 
 /**

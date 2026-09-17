@@ -12,7 +12,7 @@ import {
 } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
 import { formatCurrency } from "@/lib/format";
-import { distributeTieredPriceDeltas, resolveTieredGroupPrice } from "@/lib/pos/pricing";
+import { resolveModifiersFromSelections, resolveTieredGroupPrice } from "@/lib/pos/pricing";
 import type { ModifierGroup, ModifierOption, OrderItemModifier, Product } from "@/types";
 
 interface Props {
@@ -111,26 +111,7 @@ export function ModifierPickerDialog({
   const missingRequired = groups.some((g) => g.required && (selections[g.id] ?? []).length === 0);
 
   function handleConfirm() {
-    const modifiers: OrderItemModifier[] = groups.flatMap((group) => {
-      const chosenIds = selections[group.id] ?? [];
-      // Tiered groups price by *how many* were chosen, not which ones — see
-      // `distributeTieredPriceDeltas`'s doc comment. Every other group keeps each option's own
-      // `priceDelta`, unchanged from before this feature.
-      const tieredDeltas =
-        group.pricingMode === "tieredByCount"
-          ? distributeTieredPriceDeltas(chosenIds.length, resolveTieredGroupPrice(group.tierPricing, chosenIds.length))
-          : null;
-      return chosenIds.map((optionId, index) => {
-        const option = optionsFor(group.id).find((o) => o.id === optionId)!;
-        return {
-          groupId: group.id,
-          groupName: group.name,
-          optionId: option.id,
-          optionName: option.name,
-          priceDelta: tieredDeltas ? tieredDeltas[index] : option.priceDelta,
-        };
-      });
-    });
+    const modifiers = resolveModifiersFromSelections(groups, selections, modifierOptions, product.id);
     onConfirm({ quantity, modifiers, note: note.trim() });
     onOpenChange(false);
   }

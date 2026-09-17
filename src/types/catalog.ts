@@ -34,10 +34,34 @@ export interface Product extends WithId {
   channelPrices?: ChannelPrices;
   /** Modifier groups this product offers, e.g. [เส้น, เพิ่มเติม]. Order = display order. */
   modifierGroupIds: string[];
+  /**
+   * Staff-only one-tap shortcuts for this product's most common modifier combos (e.g. "ก๋วยเตี๋ยว
+   * พิเศษ" = เนื้อสัตว์: พิเศษ, all pre-picked) — tapping one adds the item straight to the cart
+   * with these selections already applied, skipping `ModifierPickerDialog` entirely. Purely a POS
+   * speed feature: the customer-facing self-order screens (`CustomerOrderScreen`,
+   * `PickupOrderScreen`) never read this field and always show the full picker, same as before —
+   * see those components' comments. `undefined`/empty for every product before this field
+   * existed, or one with no shortcuts defined; the base product tile with the full picker is
+   * always still available regardless.
+   */
+  posQuickPresets?: ProductQuickPreset[];
   active: boolean;
   sortOrder: number;
   createdAt: EpochMillis;
   updatedAt: EpochMillis;
+}
+
+/**
+ * One staff-facing quick-add shortcut on a product — see `Product.posQuickPresets`. `selections`
+ * has the exact same shape as `ModifierPickerDialog`'s own selection state
+ * (`Record<groupId, optionId[]>`), so `resolveModifiersFromSelections` in `lib/pos/pricing.ts`
+ * can turn either one into the same `OrderItemModifier[]` the cart actually stores.
+ */
+export interface ProductQuickPreset {
+  id: string;
+  /** Button label on the POS grid, e.g. "ก๋วยเตี๋ยวพิเศษ". */
+  label: string;
+  selections: Record<string, string[]>;
 }
 
 export type ModifierSelectionType = "single" | "multiple";
