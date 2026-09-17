@@ -4,6 +4,7 @@ import { NextResponse, type NextRequest } from "next/server";
 
 import { getAdminDb } from "@/lib/firebase/admin";
 import { COLLECTIONS } from "@/lib/firebase/collections";
+import { notifyShop } from "@/lib/notifications/notifyShop";
 import { resolveCustomerOrder, type CustomerSelection } from "@/lib/pos/customerOrder";
 import { generateOrderNumberAdmin } from "@/lib/pos/orderNumberAdmin";
 import { computeOrderTotals } from "@/lib/pos/pricing";
@@ -145,6 +146,9 @@ export async function POST(request: NextRequest) {
 
   const orderRef = db.collection(COLLECTIONS.orders).doc();
   await orderRef.set(orderData);
+
+  // Fire-and-forget — see `notifyShop`'s comment.
+  void notifyShop(db, shopId, `🔔 บิลใหม่รอตรวจสอบ\nสั่งกลับบ้าน · ${customerLabel}`);
 
   return NextResponse.json({
     ok: true,

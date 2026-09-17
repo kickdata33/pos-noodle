@@ -4,6 +4,7 @@ import { NextResponse, type NextRequest } from "next/server";
 
 import { getAdminDb } from "@/lib/firebase/admin";
 import { COLLECTIONS } from "@/lib/firebase/collections";
+import { notifyShop } from "@/lib/notifications/notifyShop";
 import { resolveCustomerOrder, type CustomerSelection } from "@/lib/pos/customerOrder";
 import { CUSTOMER_ORDER_MIN_INTERVAL_MS, isThrottled } from "@/lib/pos/customerThrottle";
 import { generateOrderNumberAdmin } from "@/lib/pos/orderNumberAdmin";
@@ -154,6 +155,11 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       tx.set(throttleRef, { lastSubmittedAt: now });
       return newOrderRef.id;
     });
+
+    // Fire-and-forget — see `notifyShop`'s comment; never worth delaying the customer's own
+    // confirmation over. Covers both a brand-new bill and items added to an already-open one,
+    // same "รอตรวจสอบ" moment either way from staff's point of view.
+    void notifyShop(db, table.shopId, `🔔 บิลใหม่รอตรวจสอบ\nโต๊ะ ${table.name}`);
 
     return NextResponse.json({ ok: true, orderId, addedCount: newItems.length });
   } catch (error) {

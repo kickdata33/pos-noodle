@@ -209,5 +209,14 @@ service cloud.firestore {
     match /paymentSlips/{slipId} {
       allow read, write: if false;
     }
+
+    // --- Telegram notification settings (paid/pending/cancelled bill alerts + daily 4am
+    //     summary). No client, not even the shop's own admin, ever reads/writes this directly —
+    //     a bot token is a real credential, not merely internal config like
+    //     ShopSettings.receiptPrinterIp. Managed through `/api/admin/notifications`, fired from
+    //     `/api/notify/*` and `/api/cron/daily-summary`, all Admin SDK. ---
+    match /notificationSettings/{shopId} {
+      allow read, write: if false;
+    }
   }
 }

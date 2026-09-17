@@ -47,4 +47,9 @@ export const COLLECTIONS = {
    * `/api/superadmin/subscriptions/[shopId]/slips/[slipId]/*`, all Admin SDK. Denied to every
    * client. */
   paymentSlips: "paymentSlips",
+  /** Server-only: one doc per shop, Telegram bot token/chat id + on/off switch for order
+   * notifications (paid/pending/cancelled bills, daily 4am summary). Denied to every client,
+   * not even the shop's own admin — a bot token is a real credential, read/written only via
+   * `/api/admin/notifications`, `/api/notify/*`, and `/api/cron/daily-summary`, all Admin SDK. */
+  notificationSettings: "notificationSettings",
 } as const;

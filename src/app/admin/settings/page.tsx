@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 
 import { AdminSection } from "@/components/admin/AdminSection";
 import { PickupQrDialog } from "@/components/admin/settings/PickupQrDialog";
+import { TelegramNotificationSettings } from "@/components/admin/settings/TelegramNotificationSettings";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -325,6 +326,8 @@ export default function SettingsPage() {
           </Button>
         </div>
         <PickupQrDialog open={pickupQrOpen} onOpenChange={setPickupQrOpen} />
+
+        <TelegramNotificationSettings />
 
         <div className="flex items-center gap-3">
           <Button onClick={handleSave} disabled={saving}>

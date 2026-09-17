@@ -23,6 +23,28 @@ import type { AuditReason, Order, OrderItem, Product, ShopSettings } from "@/typ
 
 type DraftOrder = Omit<Order, "id"> & { id: string | null };
 
+/**
+ * Tells the shop's Telegram bot (if configured) that a bill was paid or cancelled — see
+ * `/api/notify/order-event`'s comment for why this has to be a server route instead of a direct
+ * Firestore write. Fire-and-forget, same reasoning as the auto-print call just below each of
+ * this function's call sites: an unreachable notification is never worth blocking on.
+ */
+function notifyOrderEvent(event: "paid" | "cancelled", order: { orderNumber: string; total?: number; channelName: string; tableName: string | null }) {
+  void fetch("/api/notify/order-event", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      event,
+      orderNumber: order.orderNumber,
+      total: order.total,
+      channelName: order.channelName,
+      tableName: order.tableName,
+    }),
+  }).catch(() => {
+    // Best-effort — see the function comment above.
+  });
+}
+
 interface Props {
   orderId: string | null;
   initialTableId: string | null;
@@ -352,6 +374,7 @@ export function OrderScreen({ orderId, initialTableId, initialChannelId }: Props
       performedByName: appUser!.name,
       createdAt: updatedAt,
     });
+    notifyOrderEvent("cancelled", current);
     router.push("/pos");
   }
 
@@ -442,6 +465,7 @@ export function OrderScreen({ orderId, initialTableId, initialChannelId }: Props
         createdBy: appUser!.id,
         createdAt: paidAt,
       });
+      notifyOrderEvent("paid", { ...order, total: totals.total });
       // Auto-print the receipt once checkout succeeds — fire-and-forget, deliberately not
       // awaited before navigating away: an unreachable/offline printer has no fetch timeout
       // worth blocking staff on, and the sale itself already went through regardless of whether
