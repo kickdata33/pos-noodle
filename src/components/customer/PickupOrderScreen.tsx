@@ -306,6 +306,17 @@ export function PickupOrderScreen() {
               </div>
             )}
             <p className="max-w-xs text-sm text-muted-foreground">สแกนจ่ายด้วยแอปธนาคารของคุณ ยอดจะขึ้นให้อัตโนมัติ</p>
+            {qrDataUrl ? (
+              // Same "<a download>" pattern as the shop's own TableQrDialog/PickupQrDialog — lets
+              // a customer save the QR to their own phone (e.g. to pay from the banking app's
+              // "เลือกจากรูปภาพ" option, or to send it to whoever's paying for them) instead of
+              // only being able to scan it live off this screen (item: "ลูกค้าจะได้นำไปสแกนได้เลย").
+              <a href={qrDataUrl} download="promptpay-qr.png">
+                <Button variant="outline" size="sm">
+                  บันทึกรูป QR
+                </Button>
+              </a>
+            ) : null}
             {transferNotified ? (
               <p className="text-sm text-success">แจ้งแล้ว — พนักงานจะตรวจสอบยอดโอนให้เร็วที่สุด</p>
             ) : (
