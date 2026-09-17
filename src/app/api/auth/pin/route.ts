@@ -39,22 +39,27 @@ export async function POST(request: NextRequest) {
   }
 
   const db = getAdminDb();
+  const throttleRef = db.collection(COLLECTIONS.pinAttempts).doc(throttleKeyFor(request));
 
+  // Shop resolution (Firestore, cached — see shopLookupAdmin.ts) and the throttle-state read
+  // don't depend on each other, so run them concurrently instead of one after another — this
+  // was one of a handful of sequential round trips making PIN login feel slow.
+  //
   // `UserSecret.pinLookup` is HMAC(`${shopId}:${pin}`) — shopId is an *input* to the lookup
   // hash, so it must be known before the PIN is even submitted. Resolved from the request's own
   // Host header (SaaS roadmap Phase 2, `src/proxy.ts` + `resolveShopIdFromHost`), never trusted
   // from anything the client sends in the body. `null` means a subdomain was presented that
   // doesn't match any shop — a distinct, real "not found", never silently treated as the default
   // shop (that would let a mistyped/stale subdomain probe the wrong shop's PINs).
-  const shopId = await resolveShopIdFromHost(db, request.headers);
+  const [shopId, throttleSnap] = await Promise.all([
+    resolveShopIdFromHost(db, request.headers),
+    throttleRef.get(),
+  ]);
   if (!shopId) {
     return NextResponse.json({ error: "ไม่พบร้านนี้" }, { status: 404 });
   }
 
   const now = Date.now();
-  const throttleRef = db.collection(COLLECTIONS.pinAttempts).doc(throttleKeyFor(request));
-
-  const throttleSnap = await throttleRef.get();
   const throttleState = throttleSnap.exists ? (throttleSnap.data() as ThrottleState) : null;
 
   const decision = evaluateThrottle(throttleState, now);
