@@ -26,6 +26,12 @@ export async function GET() {
     enabled: settings?.enabled ?? false,
     telegramChatId: settings?.telegramChatId ?? "",
     hasToken: Boolean(settings?.telegramBotToken),
+    // `?? true` — undefined (never touched, or a doc saved before these switches existed) means
+    // "on", matching NotificationSettings's documented default.
+    notifyPaid: settings?.notifyPaid ?? true,
+    notifyPending: settings?.notifyPending ?? true,
+    notifyCancelled: settings?.notifyCancelled ?? true,
+    notifyDailySummary: settings?.notifyDailySummary ?? true,
   });
 }
 
@@ -39,6 +45,10 @@ export async function POST(request: NextRequest) {
     enabled?: boolean;
     telegramBotToken?: string;
     telegramChatId?: string;
+    notifyPaid?: boolean;
+    notifyPending?: boolean;
+    notifyCancelled?: boolean;
+    notifyDailySummary?: boolean;
   };
 
   const db = getAdminDb();
@@ -48,6 +58,10 @@ export async function POST(request: NextRequest) {
   const update: Record<string, unknown> = {
     enabled: Boolean(body.enabled),
     telegramChatId: body.telegramChatId?.trim() || null,
+    notifyPaid: Boolean(body.notifyPaid),
+    notifyPending: Boolean(body.notifyPending),
+    notifyCancelled: Boolean(body.notifyCancelled),
+    notifyDailySummary: Boolean(body.notifyDailySummary),
   };
   // Only overwrite the token when a new non-empty value was actually submitted — see the
   // function comment above.

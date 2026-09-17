@@ -40,6 +40,6 @@ export async function POST(request: NextRequest) {
 
   // Not awaited before responding — this route's own caller doesn't await it either, but this
   // still lets the request finish sending to Telegram even if the client navigates away first.
-  await notifyShop(getAdminDb(), session.appUser.shopId, text);
+  await notifyShop(getAdminDb(), session.appUser.shopId, text, body.event);
   return NextResponse.json({ ok: true });
 }

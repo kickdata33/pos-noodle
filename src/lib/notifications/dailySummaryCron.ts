@@ -33,7 +33,7 @@ export async function runDailySummaryCron(db: Firestore): Promise<{ sent: number
 
   for (const doc of settingsSnap.docs) {
     const settings = doc.data() as Omit<NotificationSettings, "id">;
-    if (!settings.telegramBotToken || !settings.telegramChatId) {
+    if (!settings.telegramBotToken || !settings.telegramChatId || settings.notifyDailySummary === false) {
       skipped++;
       continue;
     }
@@ -49,7 +49,8 @@ export async function runDailySummaryCron(db: Firestore): Promise<{ sent: number
     const orders = ordersSnap.docs.map((d) => ({ ...d.data(), id: d.id }) as Order);
 
     const summary = summarizeOrders(orders);
-    const best = topProducts(orders, 5);
+    // 10 — shop owner asked for "สินค้าขายดีสัก 10 รายการ" (was 5).
+    const best = topProducts(orders, 10);
 
     const bestLines = best.length
       ? best.map((p, i) => `${i + 1}. ${p.productName} — ${p.qty} ชิ้น`).join("\n")
@@ -62,7 +63,7 @@ export async function runDailySummaryCron(db: Firestore): Promise<{ sent: number
       `ยอดเฉลี่ยต่อบิล: ${formatCurrency(summary.avgOrderValue, "THB")}\n\n` +
       `🏆 สินค้าขายดี\n${bestLines}`;
 
-    await notifyShop(db, shopId, text);
+    await notifyShop(db, shopId, text, "dailySummary");
     sent++;
   }
 

@@ -148,7 +148,7 @@ export async function POST(request: NextRequest) {
   await orderRef.set(orderData);
 
   // Fire-and-forget — see `notifyShop`'s comment.
-  void notifyShop(db, shopId, `🔔 บิลใหม่รอตรวจสอบ\nสั่งกลับบ้าน · ${customerLabel}`);
+  void notifyShop(db, shopId, `🔔 บิลใหม่รอตรวจสอบ\nสั่งกลับบ้าน · ${customerLabel}`, "pending");
 
   return NextResponse.json({
     ok: true,

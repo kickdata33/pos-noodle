@@ -16,4 +16,15 @@ export interface NotificationSettings {
   enabled: boolean;
   telegramBotToken: string | null;
   telegramChatId: string | null;
+  /**
+   * Per-category on/off switches, requested after the first version fired all four
+   * unconditionally ("อยากให้เลือกหัวข้อที่จะให้แจ้งเตือนได้"). `undefined` (every doc saved
+   * before this existed, or a category simply never touched) must be treated the same as `true`
+   * — this feature already went live firing all four, so a missing field must never silently
+   * turn one off for a shop that didn't ask for that.
+   */
+  notifyPaid?: boolean;
+  notifyPending?: boolean;
+  notifyCancelled?: boolean;
+  notifyDailySummary?: boolean;
 }

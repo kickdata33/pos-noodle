@@ -159,7 +159,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     // Fire-and-forget — see `notifyShop`'s comment; never worth delaying the customer's own
     // confirmation over. Covers both a brand-new bill and items added to an already-open one,
     // same "รอตรวจสอบ" moment either way from staff's point of view.
-    void notifyShop(db, table.shopId, `🔔 บิลใหม่รอตรวจสอบ\nโต๊ะ ${table.name}`);
+    void notifyShop(db, table.shopId, `🔔 บิลใหม่รอตรวจสอบ\nโต๊ะ ${table.name}`, "pending");
 
     return NextResponse.json({ ok: true, orderId, addedCount: newItems.length });
   } catch (error) {

@@ -20,6 +20,10 @@ export function TelegramNotificationSettings() {
   const [chatId, setChatId] = useState("");
   const [hasToken, setHasToken] = useState(false);
   const [tokenInput, setTokenInput] = useState("");
+  const [notifyPaid, setNotifyPaid] = useState(true);
+  const [notifyPending, setNotifyPending] = useState(true);
+  const [notifyCancelled, setNotifyCancelled] = useState(true);
+  const [notifyDailySummary, setNotifyDailySummary] = useState(true);
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
   const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
@@ -27,12 +31,26 @@ export function TelegramNotificationSettings() {
   useEffect(() => {
     fetch("/api/admin/notifications")
       .then((res) => res.json())
-      .then((data: { enabled: boolean; telegramChatId: string; hasToken: boolean }) => {
-        setEnabled(data.enabled);
-        setChatId(data.telegramChatId);
-        setHasToken(data.hasToken);
-        setLoading(false);
-      });
+      .then(
+        (data: {
+          enabled: boolean;
+          telegramChatId: string;
+          hasToken: boolean;
+          notifyPaid: boolean;
+          notifyPending: boolean;
+          notifyCancelled: boolean;
+          notifyDailySummary: boolean;
+        }) => {
+          setEnabled(data.enabled);
+          setChatId(data.telegramChatId);
+          setHasToken(data.hasToken);
+          setNotifyPaid(data.notifyPaid);
+          setNotifyPending(data.notifyPending);
+          setNotifyCancelled(data.notifyCancelled);
+          setNotifyDailySummary(data.notifyDailySummary);
+          setLoading(false);
+        }
+      );
   }, []);
 
   async function handleSave() {
@@ -42,7 +60,15 @@ export function TelegramNotificationSettings() {
       await fetch("/api/admin/notifications", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ enabled, telegramChatId: chatId, telegramBotToken: tokenInput || undefined }),
+        body: JSON.stringify({
+          enabled,
+          telegramChatId: chatId,
+          telegramBotToken: tokenInput || undefined,
+          notifyPaid,
+          notifyPending,
+          notifyCancelled,
+          notifyDailySummary,
+        }),
       });
       if (tokenInput) {
         setHasToken(true);
@@ -110,6 +136,26 @@ export function TelegramNotificationSettings() {
         <div className="grid gap-1">
           <Label htmlFor="tg-chat">Chat ID</Label>
           <Input id="tg-chat" value={chatId} onChange={(e) => setChatId(e.target.value)} placeholder="เช่น -1001234567890" />
+        </div>
+
+        <div className="grid gap-2 rounded-md border border-border p-3">
+          <p className="text-sm font-medium">แจ้งเตือนหัวข้อไหนบ้าง</p>
+          <div className="flex items-center justify-between">
+            <span className="text-sm">บิลชำระเงินแล้ว</span>
+            <Switch checked={notifyPaid} onCheckedChange={setNotifyPaid} />
+          </div>
+          <div className="flex items-center justify-between">
+            <span className="text-sm">บิลใหม่รอตรวจสอบ (QR/สั่งกลับบ้าน)</span>
+            <Switch checked={notifyPending} onCheckedChange={setNotifyPending} />
+          </div>
+          <div className="flex items-center justify-between">
+            <span className="text-sm">บิลยกเลิก</span>
+            <Switch checked={notifyCancelled} onCheckedChange={setNotifyCancelled} />
+          </div>
+          <div className="flex items-center justify-between">
+            <span className="text-sm">สรุปยอดรายวัน (ตี 4, สินค้าขายดี 10 อันดับ)</span>
+            <Switch checked={notifyDailySummary} onCheckedChange={setNotifyDailySummary} />
+          </div>
         </div>
 
         {message ? (
