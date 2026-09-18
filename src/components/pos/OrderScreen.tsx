@@ -35,7 +35,10 @@ type DraftOrder = Omit<Order, "id"> & { id: string | null };
  * Firestore write. Fire-and-forget, same reasoning as the auto-print call just below each of
  * this function's call sites: an unreachable notification is never worth blocking on.
  */
-function notifyOrderEvent(event: "paid" | "cancelled", order: { orderNumber: string; total?: number; channelName: string; tableName: string | null }) {
+function notifyOrderEvent(
+  event: "paid" | "cancelled",
+  order: { orderNumber: string; total?: number; channelName: string; tableName: string | null; paymentMethodName?: string | null }
+) {
   void fetch("/api/notify/order-event", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -45,6 +48,7 @@ function notifyOrderEvent(event: "paid" | "cancelled", order: { orderNumber: str
       total: order.total,
       channelName: order.channelName,
       tableName: order.tableName,
+      paymentMethodName: order.paymentMethodName,
     }),
   }).catch(() => {
     // Best-effort — see the function comment above.
@@ -486,7 +490,7 @@ export function OrderScreen({ orderId, initialTableId, initialChannelId }: Props
         createdBy: appUser!.id,
         createdAt: paidAt,
       });
-      notifyOrderEvent("paid", { ...order, total: totals.total });
+      notifyOrderEvent("paid", { ...order, total: totals.total, paymentMethodName: payment.paymentMethodName });
       // Auto-print the receipt once checkout succeeds — fire-and-forget, deliberately not
       // awaited before navigating away: an unreachable/offline printer has no fetch timeout
       // worth blocking staff on, and the sale itself already went through regardless of whether

@@ -26,6 +26,7 @@ export async function POST(request: NextRequest) {
     total?: number;
     channelName?: string;
     tableName?: string | null;
+    paymentMethodName?: string | null;
   };
 
   if (body.event !== "paid" && body.event !== "cancelled") {
@@ -33,9 +34,10 @@ export async function POST(request: NextRequest) {
   }
 
   const where = body.tableName ? `โต๊ะ ${body.tableName}` : body.channelName ?? "";
+  const paymentLine = body.paymentMethodName ? `\nวิธีชำระ ${body.paymentMethodName}` : "";
   const text =
     body.event === "paid"
-      ? `💰 ชำระเงินแล้ว\nบิล ${body.orderNumber ?? "-"} · ${where}\nยอด ${formatCurrency(body.total ?? 0, "THB")}`
+      ? `💰 ชำระเงินแล้ว\nบิล ${body.orderNumber ?? "-"} · ${where}\nยอด ${formatCurrency(body.total ?? 0, "THB")}${paymentLine}`
       : `❌ ยกเลิกบิล\nบิล ${body.orderNumber ?? "-"} · ${where}`;
 
   // Not awaited before responding — this route's own caller doesn't await it either, but this
