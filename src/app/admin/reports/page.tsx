@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";
 import { formatCurrency } from "@/lib/format";
 import { useAuth } from "@/hooks/useAuth";
 import { customRange, resolvePreset, type DateRange, type ReportPreset } from "@/lib/pos/dateRange";
@@ -48,6 +49,11 @@ export default function ReportsPage() {
   const [loading, setLoading] = useState(true);
   const [currency, setCurrency] = useState("THB");
   const [loadError, setLoadError] = useState<string | null>(null);
+  // Off by default (plain midnight-to-midnight day, unchanged from before this existed). On:
+  // "ยอดขายรายวัน" regroups each day at 23:00 instead of midnight, matching K SHOP's own daily
+  // settlement cutoff — see `bangkokDateKeyWithCutoff`'s comment. Only affects that one chart;
+  // the range picker above and every other card stay on plain calendar days.
+  const [bankCutoff, setBankCutoff] = useState(false);
 
   useEffect(() => {
     if (!shopId) return;
@@ -105,7 +111,10 @@ export default function ReportsPage() {
 
   const summary = useMemo(() => summarizeOrders(orders), [orders]);
   const products = useMemo(() => topProducts(orders, 10), [orders]);
-  const days = useMemo(() => dailySales(orders, range.startKey, range.endKey), [orders, range.startKey, range.endKey]);
+  const days = useMemo(
+    () => dailySales(orders, range.startKey, range.endKey, bankCutoff ? 23 : 0),
+    [orders, range.startKey, range.endKey, bankCutoff]
+  );
   const hours = useMemo(() => hourlySales(orders), [orders]);
   const channels = useMemo(() => salesByChannel(orders), [orders]);
   const paymentMethods = useMemo(() => salesByPaymentMethod(orders), [orders]);
@@ -159,8 +168,21 @@ export default function ReportsPage() {
 
       <div className="mt-4 grid gap-4 lg:grid-cols-2">
         <Card>
-          <CardHeader>
-            <CardTitle>ยอดขายรายวัน</CardTitle>
+          <CardHeader className="flex flex-row items-start justify-between gap-4 space-y-0">
+            <div>
+              <CardTitle>ยอดขายรายวัน</CardTitle>
+              {bankCutoff && (
+                <p className="mt-1 text-xs text-muted-foreground">
+                  ตัดรอบวันที่ 23:00 น. — ยอดหลัง 23:00 จะนับรวมเป็นของวันถัดไป (ตรงกับรอบโอนของ K SHOP)
+                </p>
+              )}
+            </div>
+            <div className="flex shrink-0 items-center gap-2">
+              <Label htmlFor="bank-cutoff" className="text-xs text-muted-foreground">
+                เทียบยอดกับธนาคาร (ตัด 23:00)
+              </Label>
+              <Switch id="bank-cutoff" checked={bankCutoff} onCheckedChange={setBankCutoff} />
+            </div>
           </CardHeader>
           <CardContent>
             <DailyTrendChart days={days} currency={currency} />

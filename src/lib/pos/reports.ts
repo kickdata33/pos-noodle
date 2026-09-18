@@ -1,5 +1,5 @@
 import type { Order } from "@/types";
-import { bangkokDateKey, bangkokHour, dateKeysBetween } from "./dateRange";
+import { bangkokDateKey, bangkokDateKeyWithCutoff, bangkokHour, dateKeysBetween } from "./dateRange";
 
 /**
  * Pure aggregation over an already-fetched list of PAID orders (fetched by
@@ -65,15 +65,21 @@ export interface DailySales {
   orderCount: number;
 }
 
-/** One point per calendar day across the whole range, including zero-revenue days — a trend
- * chart with days silently missing reads as broken, not as "no sales that day". */
-export function dailySales(orders: Order[], startKey: string, endKey: string): DailySales[] {
+/**
+ * One point per calendar day across the whole range, including zero-revenue days — a trend
+ * chart with days silently missing reads as broken, not as "no sales that day". `cutoffHour`
+ * (default 0 = plain midnight, unchanged from before this param existed) rolls the day boundary
+ * to a different clock time instead — see `bangkokDateKeyWithCutoff`'s comment, e.g. `23` to
+ * match K SHOP's own daily settlement cutoff for bank reconciliation.
+ */
+export function dailySales(orders: Order[], startKey: string, endKey: string, cutoffHour = 0): DailySales[] {
   const byDay = new Map<string, DailySales>();
   for (const key of dateKeysBetween(startKey, endKey)) {
     byDay.set(key, { dateKey: key, revenue: 0, orderCount: 0 });
   }
   for (const order of orders) {
-    const key = bangkokDateKey(recognizedAt(order));
+    const at = recognizedAt(order);
+    const key = cutoffHour === 0 ? bangkokDateKey(at) : bangkokDateKeyWithCutoff(at, cutoffHour);
     const entry = byDay.get(key);
     if (!entry) continue; // outside the requested range — shouldn't happen, but never crash a report over it
     entry.revenue = round2(entry.revenue + order.total);

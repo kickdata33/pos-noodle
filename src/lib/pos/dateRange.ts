@@ -23,6 +23,23 @@ export function bangkokHour(epochMs: number): number {
   return new Date(epochMs + BANGKOK_OFFSET_MS).getUTCHours();
 }
 
+/**
+ * Same idea as `bangkokDateKey`, but the calendar day rolls over at `cutoffHour` instead of
+ * midnight — for reconciling against a payment provider whose own "daily" batch cuts off at a
+ * fixed clock time rather than midnight. K SHOP (Kasikornbank's merchant app), for one, settles
+ * PromptPay/K PLUS receipts at 23:00 Bangkok time and folds anything after that into the *next*
+ * day's batch ("หากมียอดรับชำระหลังเวลาดังกล่าว จะถูกรวมกับยอดของวันถัดไป") — a sale at 23:30
+ * reads as "today" under the shop's plain calendar-day reports but as "tomorrow" in K SHOP's own
+ * summary, which is exactly the kind of off-by-an-hour mismatch that makes two totals that both
+ * add up correctly still look like they disagree. Passing `cutoffHour: 23` here reproduces K
+ * SHOP's own grouping so the two can be compared apples-to-apples. `cutoffHour: 0` is identical
+ * to `bangkokDateKey`.
+ */
+export function bangkokDateKeyWithCutoff(epochMs: number, cutoffHour: number): string {
+  const baseKey = bangkokDateKey(epochMs);
+  return bangkokHour(epochMs) >= cutoffHour ? addDaysToKey(baseKey, 1) : baseKey;
+}
+
 /** 0 = Monday .. 6 = Sunday, in Bangkok local time (re-based from JS's Sunday-first 0–6). */
 export function bangkokWeekday(epochMs: number): number {
   const jsDay = new Date(epochMs + BANGKOK_OFFSET_MS).getUTCDay(); // 0 = Sunday
