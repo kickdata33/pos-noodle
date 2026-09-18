@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -11,7 +11,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { cn } from "@/lib/utils";
 import { formatCurrency } from "@/lib/format";
 import { groupItemsByProduct, type OrderTotals } from "@/lib/pos/pricing";
 import type { OrderItem, PaymentMethod } from "@/types";
@@ -49,8 +49,27 @@ export function CheckoutDialog({
   onConfirm,
 }: Props) {
   const groupedItems = groupItemsByProduct(items);
-  const [methodId, setMethodId] = useState<string>(paymentMethods[0]?.id ?? "");
+  // เงินสด/QR are the overwhelming majority of orders (item request: "เลือก เงินสด หรือ QR
+  // ตัวใหญ่ๆ" — one big tap, no dropdown for the common case), so they get their own large
+  // buttons in that fixed order regardless of `sortOrder`. Anything else the shop has configured
+  // (Delivery, a custom method) still works — it just renders smaller below, since it's rarer.
+  const cashMethod = paymentMethods.find((m) => m.code === "cash");
+  const qrMethod = paymentMethods.find((m) => m.code === "qr");
+  const otherMethods = paymentMethods.filter((m) => m.code !== "cash" && m.code !== "qr");
+  const [methodId, setMethodId] = useState<string>("");
   const [cashReceivedText, setCashReceivedText] = useState("");
+
+  // This dialog stays mounted across orders (OrderScreen just toggles `open`), so without this
+  // a staff member checking out order #2 would still see order #1's payment method highlighted
+  // and its cash-received amount pre-filled — reset to a blank slate every time it opens.
+  useEffect(() => {
+    // Resetting on the `open` prop transition, not looping off this effect's own state.
+    if (open) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setMethodId("");
+      setCashReceivedText("");
+    }
+  }, [open]);
 
   const method = paymentMethods.find((m) => m.id === methodId);
   const isCash = method?.code === "cash";
@@ -121,18 +140,38 @@ export function CheckoutDialog({
 
         <div className="grid gap-2">
           <p className="text-sm font-medium">วิธีชำระเงิน</p>
-          <Select value={methodId} onValueChange={setMethodId}>
-            <SelectTrigger>
-              <SelectValue placeholder="เลือกวิธีชำระเงิน" />
-            </SelectTrigger>
-            <SelectContent>
-              {paymentMethods.map((m) => (
-                <SelectItem key={m.id} value={m.id}>
+          {(cashMethod || qrMethod) && (
+            <div className="grid grid-cols-2 gap-3">
+              {cashMethod ? (
+                <PaymentMethodButton
+                  method={cashMethod}
+                  selected={methodId === cashMethod.id}
+                  onSelect={() => setMethodId(cashMethod.id)}
+                />
+              ) : null}
+              {qrMethod ? (
+                <PaymentMethodButton
+                  method={qrMethod}
+                  selected={methodId === qrMethod.id}
+                  onSelect={() => setMethodId(qrMethod.id)}
+                />
+              ) : null}
+            </div>
+          )}
+          {otherMethods.length > 0 ? (
+            <div className="mt-1 flex flex-wrap gap-2">
+              {otherMethods.map((m) => (
+                <Button
+                  key={m.id}
+                  type="button"
+                  variant={methodId === m.id ? "default" : "outline"}
+                  onClick={() => setMethodId(m.id)}
+                >
                   {m.name}
-                </SelectItem>
+                </Button>
               ))}
-            </SelectContent>
-          </Select>
+            </div>
+          ) : null}
         </div>
 
         {isCash ? (
@@ -173,5 +212,29 @@ function Row({ label, value, bold }: { label: string; value: string; bold?: bool
       <span>{label}</span>
       <span>{value}</span>
     </div>
+  );
+}
+
+/** Big one-tap payment button (item request: "เลือก เงินสด หรือ QR ตัวใหญ่ๆ") — the two most
+ * common payment methods get their own oversized tap target instead of living inside a dropdown. */
+function PaymentMethodButton({
+  method,
+  selected,
+  onSelect,
+}: {
+  method: PaymentMethod;
+  selected: boolean;
+  onSelect: () => void;
+}) {
+  return (
+    <Button
+      type="button"
+      size="lg"
+      variant={selected ? "default" : "outline"}
+      className={cn("w-full text-lg", selected && "ring-2 ring-ring ring-offset-2")}
+      onClick={onSelect}
+    >
+      {method.name}
+    </Button>
   );
 }
