@@ -73,17 +73,22 @@ export function CheckoutDialog({
 
   const method = paymentMethods.find((m) => m.id === methodId);
   const isCash = method?.code === "cash";
+  // "รับเงินมา" is optional for now — a lot of orders get confirmed before staff bother counting
+  // the exact cash handed over, so blank shouldn't block "ยืนยันชำระเงิน". Only an amount that was
+  // actually typed in AND falls short of the total blocks confirming.
+  const cashReceivedEntered = cashReceivedText.trim() !== "";
   const cashReceived = Number(cashReceivedText);
-  const changeDue = isCash && Number.isFinite(cashReceived) ? cashReceived - totals.total : null;
-  const canConfirm = Boolean(method) && (!isCash || (changeDue !== null && changeDue >= 0));
+  const changeDue = isCash && cashReceivedEntered && Number.isFinite(cashReceived) ? cashReceived - totals.total : null;
+  const cashShortfall = changeDue !== null && changeDue < 0;
+  const canConfirm = Boolean(method) && !cashShortfall;
 
   function handleConfirm() {
     if (!method) return;
     onConfirm({
       paymentMethodId: method.id,
       paymentMethodName: method.name,
-      cashReceived: isCash ? cashReceived : null,
-      changeDue: isCash ? changeDue : null,
+      cashReceived: isCash && changeDue !== null ? cashReceived : null,
+      changeDue: isCash && changeDue !== null ? changeDue : null,
     });
   }
 
@@ -176,7 +181,7 @@ export function CheckoutDialog({
 
         {isCash ? (
           <div className="grid gap-2">
-            <p className="text-sm font-medium">รับเงินมา</p>
+            <p className="text-sm font-medium">รับเงินมา <span className="font-normal text-muted-foreground">(ไม่บังคับ)</span></p>
             <Input
               type="number"
               inputMode="decimal"
