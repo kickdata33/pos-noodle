@@ -51,12 +51,17 @@ export default function ReportsPage() {
   const [currency, setCurrency] = useState("THB");
   const [loadError, setLoadError] = useState<string | null>(null);
   // Off by default (plain midnight-to-midnight day, unchanged from before this existed). On:
-  // "ยอดขายรายวัน" regroups each day at `cutoffHour` instead of midnight — 23:00 is the default
-  // (matches K SHOP's own daily settlement cutoff) but it's a plain <select> since a shop could
-  // be on a different provider/cutoff. Only affects that one chart; the range picker above and
-  // every other card stay on plain calendar days. See `bangkokDateKeyWithCutoff`'s comment.
-  const [bankCutoff, setBankCutoff] = useState(false);
-  const [cutoffHour, setCutoffHour] = useState(23);
+  // "ยอดขายรายวัน" regroups each day to run from `fromHour` to `toHour` the next day instead of
+  // midnight-to-midnight — matches how the shop actually thinks about "one day" (e.g. 16:00 today
+  // to 04:00 the next morning, its real operating hours), so the chart's day boundary lines up
+  // with a shift instead of the clock. Grouping only needs `fromHour` (a day always runs a full
+  // 24h from wherever it starts — see `bangkokDateKeyWithCutoff`'s comment); `toHour` is kept
+  // alongside it purely so the UI reads as a shift ("16:00–04:00") rather than an abstract
+  // "cutoff" number. Only affects that one chart; the range picker above and every other card
+  // stay on plain calendar days.
+  const [useBusinessDay, setUseBusinessDay] = useState(false);
+  const [fromHour, setFromHour] = useState(16);
+  const [toHour, setToHour] = useState(4);
 
   useEffect(() => {
     if (!shopId) return;
@@ -115,8 +120,8 @@ export default function ReportsPage() {
   const summary = useMemo(() => summarizeOrders(orders), [orders]);
   const products = useMemo(() => topProducts(orders, 10), [orders]);
   const days = useMemo(
-    () => dailySales(orders, range.startKey, range.endKey, bankCutoff ? cutoffHour : 0),
-    [orders, range.startKey, range.endKey, bankCutoff, cutoffHour]
+    () => dailySales(orders, range.startKey, range.endKey, useBusinessDay ? fromHour : 0),
+    [orders, range.startKey, range.endKey, useBusinessDay, fromHour]
   );
   const hours = useMemo(() => hourlySales(orders), [orders]);
   const channels = useMemo(() => salesByChannel(orders), [orders]);
@@ -174,31 +179,24 @@ export default function ReportsPage() {
           <CardHeader className="flex flex-row flex-wrap items-start justify-between gap-4 space-y-0">
             <div>
               <CardTitle>ยอดขายรายวัน</CardTitle>
-              {bankCutoff && (
+              {useBusinessDay && (
                 <p className="mt-1 text-xs text-muted-foreground">
-                  ตัดรอบวันที่ {String(cutoffHour).padStart(2, "0")}:00 น. — ยอดหลัง{" "}
-                  {String(cutoffHour).padStart(2, "0")}:00 จะนับรวมเป็นของวันถัดไป (ค่าเริ่มต้นตรงกับรอบโอนของ K SHOP)
+                  นับ 1 วัน ตั้งแต่ {String(fromHour).padStart(2, "0")}:00 ถึง {String(toHour).padStart(2, "0")}:00
+                  ของวันถัดไป แทนการนับตามเที่ยงคืน
                 </p>
               )}
             </div>
             <div className="flex shrink-0 flex-wrap items-center gap-2">
-              <Label htmlFor="bank-cutoff" className="text-xs text-muted-foreground">
-                เทียบยอดกับธนาคาร
+              <Label htmlFor="business-day" className="text-xs text-muted-foreground">
+                ดูตามช่วงเวลาทำการ
               </Label>
-              <Switch id="bank-cutoff" checked={bankCutoff} onCheckedChange={setBankCutoff} />
-              {bankCutoff && (
-                <Select value={String(cutoffHour)} onValueChange={(v) => setCutoffHour(Number(v))}>
-                  <SelectTrigger className="h-9 w-24 text-sm">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {Array.from({ length: 24 }, (_, hour) => (
-                      <SelectItem key={hour} value={String(hour)}>
-                        ตัด {String(hour).padStart(2, "0")}:00
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+              <Switch id="business-day" checked={useBusinessDay} onCheckedChange={setUseBusinessDay} />
+              {useBusinessDay && (
+                <>
+                  <HourSelect label="จาก" value={fromHour} onChange={setFromHour} />
+                  <span className="text-xs text-muted-foreground">ถึง</span>
+                  <HourSelect label="ถึง" value={toHour} onChange={setToHour} />
+                </>
               )}
             </div>
           </CardHeader>
@@ -253,6 +251,24 @@ export default function ReportsPage() {
         </Card>
       </div>
     </AdminSection>
+  );
+}
+
+/** Plain 0–23 hour dropdown for the "จาก .. ถึง .." business-day range picker above. */
+function HourSelect({ label, value, onChange }: { label: string; value: number; onChange: (hour: number) => void }) {
+  return (
+    <Select value={String(value)} onValueChange={(v) => onChange(Number(v))}>
+      <SelectTrigger aria-label={label} className="h-9 w-20 text-sm">
+        <SelectValue />
+      </SelectTrigger>
+      <SelectContent>
+        {Array.from({ length: 24 }, (_, hour) => (
+          <SelectItem key={hour} value={String(hour)}>
+            {String(hour).padStart(2, "0")}:00
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
   );
 }
 
