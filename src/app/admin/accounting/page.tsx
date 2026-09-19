@@ -451,7 +451,14 @@ export default function AccountingPage() {
           </div>
 
           <div>
-            <h3 className="mb-2 text-sm font-semibold">บิลวันนี้ ({selectedDayOrders.length} บิล)</h3>
+            <h3 className="mb-1 text-sm font-semibold">บิลวันนี้ ({selectedDayOrders.length} บิล)</h3>
+            {selectedDayRow ? (
+              <p className="mb-2 text-sm text-muted-foreground">
+                รวม {formatCurrency(selectedDayRow.totalSales, currency)} — เงินสด {formatCurrency(selectedDayRow.cashSales, currency)} ·
+                โอน/QR {formatCurrency(selectedDayRow.qrSales, currency)}
+                {selectedDayRow.otherSales > 0 ? ` · อื่นๆ ${formatCurrency(selectedDayRow.otherSales, currency)}` : ""}
+              </p>
+            ) : null}
             <Table>
               <TableHeader>
                 <TableRow>
