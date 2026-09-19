@@ -14,7 +14,15 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Switch } from "@/components/ui/switch";
 import { formatCurrency } from "@/lib/format";
 import { useAuth } from "@/hooks/useAuth";
-import { customRange, resolvePreset, type DateRange, type ReportPreset } from "@/lib/pos/dateRange";
+import {
+  addDaysToKey,
+  bangkokDateKeyWithCutoff,
+  bangkokDayBounds,
+  customRange,
+  resolvePreset,
+  type DateRange,
+  type ReportPreset,
+} from "@/lib/pos/dateRange";
 import {
   dailySales,
   hourlySales,
@@ -78,6 +86,20 @@ export default function ReportsPage() {
     return resolvePreset(preset);
   }, [preset, customFrom, customTo]);
 
+  // Plain calendar-day range when the "ดูตามช่วงเวลาทำการ" toggle is off (unchanged from before
+  // that toggle existed). When it's on, a business day can pull in orders physically paid just
+  // after midnight on the *next* calendar day (e.g. 02:00 on the 19th belongs to the shift that
+  // started 16:00 on the 18th — see `bangkokDateKeyWithCutoff`'s comment) — a plain calendar
+  // fetch would silently miss those, so pad the fetch by a day on each side, same fix already
+  // applied to `/admin/accounting`'s `fetchRange`.
+  const fetchRange = useMemo(() => {
+    if (!useBusinessDay) return { startMs: range.startMs, endMs: range.endMs };
+    return {
+      startMs: bangkokDayBounds(addDaysToKey(range.startKey, -1)).startMs,
+      endMs: bangkokDayBounds(addDaysToKey(range.endKey, 1)).endMs,
+    };
+  }, [useBusinessDay, range.startMs, range.endMs, range.startKey, range.endKey]);
+
   useEffect(() => {
     if (!shopId) return;
     let cancelled = false;
@@ -88,7 +110,7 @@ export default function ReportsPage() {
     setLoading(true);
     setLoadError(null);
     orderRepository
-      .listPaidForShopInRange(shopId, range.startMs, range.endMs)
+      .listPaidForShopInRange(shopId, fetchRange.startMs, fetchRange.endMs)
       .then((result) => {
         if (!cancelled) setOrders(result);
       })
@@ -115,17 +137,34 @@ export default function ReportsPage() {
     return () => {
       cancelled = true;
     };
-  }, [shopId, range.startMs, range.endMs]);
+  }, [shopId, fetchRange.startMs, fetchRange.endMs]);
 
-  const summary = useMemo(() => summarizeOrders(orders), [orders]);
-  const products = useMemo(() => topProducts(orders, 10), [orders]);
+  // With the toggle off, `fetchRange` was never padded, so this is just `orders` again — no
+  // behavior change from before. With it on, the padded fetch above may include orders from a
+  // neighboring calendar day whose *business day* falls outside what was actually requested (or
+  // vice versa — an order physically on this calendar day but belonging to the previous shift) —
+  // filtering here, once, by the same `bangkokDateKeyWithCutoff` label the accounting page uses
+  // is what keeps every card on this page (not just "ยอดขายรายวัน") agreeing on which orders
+  // belong to the selected day(s), instead of the trend chart alone reading the shop's real
+  // shift while the stat cards/top products/hourly/channel/payment cards silently still read
+  // plain midnight-to-midnight.
+  const scopedOrders = useMemo(() => {
+    if (!useBusinessDay) return orders;
+    return orders.filter((o) => {
+      const key = bangkokDateKeyWithCutoff(o.paidAt ?? o.createdAt, fromHour);
+      return key >= range.startKey && key <= range.endKey;
+    });
+  }, [orders, useBusinessDay, fromHour, range.startKey, range.endKey]);
+
+  const summary = useMemo(() => summarizeOrders(scopedOrders), [scopedOrders]);
+  const products = useMemo(() => topProducts(scopedOrders, 10), [scopedOrders]);
   const days = useMemo(
-    () => dailySales(orders, range.startKey, range.endKey, useBusinessDay ? fromHour : 0),
-    [orders, range.startKey, range.endKey, useBusinessDay, fromHour]
+    () => dailySales(scopedOrders, range.startKey, range.endKey, useBusinessDay ? fromHour : 0),
+    [scopedOrders, range.startKey, range.endKey, useBusinessDay, fromHour]
   );
-  const hours = useMemo(() => hourlySales(orders), [orders]);
-  const channels = useMemo(() => salesByChannel(orders), [orders]);
-  const paymentMethods = useMemo(() => salesByPaymentMethod(orders), [orders]);
+  const hours = useMemo(() => hourlySales(scopedOrders), [scopedOrders]);
+  const channels = useMemo(() => salesByChannel(scopedOrders), [scopedOrders]);
+  const paymentMethods = useMemo(() => salesByPaymentMethod(scopedOrders), [scopedOrders]);
 
   return (
     <AdminSection title="รายงานสรุปยอด" description="ยอดขาย สินค้าขายดี และช่วงเวลาที่ลูกค้าเยอะ เลือกช่วงวันที่ย้อนหลังได้">
