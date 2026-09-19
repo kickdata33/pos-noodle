@@ -265,7 +265,18 @@ export default function AccountingPage() {
           <CardTitle>รายจ่าย</CardTitle>
         </CardHeader>
         <CardContent>
-          <Table>
+          <Table className="table-fixed">
+            {/* Fixed, percentage-based column widths (sum to 100%) so the row never needs to
+                grow past the card's own width and force a horizontal scrollbar — every cell's
+                Input/Select below fills its column with `w-full` instead of a fixed px width. */}
+            <colgroup>
+              <col className="w-[16%]" />
+              <col className="w-[15%]" />
+              <col className="w-[27%]" />
+              <col className="w-[12%]" />
+              <col className="w-[15%]" />
+              <col className="w-[15%]" />
+            </colgroup>
             <TableHeader>
               <TableRow>
                 <TableHead>วันที่</TableHead>
@@ -273,7 +284,7 @@ export default function AccountingPage() {
                 <TableHead>รายการ</TableHead>
                 <TableHead>จ่ายด้วย</TableHead>
                 <TableHead className="text-right">จำนวนเงิน</TableHead>
-                <TableHead className="w-32" />
+                <TableHead />
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -493,11 +504,11 @@ function ExpenseQuickAddRow({
   return (
     <TableRow className="bg-muted/30">
       <TableCell>
-        <DateField value={dateKey} onChange={setDateKey} className="h-9 w-36" />
+        <DateField value={dateKey} onChange={setDateKey} className="h-9 w-full" />
       </TableCell>
       <TableCell>
         <Select value={category} onValueChange={(v) => setCategory(v as ExpenseCategory)}>
-          <SelectTrigger className="h-9 w-36 text-sm">
+          <SelectTrigger className="h-9 w-full text-sm">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
@@ -509,18 +520,18 @@ function ExpenseQuickAddRow({
           </SelectContent>
         </Select>
       </TableCell>
-      <TableCell className="min-w-48">
+      <TableCell>
         <Input
           value={description}
           onChange={(e) => setDescription(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && handleAdd()}
           placeholder="เช่น หมู 5 กก. (ไม่บังคับ)"
-          className="h-9 min-w-48"
+          className="h-9 w-full"
         />
       </TableCell>
       <TableCell>
         <Select value={paymentMethod} onValueChange={(v) => setPaymentMethod(v as "cash" | "transfer")}>
-          <SelectTrigger className="h-9 w-24 text-sm">
+          <SelectTrigger className="h-9 w-full text-sm">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
@@ -538,11 +549,11 @@ function ExpenseQuickAddRow({
           onChange={(e) => setAmountText(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && handleAdd()}
           placeholder="0.00"
-          className="h-9 w-28 text-right"
+          className="h-9 w-full text-right"
         />
       </TableCell>
       <TableCell>
-        <Button size="sm" onClick={handleAdd} disabled={!canSave || saving}>
+        <Button size="sm" onClick={handleAdd} disabled={!canSave || saving} className="w-full">
           +
         </Button>
       </TableCell>
@@ -599,11 +610,11 @@ function ExpenseRow({ expense, currency }: { expense: Expense; currency: string 
     return (
       <TableRow className="bg-muted/20">
         <TableCell>
-          <DateField value={dateKey} onChange={setDateKey} className="h-9 w-36" />
+          <DateField value={dateKey} onChange={setDateKey} className="h-9 w-full" />
         </TableCell>
         <TableCell>
           <Select value={category} onValueChange={(v) => setCategory(v as ExpenseCategory)}>
-            <SelectTrigger className="h-9 w-36 text-sm">
+            <SelectTrigger className="h-9 w-full text-sm">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -615,18 +626,18 @@ function ExpenseRow({ expense, currency }: { expense: Expense; currency: string 
             </SelectContent>
           </Select>
         </TableCell>
-        <TableCell className="min-w-48">
+        <TableCell>
           <Input
             value={description}
             onChange={(e) => setDescription(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && handleSave()}
             placeholder="(ไม่บังคับ)"
-            className="h-9 min-w-48"
+            className="h-9 w-full"
           />
         </TableCell>
         <TableCell>
           <Select value={paymentMethod} onValueChange={(v) => setPaymentMethod(v as "cash" | "transfer")}>
-            <SelectTrigger className="h-9 w-24 text-sm">
+            <SelectTrigger className="h-9 w-full text-sm">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -643,15 +654,15 @@ function ExpenseRow({ expense, currency }: { expense: Expense; currency: string 
             value={amountText}
             onChange={(e) => setAmountText(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && handleSave()}
-            className="h-9 w-28 text-right"
+            className="h-9 w-full text-right"
           />
         </TableCell>
         <TableCell>
           <div className="flex justify-end gap-1">
-            <Button size="sm" onClick={handleSave} disabled={!canSave || saving}>
+            <Button size="sm" className="px-2" onClick={handleSave} disabled={!canSave || saving}>
               บันทึก
             </Button>
-            <Button size="sm" variant="ghost" onClick={() => setEditing(false)}>
+            <Button size="sm" variant="ghost" className="px-2" onClick={() => setEditing(false)}>
               ยกเลิก
             </Button>
           </div>
@@ -662,19 +673,19 @@ function ExpenseRow({ expense, currency }: { expense: Expense; currency: string 
 
   return (
     <TableRow>
-      <TableCell>{formatKey(expense.dateKey)}</TableCell>
-      <TableCell>
+      <TableCell className="truncate">{formatKey(expense.dateKey)}</TableCell>
+      <TableCell className="truncate">
         <Badge variant="muted">{expense.category}</Badge>
       </TableCell>
-      <TableCell className="text-muted-foreground">{expense.description || "-"}</TableCell>
-      <TableCell>{expense.paymentMethod === "cash" ? "เงินสด" : "โอน"}</TableCell>
+      <TableCell className="truncate text-muted-foreground">{expense.description || "-"}</TableCell>
+      <TableCell className="truncate">{expense.paymentMethod === "cash" ? "เงินสด" : "โอน"}</TableCell>
       <TableCell className="text-right">{formatCurrency(expense.amount, currency)}</TableCell>
       <TableCell>
         <div className="flex justify-end gap-1">
-          <Button size="sm" variant="ghost" onClick={startEdit}>
+          <Button size="sm" variant="ghost" className="px-2" onClick={startEdit}>
             แก้ไข
           </Button>
-          <Button size="sm" variant="ghost" className="text-destructive" onClick={handleDelete}>
+          <Button size="sm" variant="ghost" className="px-2 text-destructive" onClick={handleDelete}>
             ลบ
           </Button>
         </div>
