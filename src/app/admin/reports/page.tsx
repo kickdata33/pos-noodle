@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { formatCurrency } from "@/lib/format";
 import { useAuth } from "@/hooks/useAuth";
@@ -50,10 +51,12 @@ export default function ReportsPage() {
   const [currency, setCurrency] = useState("THB");
   const [loadError, setLoadError] = useState<string | null>(null);
   // Off by default (plain midnight-to-midnight day, unchanged from before this existed). On:
-  // "ยอดขายรายวัน" regroups each day at 23:00 instead of midnight, matching K SHOP's own daily
-  // settlement cutoff — see `bangkokDateKeyWithCutoff`'s comment. Only affects that one chart;
-  // the range picker above and every other card stay on plain calendar days.
+  // "ยอดขายรายวัน" regroups each day at `cutoffHour` instead of midnight — 23:00 is the default
+  // (matches K SHOP's own daily settlement cutoff) but it's a plain <select> since a shop could
+  // be on a different provider/cutoff. Only affects that one chart; the range picker above and
+  // every other card stay on plain calendar days. See `bangkokDateKeyWithCutoff`'s comment.
   const [bankCutoff, setBankCutoff] = useState(false);
+  const [cutoffHour, setCutoffHour] = useState(23);
 
   useEffect(() => {
     if (!shopId) return;
@@ -112,8 +115,8 @@ export default function ReportsPage() {
   const summary = useMemo(() => summarizeOrders(orders), [orders]);
   const products = useMemo(() => topProducts(orders, 10), [orders]);
   const days = useMemo(
-    () => dailySales(orders, range.startKey, range.endKey, bankCutoff ? 23 : 0),
-    [orders, range.startKey, range.endKey, bankCutoff]
+    () => dailySales(orders, range.startKey, range.endKey, bankCutoff ? cutoffHour : 0),
+    [orders, range.startKey, range.endKey, bankCutoff, cutoffHour]
   );
   const hours = useMemo(() => hourlySales(orders), [orders]);
   const channels = useMemo(() => salesByChannel(orders), [orders]);
@@ -168,20 +171,35 @@ export default function ReportsPage() {
 
       <div className="mt-4 grid gap-4 lg:grid-cols-2">
         <Card>
-          <CardHeader className="flex flex-row items-start justify-between gap-4 space-y-0">
+          <CardHeader className="flex flex-row flex-wrap items-start justify-between gap-4 space-y-0">
             <div>
               <CardTitle>ยอดขายรายวัน</CardTitle>
               {bankCutoff && (
                 <p className="mt-1 text-xs text-muted-foreground">
-                  ตัดรอบวันที่ 23:00 น. — ยอดหลัง 23:00 จะนับรวมเป็นของวันถัดไป (ตรงกับรอบโอนของ K SHOP)
+                  ตัดรอบวันที่ {String(cutoffHour).padStart(2, "0")}:00 น. — ยอดหลัง{" "}
+                  {String(cutoffHour).padStart(2, "0")}:00 จะนับรวมเป็นของวันถัดไป (ค่าเริ่มต้นตรงกับรอบโอนของ K SHOP)
                 </p>
               )}
             </div>
-            <div className="flex shrink-0 items-center gap-2">
+            <div className="flex shrink-0 flex-wrap items-center gap-2">
               <Label htmlFor="bank-cutoff" className="text-xs text-muted-foreground">
-                เทียบยอดกับธนาคาร (ตัด 23:00)
+                เทียบยอดกับธนาคาร
               </Label>
               <Switch id="bank-cutoff" checked={bankCutoff} onCheckedChange={setBankCutoff} />
+              {bankCutoff && (
+                <Select value={String(cutoffHour)} onValueChange={(v) => setCutoffHour(Number(v))}>
+                  <SelectTrigger className="h-9 w-24 text-sm">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {Array.from({ length: 24 }, (_, hour) => (
+                      <SelectItem key={hour} value={String(hour)}>
+                        ตัด {String(hour).padStart(2, "0")}:00
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              )}
             </div>
           </CardHeader>
           <CardContent>
