@@ -12,3 +12,5 @@ export * from "./user";
 export * from "./order";
 export * from "./auditLog";
 export * from "./notificationSettings";
+export * from "./expense";
+export * from "./bankTransfer";

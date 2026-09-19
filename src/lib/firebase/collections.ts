@@ -52,4 +52,12 @@ export const COLLECTIONS = {
    * not even the shop's own admin — a bot token is a real credential, read/written only via
    * `/api/admin/notifications`, `/api/notify/*`, and `/api/cron/daily-summary`, all Admin SDK. */
   notificationSettings: "notificationSettings",
+  /** Admin-entered daily expenses (item: บัญชีรายรับ-รายจ่าย) — rent, staff, suppliers, utilities,
+   * etc. Read/write goes through the normal client SDK + firestore.rules like `paymentMethods`,
+   * not the Admin SDK — this isn't a secret, just admin-only accounting data for one shop. */
+  expenses: "expenses",
+  /** Admin-entered bank deposits (from K SHOP or any other provider's settlement), matched
+   * against business-day sales for reconciliation — see `types/bankTransfer.ts`. Same access
+   * model as `expenses`. */
+  bankTransfers: "bankTransfers",
 } as const;

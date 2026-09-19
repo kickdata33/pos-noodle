@@ -115,6 +115,25 @@ service cloud.firestore {
       allow delete: if isAdmin() && ownsExisting();
     }
 
+    // --- Accounting (expenses + bank transfer log): unlike the catalog/config collections
+    //     above, staff never need to see money in/out — read is Admin-only here too, matching
+    //     who can actually reach `/admin/accounting` (the page itself is behind the same
+    //     `role === "admin"` gate in `admin/layout.tsx`, but rules never rely on a page gate
+    //     alone). ---
+    match /expenses/{expenseId} {
+      allow read: if isAdmin() && ownsExisting();
+      allow create: if isAdmin() && ownsIncoming();
+      allow update: if isAdmin() && ownsExisting() && ownsIncoming();
+      allow delete: if isAdmin() && ownsExisting();
+    }
+
+    match /bankTransfers/{transferId} {
+      allow read: if isAdmin() && ownsExisting();
+      allow create: if isAdmin() && ownsIncoming();
+      allow update: if isAdmin() && ownsExisting() && ownsIncoming();
+      allow delete: if isAdmin() && ownsExisting();
+    }
+
     // --- Users: everyone can read their own doc (needed at login to resolve role/active);
     //     Admin can read every user *in their own shop* (item 11 staff management) — never
     //     another shop's staff list. No one edits their own role/active/shopId. Creation always
