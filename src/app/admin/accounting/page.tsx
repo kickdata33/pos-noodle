@@ -125,14 +125,24 @@ export default function AccountingPage() {
   );
 
   const visibleExpenses = useMemo(
-    () => expenses.filter((e) => e.dateKey >= range.startKey && e.dateKey <= range.endKey).sort((a, b) => (a.dateKey < b.dateKey ? 1 : -1)),
+    () =>
+      expenses
+        .filter((e) => e.dateKey >= range.startKey && e.dateKey <= range.endKey)
+        // Newest date first; same-day entries then fall back to createdAt (newest first) instead
+        // of whatever arbitrary order Firestore happened to return them in — without this
+        // tie-break, same-day rows could reorder themselves on every reload.
+        .sort((a, b) => (a.dateKey === b.dateKey ? b.createdAt - a.createdAt : a.dateKey < b.dateKey ? 1 : -1)),
     [expenses, range.startKey, range.endKey]
   );
   const visibleTransfers = useMemo(
     () =>
       transfers
         .filter((t) => t.businessDayKey >= range.startKey && t.businessDayKey <= range.endKey)
-        .sort((a, b) => b.transferredAt - a.transferredAt),
+        // Group by business day first (newest first) so the two settlement batches of the same
+        // day always sit together, then by transferredAt (newest first) within that day.
+        .sort((a, b) =>
+          a.businessDayKey === b.businessDayKey ? b.transferredAt - a.transferredAt : a.businessDayKey < b.businessDayKey ? 1 : -1
+        ),
     [transfers, range.startKey, range.endKey]
   );
 
@@ -450,7 +460,7 @@ function ExpenseQuickAddRow({
           onChange={(e) => setAmountText(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && handleAdd()}
           placeholder="0.00"
-          className="h-9 text-right"
+          className="h-9 min-w-24 text-right"
         />
       </TableCell>
       <TableCell>
@@ -555,7 +565,7 @@ function ExpenseRow({ expense, currency }: { expense: Expense; currency: string 
             value={amountText}
             onChange={(e) => setAmountText(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && handleSave()}
-            className="h-9 text-right"
+            className="h-9 min-w-24 text-right"
           />
         </TableCell>
         <TableCell>
@@ -685,7 +695,7 @@ function TransferQuickAddRow({
           onChange={(e) => setAmount1Text(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && handleAdd()}
           placeholder="ยอด 16:00-23:00"
-          className="h-9 text-right"
+          className="h-9 min-w-24 text-right"
         />
       </TableCell>
       <TableCell>
@@ -697,7 +707,7 @@ function TransferQuickAddRow({
           onChange={(e) => setAmount2Text(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && handleAdd()}
           placeholder="ยอด 23:00-04:00"
-          className="h-9 text-right"
+          className="h-9 min-w-24 text-right"
         />
       </TableCell>
       <TableCell>
