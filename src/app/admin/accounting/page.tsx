@@ -6,13 +6,6 @@ import { AdminSection } from "@/components/admin/AdminSection";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import {
-  Dialog,
-  DialogContent,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -65,9 +58,6 @@ export default function AccountingPage() {
   const [transfers, setTransfers] = useState<BankTransfer[]>([]);
   const [currency, setCurrency] = useState("THB");
   const [loading, setLoading] = useState(true);
-
-  const [expenseDialogOpen, setExpenseDialogOpen] = useState(false);
-  const [transferDialogOpen, setTransferDialogOpen] = useState(false);
 
   useEffect(() => {
     if (!shopId) return;
@@ -243,11 +233,8 @@ export default function AccountingPage() {
       </Card>
 
       <Card className="mt-4">
-        <CardHeader className="flex flex-row items-center justify-between space-y-0">
+        <CardHeader>
           <CardTitle>รายจ่าย</CardTitle>
-          <Button size="sm" onClick={() => setExpenseDialogOpen(true)}>
-            + บันทึกรายจ่าย
-          </Button>
         </CardHeader>
         <CardContent>
           <Table>
@@ -258,9 +245,13 @@ export default function AccountingPage() {
                 <TableHead>รายการ</TableHead>
                 <TableHead>จ่ายด้วย</TableHead>
                 <TableHead className="text-right">จำนวนเงิน</TableHead>
+                <TableHead className="w-10" />
               </TableRow>
             </TableHeader>
             <TableBody>
+              {shopId && appUser ? (
+                <ExpenseQuickAddRow shopId={shopId} createdBy={appUser.id} createdByName={appUser.name} />
+              ) : null}
               {visibleExpenses.map((e) => (
                 <TableRow key={e.id}>
                   <TableCell>{formatKey(e.dateKey)}</TableCell>
@@ -270,11 +261,12 @@ export default function AccountingPage() {
                   <TableCell>{e.description}</TableCell>
                   <TableCell>{e.paymentMethod === "cash" ? "เงินสด" : "โอน"}</TableCell>
                   <TableCell className="text-right">{formatCurrency(e.amount, currency)}</TableCell>
+                  <TableCell />
                 </TableRow>
               ))}
               {visibleExpenses.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={5} className="text-center text-muted-foreground">
+                  <TableCell colSpan={6} className="text-center text-muted-foreground">
                     ยังไม่มีรายจ่ายในช่วงนี้
                   </TableCell>
                 </TableRow>
@@ -285,11 +277,8 @@ export default function AccountingPage() {
       </Card>
 
       <Card className="mt-4">
-        <CardHeader className="flex flex-row items-center justify-between space-y-0">
+        <CardHeader>
           <CardTitle>เงินโอนเข้าบัญชี</CardTitle>
-          <Button size="sm" onClick={() => setTransferDialogOpen(true)}>
-            + บันทึกเงินโอน
-          </Button>
         </CardHeader>
         <CardContent>
           <Table>
@@ -299,20 +288,30 @@ export default function AccountingPage() {
                 <TableHead>สำหรับวันทำการ</TableHead>
                 <TableHead>หมายเหตุ</TableHead>
                 <TableHead className="text-right">จำนวนเงิน</TableHead>
+                <TableHead className="w-10" />
               </TableRow>
             </TableHeader>
             <TableBody>
+              {shopId && appUser ? (
+                <TransferQuickAddRow
+                  shopId={shopId}
+                  fromHour={fromHour}
+                  createdBy={appUser.id}
+                  createdByName={appUser.name}
+                />
+              ) : null}
               {visibleTransfers.map((t) => (
                 <TableRow key={t.id}>
                   <TableCell>{formatKey(bangkokDateKey(t.transferredAt))}</TableCell>
                   <TableCell>{formatKey(t.businessDayKey)}</TableCell>
                   <TableCell className="text-muted-foreground">{t.note || "-"}</TableCell>
                   <TableCell className="text-right">{formatCurrency(t.amount, currency)}</TableCell>
+                  <TableCell />
                 </TableRow>
               ))}
               {visibleTransfers.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={4} className="text-center text-muted-foreground">
+                  <TableCell colSpan={5} className="text-center text-muted-foreground">
                     ยังไม่มีรายการโอนในช่วงนี้
                   </TableCell>
                 </TableRow>
@@ -321,26 +320,6 @@ export default function AccountingPage() {
           </Table>
         </CardContent>
       </Card>
-
-      {shopId && appUser ? (
-        <ExpenseDialog
-          open={expenseDialogOpen}
-          onOpenChange={setExpenseDialogOpen}
-          shopId={shopId}
-          createdBy={appUser.id}
-          createdByName={appUser.name}
-        />
-      ) : null}
-      {shopId && appUser ? (
-        <TransferDialog
-          open={transferDialogOpen}
-          onOpenChange={setTransferDialogOpen}
-          shopId={shopId}
-          fromHour={fromHour}
-          createdBy={appUser.id}
-          createdByName={appUser.name}
-        />
-      ) : null}
     </AdminSection>
   );
 }
@@ -376,15 +355,18 @@ function todayKey(): string {
   return bangkokDateKey(Date.now());
 }
 
-function ExpenseDialog({
-  open,
-  onOpenChange,
+/**
+ * One always-visible editable row at the top of the รายจ่าย table — added after the user found
+ * the earlier "+ บันทึกรายจ่าย" popup dialog too slow for entering several expenses in a row
+ * ("คลิกแบบนี้เสียเวลา"). Typing an amount and pressing Enter (or the ✓ button) saves and clears
+ * only the fields that change every time (รายการ, จำนวนเงิน) — วันที่/หมวด/จ่ายด้วย stay as last
+ * set, since consecutive entries are usually the same day and often the same category.
+ */
+function ExpenseQuickAddRow({
   shopId,
   createdBy,
   createdByName,
 }: {
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
   shopId: string;
   createdBy: string;
   createdByName: string;
@@ -396,22 +378,11 @@ function ExpenseDialog({
   const [paymentMethod, setPaymentMethod] = useState<"cash" | "transfer">("cash");
   const [saving, setSaving] = useState(false);
 
-  useEffect(() => {
-    if (open) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect
-      setDateKey(todayKey());
-      setCategory(EXPENSE_CATEGORIES[0]);
-      setDescription("");
-      setAmountText("");
-      setPaymentMethod("cash");
-    }
-  }, [open]);
-
   const amount = Number(amountText);
   const canSave = dateKey && description.trim() && Number.isFinite(amount) && amount > 0;
 
-  async function handleSave() {
-    if (!canSave) return;
+  async function handleAdd() {
+    if (!canSave || saving) return;
     setSaving(true);
     try {
       await expenseRepository.create({
@@ -425,125 +396,99 @@ function ExpenseDialog({
         createdByName,
         createdAt: Date.now(),
       });
-      onOpenChange(false);
+      setDescription("");
+      setAmountText("");
     } finally {
       setSaving(false);
     }
   }
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>บันทึกรายจ่าย</DialogTitle>
-        </DialogHeader>
-        <div className="grid gap-3">
-          <div className="grid gap-2">
-            <Label htmlFor="exp-date">วันที่จ่าย</Label>
-            <Input id="exp-date" type="date" value={dateKey} onChange={(e) => setDateKey(e.target.value)} />
-          </div>
-          <div className="grid gap-2">
-            <Label>หมวด</Label>
-            <Select value={category} onValueChange={(v) => setCategory(v as ExpenseCategory)}>
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {EXPENSE_CATEGORIES.map((c) => (
-                  <SelectItem key={c} value={c}>
-                    {c}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-          <div className="grid gap-2">
-            <Label htmlFor="exp-desc">รายการ/รายละเอียด</Label>
-            <Input
-              id="exp-desc"
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-              placeholder="เช่น หมู 5 กก."
-              autoFocus
-            />
-          </div>
-          <div className="grid gap-2">
-            <Label htmlFor="exp-amount">จำนวนเงิน</Label>
-            <Input
-              id="exp-amount"
-              type="number"
-              inputMode="decimal"
-              min={0}
-              value={amountText}
-              onChange={(e) => setAmountText(e.target.value)}
-            />
-          </div>
-          <div className="grid gap-2">
-            <Label>จ่ายด้วย</Label>
-            <Select value={paymentMethod} onValueChange={(v) => setPaymentMethod(v as "cash" | "transfer")}>
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="cash">เงินสด</SelectItem>
-                <SelectItem value="transfer">โอน</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-        </div>
-        <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={saving}>
-            ยกเลิก
-          </Button>
-          <Button onClick={handleSave} disabled={!canSave || saving}>
-            บันทึก
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+    <TableRow className="bg-muted/30">
+      <TableCell>
+        <Input type="date" value={dateKey} onChange={(e) => setDateKey(e.target.value)} className="h-9 w-36" />
+      </TableCell>
+      <TableCell>
+        <Select value={category} onValueChange={(v) => setCategory(v as ExpenseCategory)}>
+          <SelectTrigger className="h-9 w-36 text-sm">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {EXPENSE_CATEGORIES.map((c) => (
+              <SelectItem key={c} value={c}>
+                {c}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </TableCell>
+      <TableCell>
+        <Input
+          value={description}
+          onChange={(e) => setDescription(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && handleAdd()}
+          placeholder="เช่น หมู 5 กก."
+          className="h-9"
+        />
+      </TableCell>
+      <TableCell>
+        <Select value={paymentMethod} onValueChange={(v) => setPaymentMethod(v as "cash" | "transfer")}>
+          <SelectTrigger className="h-9 w-24 text-sm">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="cash">เงินสด</SelectItem>
+            <SelectItem value="transfer">โอน</SelectItem>
+          </SelectContent>
+        </Select>
+      </TableCell>
+      <TableCell>
+        <Input
+          type="number"
+          inputMode="decimal"
+          min={0}
+          value={amountText}
+          onChange={(e) => setAmountText(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && handleAdd()}
+          placeholder="0.00"
+          className="h-9 text-right"
+        />
+      </TableCell>
+      <TableCell>
+        <Button size="sm" onClick={handleAdd} disabled={!canSave || saving}>
+          +
+        </Button>
+      </TableCell>
+    </TableRow>
   );
 }
 
-function TransferDialog({
-  open,
-  onOpenChange,
+/** Same quick-add pattern as `ExpenseQuickAddRow`, for the เงินโอนเข้าบัญชี table. */
+function TransferQuickAddRow({
   shopId,
   fromHour,
   createdBy,
   createdByName,
 }: {
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
   shopId: string;
   fromHour: number;
   createdBy: string;
   createdByName: string;
 }) {
   const [transferredDateKey, setTransferredDateKey] = useState(todayKey());
-  const [businessDayKey, setBusinessDayKey] = useState(todayKey());
+  // Guess which business day is "currently open" right now, given the chosen start hour — just
+  // a starting point the person can change, not a claim of correctness (see
+  // `BankTransfer.businessDayKey`'s comment on why this is always a human decision).
+  const [businessDayKey, setBusinessDayKey] = useState(() => bangkokDateKeyWithCutoff(Date.now(), fromHour));
   const [amountText, setAmountText] = useState("");
   const [note, setNote] = useState("");
   const [saving, setSaving] = useState(false);
 
-  useEffect(() => {
-    if (open) {
-      const today = todayKey();
-      // eslint-disable-next-line react-hooks/set-state-in-effect
-      setTransferredDateKey(today);
-      // Guess which business day is "currently open" right now, given the chosen start hour —
-      // just a starting point, not a claim of correctness (see `BankTransfer.businessDayKey`'s
-      // comment on why this is always a human decision, not a computed one).
-      setBusinessDayKey(bangkokDateKeyWithCutoff(Date.now(), fromHour));
-      setAmountText("");
-      setNote("");
-    }
-  }, [open, fromHour]);
-
   const amount = Number(amountText);
   const canSave = transferredDateKey && businessDayKey && Number.isFinite(amount) && amount > 0;
 
-  async function handleSave() {
-    if (!canSave) return;
+  async function handleAdd() {
+    if (!canSave || saving) return;
     setSaving(true);
     try {
       await bankTransferRepository.create({
@@ -556,67 +501,52 @@ function TransferDialog({
         createdByName,
         createdAt: Date.now(),
       });
-      onOpenChange(false);
+      setAmountText("");
+      setNote("");
     } finally {
       setSaving(false);
     }
   }
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>บันทึกเงินโอนเข้าบัญชี</DialogTitle>
-        </DialogHeader>
-        <div className="grid gap-3">
-          <div className="grid gap-2">
-            <Label htmlFor="tf-date">วันที่โอนเข้าจริง (ตาม statement ธนาคาร)</Label>
-            <Input
-              id="tf-date"
-              type="date"
-              value={transferredDateKey}
-              onChange={(e) => setTransferredDateKey(e.target.value)}
-            />
-          </div>
-          <div className="grid gap-2">
-            <Label htmlFor="tf-business-day">สำหรับวันทำการ</Label>
-            <Input
-              id="tf-business-day"
-              type="date"
-              value={businessDayKey}
-              onChange={(e) => setBusinessDayKey(e.target.value)}
-            />
-            <p className="text-xs text-muted-foreground">
-              เลือกวันทำการที่ยอดนี้เป็นเงินของยอดขายวันนั้น ไม่ใช่วันที่เงินโอนเข้าจริงเสมอไป — เช่น ยอด QR
-              ช่วงหลังเที่ยงคืนมักโอนเข้าอีกทีคืนถัดไป แต่ยังนับเป็นยอดของวันทำการเดิม
-            </p>
-          </div>
-          <div className="grid gap-2">
-            <Label htmlFor="tf-amount">จำนวนเงิน</Label>
-            <Input
-              id="tf-amount"
-              type="number"
-              inputMode="decimal"
-              min={0}
-              value={amountText}
-              onChange={(e) => setAmountText(e.target.value)}
-              autoFocus
-            />
-          </div>
-          <div className="grid gap-2">
-            <Label htmlFor="tf-note">หมายเหตุ (ไม่บังคับ)</Label>
-            <Input id="tf-note" value={note} onChange={(e) => setNote(e.target.value)} placeholder="เช่น K SHOP รอบ 23:00" />
-          </div>
-        </div>
-        <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={saving}>
-            ยกเลิก
-          </Button>
-          <Button onClick={handleSave} disabled={!canSave || saving}>
-            บันทึก
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+    <TableRow className="bg-muted/30">
+      <TableCell>
+        <Input
+          type="date"
+          value={transferredDateKey}
+          onChange={(e) => setTransferredDateKey(e.target.value)}
+          className="h-9 w-36"
+        />
+      </TableCell>
+      <TableCell>
+        <Input type="date" value={businessDayKey} onChange={(e) => setBusinessDayKey(e.target.value)} className="h-9 w-36" />
+      </TableCell>
+      <TableCell>
+        <Input
+          value={note}
+          onChange={(e) => setNote(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && handleAdd()}
+          placeholder="เช่น K SHOP รอบ 23:00"
+          className="h-9"
+        />
+      </TableCell>
+      <TableCell>
+        <Input
+          type="number"
+          inputMode="decimal"
+          min={0}
+          value={amountText}
+          onChange={(e) => setAmountText(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && handleAdd()}
+          placeholder="0.00"
+          className="h-9 text-right"
+        />
+      </TableCell>
+      <TableCell>
+        <Button size="sm" onClick={handleAdd} disabled={!canSave || saving}>
+          +
+        </Button>
+      </TableCell>
+    </TableRow>
   );
 }
