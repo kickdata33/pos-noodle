@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import { AdminSection } from "@/components/admin/AdminSection";
 import { Badge } from "@/components/ui/badge";
@@ -61,6 +61,11 @@ export default function AccountingPage() {
   // instead of guessed from the clock (see `BankTransfer.businessDayKey`'s comment).
   const [fromHour, setFromHour] = useState(16);
   const [toHour, setToHour] = useState(4);
+
+  // The รายจ่าย table has its own single-day filter, independent of the range picker above —
+  // that picker can span a week/month for the reconciliation table, but for รายจ่าย the user
+  // wants exactly one day's entries on screen at a time, nothing else mixed in.
+  const [expenseDay, setExpenseDay] = useState(() => todayKey());
 
   const [orders, setOrders] = useState<Order[]>([]);
   const [paymentMethods, setPaymentMethods] = useState<PaymentMethod[]>([]);
@@ -125,24 +130,17 @@ export default function AccountingPage() {
     [orders, paymentMethods, transfers, expenses, range.startKey, range.endKey, fromHour]
   );
 
+  // เลือกวันไหน โชว์แค่วันนั้น — filtered by `expenseDay` alone, not the range picker above, so
+  // switching the day never mixes in another day's rows.
   const visibleExpenses = useMemo(
     () =>
       expenses
-        .filter((e) => e.dateKey >= range.startKey && e.dateKey <= range.endKey)
-        // Newest date first; same-day entries then fall back to createdAt (newest first) instead
-        // of whatever arbitrary order Firestore happened to return them in — without this
-        // tie-break, same-day rows could reorder themselves on every reload.
-        .sort((a, b) => (a.dateKey === b.dateKey ? b.createdAt - a.createdAt : a.dateKey < b.dateKey ? 1 : -1)),
-    [expenses, range.startKey, range.endKey]
+        .filter((e) => e.dateKey === expenseDay)
+        // Newest first, so a just-added entry appears at the top instead of the bottom.
+        .sort((a, b) => b.createdAt - a.createdAt),
+    [expenses, expenseDay]
   );
-  // แยกเป็นวันใครวันมัน — the รายจ่าย table groups rows under a header per day instead of a flat
-  // list, so a busy day's several categories don't blur together with the next day's. Cheap to
-  // compute since `visibleExpenses` is already sorted with same-day rows contiguous.
-  const expenseDayTotals = useMemo(() => {
-    const totals = new Map<string, number>();
-    for (const e of visibleExpenses) totals.set(e.dateKey, (totals.get(e.dateKey) ?? 0) + e.amount);
-    return totals;
-  }, [visibleExpenses]);
+  const expenseDayTotal = useMemo(() => visibleExpenses.reduce((sum, e) => sum + e.amount, 0), [visibleExpenses]);
   const visibleTransfers = useMemo(
     () =>
       transfers
@@ -265,6 +263,15 @@ export default function AccountingPage() {
           <CardTitle>รายจ่าย</CardTitle>
         </CardHeader>
         <CardContent>
+          {/* Its own single-day filter, separate from the range picker above — เลือกวันไหน โชว์
+              แค่วันนั้น, never mixed with any other day. The quick-add row's own date field below
+              doubles as this filter (`dateKey`/`onDateKeyChange`), so picking a day to view and
+              picking which day a new entry belongs to are the same action. */}
+          <div className="mb-3 flex items-center gap-2">
+            <Label className="text-sm text-muted-foreground">วันที่</Label>
+            <DateField value={expenseDay} onChange={setExpenseDay} className="h-9 w-36" />
+            <span className="text-sm font-medium">{formatKey(expenseDay)}</span>
+          </div>
           <Table className="table-fixed">
             {/* Fixed, percentage-based column widths (sum to 100%) so the row never needs to
                 grow past the card's own width and force a horizontal scrollbar — every cell's
@@ -289,35 +296,29 @@ export default function AccountingPage() {
             </TableHeader>
             <TableBody>
               {shopId && appUser ? (
-                <ExpenseQuickAddRow shopId={shopId} createdBy={appUser.id} createdByName={appUser.name} />
+                <ExpenseQuickAddRow
+                  shopId={shopId}
+                  createdBy={appUser.id}
+                  createdByName={appUser.name}
+                  dateKey={expenseDay}
+                  onDateKeyChange={setExpenseDay}
+                />
               ) : null}
-              {visibleExpenses.map((e, i) => {
-                const isNewDay = i === 0 || visibleExpenses[i - 1].dateKey !== e.dateKey;
-                return (
-                  <Fragment key={e.id}>
-                    {isNewDay ? (
-                      <TableRow className="bg-muted/50 hover:bg-muted/50">
-                        <TableCell colSpan={5} className="py-2 font-semibold">
-                          {formatKey(e.dateKey)}
-                        </TableCell>
-                        <TableCell className="py-2 text-right font-semibold">
-                          {formatCurrency(expenseDayTotals.get(e.dateKey) ?? 0, currency)}
-                        </TableCell>
-                      </TableRow>
-                    ) : null}
-                    <ExpenseRow expense={e} currency={currency} />
-                  </Fragment>
-                );
-              })}
+              {visibleExpenses.map((e) => (
+                <ExpenseRow key={e.id} expense={e} currency={currency} />
+              ))}
               {visibleExpenses.length === 0 ? (
                 <TableRow>
                   <TableCell colSpan={6} className="text-center text-muted-foreground">
-                    ยังไม่มีรายจ่ายในช่วงนี้
+                    ยังไม่มีรายจ่ายวันนี้
                   </TableCell>
                 </TableRow>
               ) : null}
             </TableBody>
           </Table>
+          <p className="mt-3 text-right text-sm font-medium">
+            ยอดรวมวันที่ {formatKey(expenseDay)} {formatCurrency(expenseDayTotal, currency)}
+          </p>
         </CardContent>
       </Card>
 
@@ -462,12 +463,17 @@ function ExpenseQuickAddRow({
   shopId,
   createdBy,
   createdByName,
+  dateKey,
+  onDateKeyChange,
 }: {
   shopId: string;
   createdBy: string;
   createdByName: string;
+  // Controlled from the parent, not local state — this date field IS the "which day am I
+  // looking at" filter for the table below it, so changing it here also changes what's shown.
+  dateKey: string;
+  onDateKeyChange: (dateKey: string) => void;
 }) {
-  const [dateKey, setDateKey] = useState(todayKey());
   const [category, setCategory] = useState<ExpenseCategory>(EXPENSE_CATEGORIES[0]);
   const [description, setDescription] = useState("");
   const [amountText, setAmountText] = useState("");
@@ -504,7 +510,7 @@ function ExpenseQuickAddRow({
   return (
     <TableRow className="bg-muted/30">
       <TableCell>
-        <DateField value={dateKey} onChange={setDateKey} className="h-9 w-full" />
+        <DateField value={dateKey} onChange={onDateKeyChange} className="h-9 w-full" />
       </TableCell>
       <TableCell>
         <Select value={category} onValueChange={(v) => setCategory(v as ExpenseCategory)}>
