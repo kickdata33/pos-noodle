@@ -12,7 +12,16 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { formatCurrency } from "@/lib/format";
 import { useAuth } from "@/hooks/useAuth";
-import { bangkokDateKey, bangkokDateKeyWithCutoff, customRange, resolvePreset, type DateRange, type ReportPreset } from "@/lib/pos/dateRange";
+import {
+  addDaysToKey,
+  bangkokDateKey,
+  bangkokDateKeyWithCutoff,
+  bangkokDayBounds,
+  customRange,
+  resolvePreset,
+  type DateRange,
+  type ReportPreset,
+} from "@/lib/pos/dateRange";
 import { reconciliationRows } from "@/lib/pos/reconciliation";
 import { bankTransferRepository } from "@/repositories/bankTransferRepository";
 import { expenseRepository } from "@/repositories/expenseRepository";
@@ -258,7 +267,7 @@ export default function AccountingPage() {
                   <TableCell>
                     <Badge variant="muted">{e.category}</Badge>
                   </TableCell>
-                  <TableCell>{e.description}</TableCell>
+                  <TableCell className="text-muted-foreground">{e.description || "-"}</TableCell>
                   <TableCell>{e.paymentMethod === "cash" ? "เงินสด" : "โอน"}</TableCell>
                   <TableCell className="text-right">{formatCurrency(e.amount, currency)}</TableCell>
                   <TableCell />
@@ -273,6 +282,9 @@ export default function AccountingPage() {
               ) : null}
             </TableBody>
           </Table>
+          <p className="mt-3 text-right text-sm font-medium">
+            ยอดรวมทั้งหมด {formatCurrency(totals.expenses, currency)}
+          </p>
         </CardContent>
       </Card>
 
@@ -284,10 +296,10 @@ export default function AccountingPage() {
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>วันที่โอนเข้าจริง</TableHead>
                 <TableHead>สำหรับวันทำการ</TableHead>
+                <TableHead className="text-right">ยอด 16:00-23:00</TableHead>
+                <TableHead className="text-right">ยอด 23:00-04:00</TableHead>
                 <TableHead>หมายเหตุ</TableHead>
-                <TableHead className="text-right">จำนวนเงิน</TableHead>
                 <TableHead className="w-10" />
               </TableRow>
             </TableHeader>
@@ -300,15 +312,22 @@ export default function AccountingPage() {
                   createdByName={appUser.name}
                 />
               ) : null}
-              {visibleTransfers.map((t) => (
-                <TableRow key={t.id}>
-                  <TableCell>{formatKey(bangkokDateKey(t.transferredAt))}</TableCell>
-                  <TableCell>{formatKey(t.businessDayKey)}</TableCell>
-                  <TableCell className="text-muted-foreground">{t.note || "-"}</TableCell>
-                  <TableCell className="text-right">{formatCurrency(t.amount, currency)}</TableCell>
-                  <TableCell />
-                </TableRow>
-              ))}
+              {visibleTransfers.map((t) => {
+                // Each logged transfer is one settlement batch — tell which of the two it is by
+                // comparing its own transfer date against the business day it's logged under
+                // (batch 1 settles the calendar day *before* the label date, batch 2 on the label
+                // date itself; see `TransferQuickAddRow`'s comment above for why).
+                const isBatch1 = bangkokDateKey(t.transferredAt) === addDaysToKey(t.businessDayKey, -1);
+                return (
+                  <TableRow key={t.id}>
+                    <TableCell>{formatKey(t.businessDayKey)}</TableCell>
+                    <TableCell className="text-right">{isBatch1 ? formatCurrency(t.amount, currency) : "-"}</TableCell>
+                    <TableCell className="text-right">{isBatch1 ? "-" : formatCurrency(t.amount, currency)}</TableCell>
+                    <TableCell className="text-muted-foreground">{t.note || "-"}</TableCell>
+                    <TableCell />
+                  </TableRow>
+                );
+              })}
               {visibleTransfers.length === 0 ? (
                 <TableRow>
                   <TableCell colSpan={5} className="text-center text-muted-foreground">
@@ -379,7 +398,9 @@ function ExpenseQuickAddRow({
   const [saving, setSaving] = useState(false);
 
   const amount = Number(amountText);
-  const canSave = dateKey && description.trim() && Number.isFinite(amount) && amount > 0;
+  // รายการ (description) is optional now — some expenses (e.g. a flat "ค่าเช่าที่" line) don't
+  // need a separate detail, and requiring one just slows down quick entry for no real benefit.
+  const canSave = Boolean(dateKey) && Number.isFinite(amount) && amount > 0;
 
   async function handleAdd() {
     if (!canSave || saving) return;
@@ -427,7 +448,7 @@ function ExpenseQuickAddRow({
           value={description}
           onChange={(e) => setDescription(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && handleAdd()}
-          placeholder="เช่น หมู 5 กก."
+          placeholder="เช่น หมู 5 กก. (ไม่บังคับ)"
           className="h-9"
         />
       </TableCell>
@@ -475,33 +496,64 @@ function TransferQuickAddRow({
   createdBy: string;
   createdByName: string;
 }) {
-  const [transferredDateKey, setTransferredDateKey] = useState(todayKey());
   // Guess which business day is "currently open" right now, given the chosen start hour — just
   // a starting point the person can change, not a claim of correctness (see
   // `BankTransfer.businessDayKey`'s comment on why this is always a human decision).
   const [businessDayKey, setBusinessDayKey] = useState(() => bangkokDateKeyWithCutoff(Date.now(), fromHour));
-  const [amountText, setAmountText] = useState("");
+  // Split into the two real K SHOP settlement batches a single business day actually receives
+  // (see `lib/pos/reconciliation.ts`'s file comment) — the 16:00-23:00 portion transfers that
+  // same night, the 23:00-04:00 portion transfers the *next* night. Either can be left blank if
+  // only one has landed so far; each filled-in amount becomes its own `BankTransfer` doc, both
+  // tagged with the same `businessDayKey` so the reconciliation table sums them together.
+  const [amount1Text, setAmount1Text] = useState("");
+  const [amount2Text, setAmount2Text] = useState("");
   const [note, setNote] = useState("");
   const [saving, setSaving] = useState(false);
 
-  const amount = Number(amountText);
-  const canSave = transferredDateKey && businessDayKey && Number.isFinite(amount) && amount > 0;
+  const amount1 = Number(amount1Text);
+  const amount2 = Number(amount2Text);
+  const hasAmount1 = amount1Text.trim() !== "" && Number.isFinite(amount1) && amount1 > 0;
+  const hasAmount2 = amount2Text.trim() !== "" && Number.isFinite(amount2) && amount2 > 0;
+  const canSave = Boolean(businessDayKey) && (hasAmount1 || hasAmount2);
 
   async function handleAdd() {
     if (!canSave || saving) return;
     setSaving(true);
     try {
-      await bankTransferRepository.create({
-        shopId,
-        transferredAt: Date.parse(`${transferredDateKey}T00:00:00+07:00`),
-        amount,
-        businessDayKey,
-        note: note.trim(),
-        createdBy,
-        createdByName,
-        createdAt: Date.now(),
-      });
-      setAmountText("");
+      // Batch 1 (16:00-23:00) settles at 23:00 the calendar day *before* the business-day label
+      // (a shift labeled "19" starts 16:00 on the 18th); batch 2 (23:00-04:00) settles at 23:00
+      // on the label date itself — see this file's businessDayKey comment above.
+      const batch1At = bangkokDayBounds(addDaysToKey(businessDayKey, -1)).startMs + 23 * 60 * 60 * 1000;
+      const batch2At = bangkokDayBounds(businessDayKey).startMs + 23 * 60 * 60 * 1000;
+      const trimmedNote = note.trim();
+      await Promise.all([
+        hasAmount1
+          ? bankTransferRepository.create({
+              shopId,
+              transferredAt: batch1At,
+              amount: amount1,
+              businessDayKey,
+              note: trimmedNote ? `${trimmedNote} (16:00-23:00)` : "รอบ 16:00-23:00",
+              createdBy,
+              createdByName,
+              createdAt: Date.now(),
+            })
+          : Promise.resolve(),
+        hasAmount2
+          ? bankTransferRepository.create({
+              shopId,
+              transferredAt: batch2At,
+              amount: amount2,
+              businessDayKey,
+              note: trimmedNote ? `${trimmedNote} (23:00-04:00)` : "รอบ 23:00-04:00",
+              createdBy,
+              createdByName,
+              createdAt: Date.now(),
+            })
+          : Promise.resolve(),
+      ]);
+      setAmount1Text("");
+      setAmount2Text("");
       setNote("");
     } finally {
       setSaving(false);
@@ -511,23 +563,18 @@ function TransferQuickAddRow({
   return (
     <TableRow className="bg-muted/30">
       <TableCell>
-        <Input
-          type="date"
-          value={transferredDateKey}
-          onChange={(e) => setTransferredDateKey(e.target.value)}
-          className="h-9 w-36"
-        />
-      </TableCell>
-      <TableCell>
         <Input type="date" value={businessDayKey} onChange={(e) => setBusinessDayKey(e.target.value)} className="h-9 w-36" />
       </TableCell>
       <TableCell>
         <Input
-          value={note}
-          onChange={(e) => setNote(e.target.value)}
+          type="number"
+          inputMode="decimal"
+          min={0}
+          value={amount1Text}
+          onChange={(e) => setAmount1Text(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && handleAdd()}
-          placeholder="เช่น K SHOP รอบ 23:00"
-          className="h-9"
+          placeholder="ยอด 16:00-23:00"
+          className="h-9 text-right"
         />
       </TableCell>
       <TableCell>
@@ -535,11 +582,20 @@ function TransferQuickAddRow({
           type="number"
           inputMode="decimal"
           min={0}
-          value={amountText}
-          onChange={(e) => setAmountText(e.target.value)}
+          value={amount2Text}
+          onChange={(e) => setAmount2Text(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && handleAdd()}
-          placeholder="0.00"
+          placeholder="ยอด 23:00-04:00"
           className="h-9 text-right"
+        />
+      </TableCell>
+      <TableCell>
+        <Input
+          value={note}
+          onChange={(e) => setNote(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && handleAdd()}
+          placeholder="หมายเหตุ (ไม่บังคับ)"
+          className="h-9"
         />
       </TableCell>
       <TableCell>
