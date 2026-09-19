@@ -6,6 +6,7 @@ import { AdminSection } from "@/components/admin/AdminSection";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -66,6 +67,13 @@ export default function AccountingPage() {
   // that picker can span a week/month for the reconciliation table, but for รายจ่าย the user
   // wants exactly one day's entries on screen at a time, nothing else mixed in.
   const [expenseDay, setExpenseDay] = useState(() => todayKey());
+
+  // Clicking a row in the reconciliation table opens a detail dialog for that business day —
+  // the transfer amounts already logged for it (item: "ไม่ต้องเลื่อนลงไปดู" — no scrolling down to
+  // the เงินโอนเข้าบัญชี card), plus every bill (order) that fell inside that day's shift window,
+  // so a discrepancy can be chased down without leaving this one popup.
+  const [selectedDay, setSelectedDay] = useState<string | null>(null);
+  const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
 
   const [orders, setOrders] = useState<Order[]>([]);
   const [paymentMethods, setPaymentMethods] = useState<PaymentMethod[]>([]);
@@ -168,6 +176,32 @@ export default function AccountingPage() {
     [transfers, range.startKey, range.endKey]
   );
 
+  const selectedDayRow = useMemo(() => rows.find((r) => r.dateKey === selectedDay) ?? null, [rows, selectedDay]);
+
+  const selectedDayTransfers = useMemo(
+    () =>
+      selectedDay
+        ? transfers
+            .filter((t) => t.businessDayKey === selectedDay)
+            .sort((a, b) => b.transferredAt - a.transferredAt)
+        : [],
+    [transfers, selectedDay]
+  );
+
+  // Same business-day grouping as `businessDaySales` (`bangkokDateKeyWithCutoff`,
+  // paidAt-or-createdAt) so "บิลวันนี้" shows exactly the orders this row's QR/เงินสด figures were
+  // computed from — the shift runs from `fromHour` (16:00) through the small hours of the next
+  // calendar day, not plain midnight-to-midnight.
+  const selectedDayOrders = useMemo(
+    () =>
+      selectedDay
+        ? orders
+            .filter((o) => bangkokDateKeyWithCutoff(o.paidAt ?? o.createdAt, fromHour) === selectedDay)
+            .sort((a, b) => (a.paidAt ?? a.createdAt) - (b.paidAt ?? b.createdAt))
+        : [],
+    [orders, selectedDay, fromHour]
+  );
+
   const totals = useMemo(
     () =>
       rows.reduce(
@@ -242,7 +276,7 @@ export default function AccountingPage() {
             </TableHeader>
             <TableBody>
               {rows.map((r) => (
-                <TableRow key={r.dateKey}>
+                <TableRow key={r.dateKey} className="cursor-pointer hover:bg-accent/50" onClick={() => setSelectedDay(r.dateKey)}>
                   <TableCell className="font-medium">{formatKey(r.dateKey)}</TableCell>
                   <TableCell className="text-right">{formatCurrency(r.cashSales, currency)}</TableCell>
                   <TableCell className="text-right">{formatCurrency(r.qrSales, currency)}</TableCell>
@@ -375,6 +409,126 @@ export default function AccountingPage() {
           </Table>
         </CardContent>
       </Card>
+
+      <Dialog open={selectedDay !== null} onOpenChange={(open) => !open && setSelectedDay(null)}>
+        <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>รายละเอียดวันที่ {selectedDay ? formatKey(selectedDay) : ""}</DialogTitle>
+          </DialogHeader>
+          {selectedDayRow ? (
+            <p className="-mt-2 text-sm text-muted-foreground">
+              QR {formatCurrency(selectedDayRow.qrSales, currency)} · โอนเข้าแล้ว {formatCurrency(selectedDayRow.transferred, currency)} · รอโอน{" "}
+              {selectedDayRow.pendingTransfer > 0 ? formatCurrency(selectedDayRow.pendingTransfer, currency) : "-"} ·{" "}
+              <Badge variant={selectedDayRow.settled ? "success" : "default"}>{selectedDayRow.settled ? "ครบ" : "รอ"}</Badge>
+            </p>
+          ) : null}
+
+          <div>
+            <h3 className="mb-2 text-sm font-semibold">เงินโอนเข้าบัญชี</h3>
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>สำหรับวันทำการ</TableHead>
+                  <TableHead className="text-right">ยอด 16:00-23:00</TableHead>
+                  <TableHead className="text-right">ยอด 23:00-04:00</TableHead>
+                  <TableHead>หมายเหตุ</TableHead>
+                  <TableHead className="w-32" />
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {selectedDayTransfers.map((t) => (
+                  <TransferRow key={t.id} transfer={t} currency={currency} />
+                ))}
+                {selectedDayTransfers.length === 0 ? (
+                  <TableRow>
+                    <TableCell colSpan={5} className="text-center text-muted-foreground">
+                      ยังไม่มีรายการโอนวันนี้
+                    </TableCell>
+                  </TableRow>
+                ) : null}
+              </TableBody>
+            </Table>
+          </div>
+
+          <div>
+            <h3 className="mb-2 text-sm font-semibold">บิลวันนี้ ({selectedDayOrders.length} บิล)</h3>
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>เลขที่ออเดอร์</TableHead>
+                  <TableHead>ช่องทาง/โต๊ะ</TableHead>
+                  <TableHead>ชำระโดย</TableHead>
+                  <TableHead className="text-right">ยอด</TableHead>
+                  <TableHead>เวลา</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {selectedDayOrders.map((o) => (
+                  <TableRow key={o.id} className="cursor-pointer hover:bg-accent" onClick={() => setSelectedOrder(o)}>
+                    <TableCell>{o.orderNumber || "—"}</TableCell>
+                    <TableCell>
+                      {o.tableName ? `โต๊ะ ${o.tableName}` : o.channelName}
+                      {o.customerLabel ? ` · ${o.customerLabel}` : ""}
+                    </TableCell>
+                    <TableCell>{o.paymentMethodName || "-"}</TableCell>
+                    <TableCell className="text-right">{formatCurrency(o.total, currency)}</TableCell>
+                    <TableCell>
+                      {new Date(o.paidAt ?? o.createdAt).toLocaleTimeString("th-TH", { hour: "2-digit", minute: "2-digit" })}
+                    </TableCell>
+                  </TableRow>
+                ))}
+                {selectedDayOrders.length === 0 ? (
+                  <TableRow>
+                    <TableCell colSpan={5} className="text-center text-muted-foreground">
+                      ไม่มีบิลวันนี้
+                    </TableCell>
+                  </TableRow>
+                ) : null}
+              </TableBody>
+            </Table>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={selectedOrder !== null} onOpenChange={(open) => !open && setSelectedOrder(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>
+              {selectedOrder?.orderNumber} — {selectedOrder?.tableName ? `โต๊ะ ${selectedOrder.tableName}` : selectedOrder?.channelName}
+              {selectedOrder?.customerLabel ? ` · ${selectedOrder.customerLabel}` : ""}
+            </DialogTitle>
+          </DialogHeader>
+          <div className="grid gap-3">
+            {selectedOrder?.items.map((item) => (
+              <div key={item.id} className="flex items-start justify-between gap-2 border-b border-border pb-2 text-sm">
+                <div>
+                  <p className="font-medium">
+                    {item.quantity}x {item.productName}
+                  </p>
+                  {item.modifiers.map((m) => (
+                    <p key={m.optionId} className="text-xs text-muted-foreground">
+                      {m.optionName}
+                    </p>
+                  ))}
+                  {item.note ? <p className="text-xs text-muted-foreground">หมายเหตุ: {item.note}</p> : null}
+                </div>
+                <span>{formatCurrency(item.lineTotal, currency)}</span>
+              </div>
+            ))}
+            {selectedOrder ? (
+              <div className="grid gap-1 text-sm">
+                <div className="flex justify-between text-base font-semibold">
+                  <span>ยอดสุทธิ</span>
+                  <span>{formatCurrency(selectedOrder.total, currency)}</span>
+                </div>
+                {selectedOrder.paymentMethodName ? (
+                  <p className="text-muted-foreground">ชำระโดย {selectedOrder.paymentMethodName}</p>
+                ) : null}
+              </div>
+            ) : null}
+          </div>
+        </DialogContent>
+      </Dialog>
     </AdminSection>
   );
 }
