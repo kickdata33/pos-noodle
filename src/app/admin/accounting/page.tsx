@@ -254,7 +254,7 @@ export default function AccountingPage() {
                 <TableHead>รายการ</TableHead>
                 <TableHead>จ่ายด้วย</TableHead>
                 <TableHead className="text-right">จำนวนเงิน</TableHead>
-                <TableHead className="w-10" />
+                <TableHead className="w-32" />
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -262,16 +262,7 @@ export default function AccountingPage() {
                 <ExpenseQuickAddRow shopId={shopId} createdBy={appUser.id} createdByName={appUser.name} />
               ) : null}
               {visibleExpenses.map((e) => (
-                <TableRow key={e.id}>
-                  <TableCell>{formatKey(e.dateKey)}</TableCell>
-                  <TableCell>
-                    <Badge variant="muted">{e.category}</Badge>
-                  </TableCell>
-                  <TableCell className="text-muted-foreground">{e.description || "-"}</TableCell>
-                  <TableCell>{e.paymentMethod === "cash" ? "เงินสด" : "โอน"}</TableCell>
-                  <TableCell className="text-right">{formatCurrency(e.amount, currency)}</TableCell>
-                  <TableCell />
-                </TableRow>
+                <ExpenseRow key={e.id} expense={e} currency={currency} />
               ))}
               {visibleExpenses.length === 0 ? (
                 <TableRow>
@@ -300,7 +291,7 @@ export default function AccountingPage() {
                 <TableHead className="text-right">ยอด 16:00-23:00</TableHead>
                 <TableHead className="text-right">ยอด 23:00-04:00</TableHead>
                 <TableHead>หมายเหตุ</TableHead>
-                <TableHead className="w-10" />
+                <TableHead className="w-32" />
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -312,22 +303,9 @@ export default function AccountingPage() {
                   createdByName={appUser.name}
                 />
               ) : null}
-              {visibleTransfers.map((t) => {
-                // Each logged transfer is one settlement batch — tell which of the two it is by
-                // comparing its own transfer date against the business day it's logged under
-                // (batch 1 settles the calendar day *before* the label date, batch 2 on the label
-                // date itself; see `TransferQuickAddRow`'s comment above for why).
-                const isBatch1 = bangkokDateKey(t.transferredAt) === addDaysToKey(t.businessDayKey, -1);
-                return (
-                  <TableRow key={t.id}>
-                    <TableCell>{formatKey(t.businessDayKey)}</TableCell>
-                    <TableCell className="text-right">{isBatch1 ? formatCurrency(t.amount, currency) : "-"}</TableCell>
-                    <TableCell className="text-right">{isBatch1 ? "-" : formatCurrency(t.amount, currency)}</TableCell>
-                    <TableCell className="text-muted-foreground">{t.note || "-"}</TableCell>
-                    <TableCell />
-                  </TableRow>
-                );
-              })}
+              {visibleTransfers.map((t) => (
+                <TransferRow key={t.id} transfer={t} currency={currency} />
+              ))}
               {visibleTransfers.length === 0 ? (
                 <TableRow>
                   <TableCell colSpan={5} className="text-center text-muted-foreground">
@@ -484,6 +462,139 @@ function ExpenseQuickAddRow({
   );
 }
 
+/**
+ * One row of the รายจ่าย table — a plain read row by default, or (after "แก้ไข") the same fields
+ * as `ExpenseQuickAddRow` inline for correcting a typo or amount, plus "ลบ" for a mistaken entry
+ * entirely. Both dateKey inputs (here and in the quick-add row) are plain `<input type="date">`
+ * with no `min`, so backdating a missed entry has always worked — this just adds the ability to
+ * fix one after the fact.
+ */
+function ExpenseRow({ expense, currency }: { expense: Expense; currency: string }) {
+  const [editing, setEditing] = useState(false);
+  const [dateKey, setDateKey] = useState(expense.dateKey);
+  const [category, setCategory] = useState<ExpenseCategory>(expense.category);
+  const [description, setDescription] = useState(expense.description);
+  const [paymentMethod, setPaymentMethod] = useState<"cash" | "transfer">(expense.paymentMethod);
+  const [amountText, setAmountText] = useState(String(expense.amount));
+  const [saving, setSaving] = useState(false);
+
+  function startEdit() {
+    setDateKey(expense.dateKey);
+    setCategory(expense.category);
+    setDescription(expense.description);
+    setPaymentMethod(expense.paymentMethod);
+    setAmountText(String(expense.amount));
+    setEditing(true);
+  }
+
+  const amount = Number(amountText);
+  const canSave = Boolean(dateKey) && Number.isFinite(amount) && amount > 0;
+
+  async function handleSave() {
+    if (!canSave || saving) return;
+    setSaving(true);
+    try {
+      await expenseRepository.update(expense.id, { dateKey, category, description: description.trim(), paymentMethod, amount });
+      setEditing(false);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handleDelete() {
+    const label = expense.description || expense.category;
+    if (!window.confirm(`ลบรายจ่าย "${label}" ${formatCurrency(expense.amount, currency)}?`)) return;
+    await expenseRepository.remove(expense.id);
+  }
+
+  if (editing) {
+    return (
+      <TableRow className="bg-muted/20">
+        <TableCell>
+          <Input type="date" value={dateKey} onChange={(e) => setDateKey(e.target.value)} className="h-9 w-36" />
+        </TableCell>
+        <TableCell>
+          <Select value={category} onValueChange={(v) => setCategory(v as ExpenseCategory)}>
+            <SelectTrigger className="h-9 w-36 text-sm">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {EXPENSE_CATEGORIES.map((c) => (
+                <SelectItem key={c} value={c}>
+                  {c}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </TableCell>
+        <TableCell>
+          <Input
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && handleSave()}
+            placeholder="(ไม่บังคับ)"
+            className="h-9"
+          />
+        </TableCell>
+        <TableCell>
+          <Select value={paymentMethod} onValueChange={(v) => setPaymentMethod(v as "cash" | "transfer")}>
+            <SelectTrigger className="h-9 w-24 text-sm">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="cash">เงินสด</SelectItem>
+              <SelectItem value="transfer">โอน</SelectItem>
+            </SelectContent>
+          </Select>
+        </TableCell>
+        <TableCell>
+          <Input
+            type="number"
+            inputMode="decimal"
+            min={0}
+            value={amountText}
+            onChange={(e) => setAmountText(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && handleSave()}
+            className="h-9 text-right"
+          />
+        </TableCell>
+        <TableCell>
+          <div className="flex justify-end gap-1">
+            <Button size="sm" onClick={handleSave} disabled={!canSave || saving}>
+              บันทึก
+            </Button>
+            <Button size="sm" variant="ghost" onClick={() => setEditing(false)}>
+              ยกเลิก
+            </Button>
+          </div>
+        </TableCell>
+      </TableRow>
+    );
+  }
+
+  return (
+    <TableRow>
+      <TableCell>{formatKey(expense.dateKey)}</TableCell>
+      <TableCell>
+        <Badge variant="muted">{expense.category}</Badge>
+      </TableCell>
+      <TableCell className="text-muted-foreground">{expense.description || "-"}</TableCell>
+      <TableCell>{expense.paymentMethod === "cash" ? "เงินสด" : "โอน"}</TableCell>
+      <TableCell className="text-right">{formatCurrency(expense.amount, currency)}</TableCell>
+      <TableCell>
+        <div className="flex justify-end gap-1">
+          <Button size="sm" variant="ghost" onClick={startEdit}>
+            แก้ไข
+          </Button>
+          <Button size="sm" variant="ghost" className="text-destructive" onClick={handleDelete}>
+            ลบ
+          </Button>
+        </div>
+      </TableCell>
+    </TableRow>
+  );
+}
+
 /** Same quick-add pattern as `ExpenseQuickAddRow`, for the เงินโอนเข้าบัญชี table. */
 function TransferQuickAddRow({
   shopId,
@@ -602,6 +713,108 @@ function TransferQuickAddRow({
         <Button size="sm" onClick={handleAdd} disabled={!canSave || saving}>
           +
         </Button>
+      </TableCell>
+    </TableRow>
+  );
+}
+
+
+/**
+ * One row of the เงินโอนเข้าบัญชี table — a plain read row by default, or (after "แก้ไข") lets
+ * correcting the business day, this one batch's amount, or the note; "ลบ" removes a mistaken or
+ * duplicate entry entirely. Each logged transfer is always exactly one settlement batch, so
+ * editing only ever touches one amount, not two — same `isBatch1` classification used for display.
+ */
+function TransferRow({ transfer, currency }: { transfer: BankTransfer; currency: string }) {
+  const isBatch1 = bangkokDateKey(transfer.transferredAt) === addDaysToKey(transfer.businessDayKey, -1);
+
+  const [editing, setEditing] = useState(false);
+  const [businessDayKey, setBusinessDayKey] = useState(transfer.businessDayKey);
+  const [amountText, setAmountText] = useState(String(transfer.amount));
+  const [note, setNote] = useState(transfer.note);
+  const [saving, setSaving] = useState(false);
+
+  function startEdit() {
+    setBusinessDayKey(transfer.businessDayKey);
+    setAmountText(String(transfer.amount));
+    setNote(transfer.note);
+    setEditing(true);
+  }
+
+  const amount = Number(amountText);
+  const canSave = Boolean(businessDayKey) && Number.isFinite(amount) && amount > 0;
+
+  async function handleSave() {
+    if (!canSave || saving) return;
+    setSaving(true);
+    try {
+      // Editing the business day alone doesn't move `transferredAt` (which real-world date the
+      // transfer landed on) — only which shift it's credited against, same as the quick-add row
+      // logging it there in the first place.
+      await bankTransferRepository.update(transfer.id, { businessDayKey, amount, note: note.trim() });
+      setEditing(false);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handleDelete() {
+    if (!window.confirm(`ลบรายการโอน ${formatCurrency(transfer.amount, currency)} (${formatKey(transfer.businessDayKey)})?`)) return;
+    await bankTransferRepository.remove(transfer.id);
+  }
+
+  if (editing) {
+    return (
+      <TableRow className="bg-muted/20">
+        <TableCell>
+          <Input type="date" value={businessDayKey} onChange={(e) => setBusinessDayKey(e.target.value)} className="h-9 w-36" />
+        </TableCell>
+        <TableCell colSpan={2}>
+          <div className="flex items-center justify-end gap-2">
+            <span className="text-xs text-muted-foreground">{isBatch1 ? "16:00-23:00" : "23:00-04:00"}</span>
+            <Input
+              type="number"
+              inputMode="decimal"
+              min={0}
+              value={amountText}
+              onChange={(e) => setAmountText(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && handleSave()}
+              className="h-9 w-28 text-right"
+            />
+          </div>
+        </TableCell>
+        <TableCell>
+          <Input value={note} onChange={(e) => setNote(e.target.value)} onKeyDown={(e) => e.key === "Enter" && handleSave()} className="h-9" />
+        </TableCell>
+        <TableCell>
+          <div className="flex justify-end gap-1">
+            <Button size="sm" onClick={handleSave} disabled={!canSave || saving}>
+              บันทึก
+            </Button>
+            <Button size="sm" variant="ghost" onClick={() => setEditing(false)}>
+              ยกเลิก
+            </Button>
+          </div>
+        </TableCell>
+      </TableRow>
+    );
+  }
+
+  return (
+    <TableRow>
+      <TableCell>{formatKey(transfer.businessDayKey)}</TableCell>
+      <TableCell className="text-right">{isBatch1 ? formatCurrency(transfer.amount, currency) : "-"}</TableCell>
+      <TableCell className="text-right">{isBatch1 ? "-" : formatCurrency(transfer.amount, currency)}</TableCell>
+      <TableCell className="text-muted-foreground">{transfer.note || "-"}</TableCell>
+      <TableCell>
+        <div className="flex justify-end gap-1">
+          <Button size="sm" variant="ghost" onClick={startEdit}>
+            แก้ไข
+          </Button>
+          <Button size="sm" variant="ghost" className="text-destructive" onClick={handleDelete}>
+            ลบ
+          </Button>
+        </div>
       </TableCell>
     </TableRow>
   );
