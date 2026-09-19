@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 
 import { AdminSection } from "@/components/admin/AdminSection";
 import { Badge } from "@/components/ui/badge";
@@ -11,6 +11,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { formatCurrency } from "@/lib/format";
+import { cn } from "@/lib/utils";
 import { useAuth } from "@/hooks/useAuth";
 import {
   addDaysToKey,
@@ -188,13 +189,13 @@ export default function AccountingPage() {
               <Label htmlFor="from" className="mb-1 block">
                 จากวันที่
               </Label>
-              <Input id="from" type="date" value={customFrom} onChange={(e) => setCustomFrom(e.target.value)} className="h-12 w-40" />
+              <DateField id="from" value={customFrom} onChange={setCustomFrom} className="h-12 w-40" />
             </div>
             <div>
               <Label htmlFor="to" className="mb-1 block">
                 ถึงวันที่
               </Label>
-              <Input id="to" type="date" value={customTo} onChange={(e) => setCustomTo(e.target.value)} className="h-12 w-40" />
+              <DateField id="to" value={customTo} onChange={setCustomTo} className="h-12 w-40" />
             </div>
           </div>
         )}
@@ -371,6 +372,63 @@ function HourSelect({ label, value, onChange }: { label: string; value: number; 
   );
 }
 
+/**
+ * A date `<Input>` with an explicit "📅" button that opens the native calendar picker
+ * (`input.showPicker()`) — added because a bare `type="date"` input reads, on a lot of desktop
+ * browsers/screen widths, as "type the date in" rather than "click to pick a date", which is
+ * exactly the confusion the user hit. Typing the date is still possible (that's the browser's
+ * own native behavior, not something this page can safely block without also blocking the
+ * picker on some browsers), but now there's an unmistakable button for the point-and-click path.
+ */
+function DateField({
+  value,
+  onChange,
+  className,
+  id,
+}: {
+  value: string;
+  onChange: (value: string) => void;
+  className?: string;
+  id?: string;
+}) {
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  function openPicker() {
+    const el = inputRef.current;
+    if (!el) return;
+    if ("showPicker" in el && typeof el.showPicker === "function") {
+      try {
+        el.showPicker();
+        return;
+      } catch {
+        // Some browsers throw if the call isn't user-gesture-adjacent enough — fall through to focus().
+      }
+    }
+    el.focus();
+  }
+
+  return (
+    <div className={cn("relative", className)}>
+      <Input
+        ref={inputRef}
+        id={id}
+        type="date"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className="h-full w-full pr-9"
+      />
+      <button
+        type="button"
+        onClick={openPicker}
+        aria-label="เลือกวันที่"
+        className="absolute inset-y-0 right-1 flex w-8 items-center justify-center text-base text-muted-foreground"
+      >
+        📅
+      </button>
+    </div>
+  );
+}
+
 function formatKey(dateKey: string): string {
   const [y, m, d] = dateKey.split("-").map(Number);
   return new Date(Date.UTC(y, m - 1, d)).toLocaleDateString("th-TH", {
@@ -438,7 +496,7 @@ function ExpenseQuickAddRow({
   return (
     <TableRow className="bg-muted/30">
       <TableCell>
-        <Input type="date" value={dateKey} onChange={(e) => setDateKey(e.target.value)} className="h-9 w-36" />
+        <DateField value={dateKey} onChange={setDateKey} className="h-9 w-36" />
       </TableCell>
       <TableCell>
         <Select value={category} onValueChange={(v) => setCategory(v as ExpenseCategory)}>
@@ -498,8 +556,8 @@ function ExpenseQuickAddRow({
 /**
  * One row of the รายจ่าย table — a plain read row by default, or (after "แก้ไข") the same fields
  * as `ExpenseQuickAddRow` inline for correcting a typo or amount, plus "ลบ" for a mistaken entry
- * entirely. Both dateKey inputs (here and in the quick-add row) are plain `<input type="date">`
- * with no `min`, so backdating a missed entry has always worked — this just adds the ability to
+ * entirely. Both dateKey inputs (here and in the quick-add row) use `DateField`, which has no
+ * `min`, so backdating a missed entry has always worked — this just adds the ability to
  * fix one after the fact.
  */
 function ExpenseRow({ expense, currency }: { expense: Expense; currency: string }) {
@@ -544,7 +602,7 @@ function ExpenseRow({ expense, currency }: { expense: Expense; currency: string 
     return (
       <TableRow className="bg-muted/20">
         <TableCell>
-          <Input type="date" value={dateKey} onChange={(e) => setDateKey(e.target.value)} className="h-9 w-36" />
+          <DateField value={dateKey} onChange={setDateKey} className="h-9 w-36" />
         </TableCell>
         <TableCell>
           <Select value={category} onValueChange={(v) => setCategory(v as ExpenseCategory)}>
@@ -707,7 +765,7 @@ function TransferQuickAddRow({
   return (
     <TableRow className="bg-muted/30">
       <TableCell>
-        <Input type="date" value={businessDayKey} onChange={(e) => setBusinessDayKey(e.target.value)} className="h-9 w-36" />
+        <DateField value={businessDayKey} onChange={setBusinessDayKey} className="h-9 w-36" />
       </TableCell>
       <TableCell>
         <Input
@@ -800,7 +858,7 @@ function TransferRow({ transfer, currency }: { transfer: BankTransfer; currency:
     return (
       <TableRow className="bg-muted/20">
         <TableCell>
-          <Input type="date" value={businessDayKey} onChange={(e) => setBusinessDayKey(e.target.value)} className="h-9 w-36" />
+          <DateField value={businessDayKey} onChange={setBusinessDayKey} className="h-9 w-36" />
         </TableCell>
         <TableCell colSpan={2}>
           <div className="flex items-center justify-end gap-2">
