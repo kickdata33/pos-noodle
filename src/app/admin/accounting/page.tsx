@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 
 import { AdminSection } from "@/components/admin/AdminSection";
 import { Badge } from "@/components/ui/badge";
@@ -134,6 +134,14 @@ export default function AccountingPage() {
         .sort((a, b) => (a.dateKey === b.dateKey ? b.createdAt - a.createdAt : a.dateKey < b.dateKey ? 1 : -1)),
     [expenses, range.startKey, range.endKey]
   );
+  // แยกเป็นวันใครวันมัน — the รายจ่าย table groups rows under a header per day instead of a flat
+  // list, so a busy day's several categories don't blur together with the next day's. Cheap to
+  // compute since `visibleExpenses` is already sorted with same-day rows contiguous.
+  const expenseDayTotals = useMemo(() => {
+    const totals = new Map<string, number>();
+    for (const e of visibleExpenses) totals.set(e.dateKey, (totals.get(e.dateKey) ?? 0) + e.amount);
+    return totals;
+  }, [visibleExpenses]);
   const visibleTransfers = useMemo(
     () =>
       transfers
@@ -271,9 +279,24 @@ export default function AccountingPage() {
               {shopId && appUser ? (
                 <ExpenseQuickAddRow shopId={shopId} createdBy={appUser.id} createdByName={appUser.name} />
               ) : null}
-              {visibleExpenses.map((e) => (
-                <ExpenseRow key={e.id} expense={e} currency={currency} />
-              ))}
+              {visibleExpenses.map((e, i) => {
+                const isNewDay = i === 0 || visibleExpenses[i - 1].dateKey !== e.dateKey;
+                return (
+                  <Fragment key={e.id}>
+                    {isNewDay ? (
+                      <TableRow className="bg-muted/50 hover:bg-muted/50">
+                        <TableCell colSpan={5} className="py-2 font-semibold">
+                          {formatKey(e.dateKey)}
+                        </TableCell>
+                        <TableCell className="py-2 text-right font-semibold">
+                          {formatCurrency(expenseDayTotals.get(e.dateKey) ?? 0, currency)}
+                        </TableCell>
+                      </TableRow>
+                    ) : null}
+                    <ExpenseRow expense={e} currency={currency} />
+                  </Fragment>
+                );
+              })}
               {visibleExpenses.length === 0 ? (
                 <TableRow>
                   <TableCell colSpan={6} className="text-center text-muted-foreground">
