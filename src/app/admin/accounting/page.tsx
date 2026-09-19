@@ -307,9 +307,6 @@ export default function AccountingPage() {
               ) : null}
             </TableBody>
           </Table>
-          <p className="mt-3 text-right text-sm font-medium">
-            ยอดรวมทั้งหมด {formatCurrency(totals.expenses, currency)}
-          </p>
         </CardContent>
       </Card>
 
@@ -512,13 +509,13 @@ function ExpenseQuickAddRow({
           </SelectContent>
         </Select>
       </TableCell>
-      <TableCell>
+      <TableCell className="min-w-48">
         <Input
           value={description}
           onChange={(e) => setDescription(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && handleAdd()}
           placeholder="เช่น หมู 5 กก. (ไม่บังคับ)"
-          className="h-9"
+          className="h-9 min-w-48"
         />
       </TableCell>
       <TableCell>
@@ -541,7 +538,7 @@ function ExpenseQuickAddRow({
           onChange={(e) => setAmountText(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && handleAdd()}
           placeholder="0.00"
-          className="h-9 min-w-24 text-right"
+          className="h-9 w-28 text-right"
         />
       </TableCell>
       <TableCell>
@@ -618,13 +615,13 @@ function ExpenseRow({ expense, currency }: { expense: Expense; currency: string 
             </SelectContent>
           </Select>
         </TableCell>
-        <TableCell>
+        <TableCell className="min-w-48">
           <Input
             value={description}
             onChange={(e) => setDescription(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && handleSave()}
             placeholder="(ไม่บังคับ)"
-            className="h-9"
+            className="h-9 min-w-48"
           />
         </TableCell>
         <TableCell>
@@ -646,7 +643,7 @@ function ExpenseRow({ expense, currency }: { expense: Expense; currency: string 
             value={amountText}
             onChange={(e) => setAmountText(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && handleSave()}
-            className="h-9 min-w-24 text-right"
+            className="h-9 w-28 text-right"
           />
         </TableCell>
         <TableCell>
