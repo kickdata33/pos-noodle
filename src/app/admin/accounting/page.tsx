@@ -107,13 +107,28 @@ export default function AccountingPage() {
     return resolvePreset(preset);
   }, [preset, customFrom, customTo]);
 
+  // Business-day grouping means an order physically paid on one calendar day can belong to the
+  // *previous* day's label (see `bangkokDateKeyWithCutoff`'s comment) — a plain calendar-day
+  // fetch for "just today" would silently miss that order (it falls outside `range.startMs`),
+  // undercounting a business day's own total. Padding the fetch by a full calendar day on each
+  // side guarantees every order that could possibly land in a requested business day gets
+  // fetched; `businessDaySales`'s own day-map still only counts the labels actually requested
+  // (`range.startKey`..`range.endKey`), so the padding never leaks a neighboring day's numbers in.
+  const fetchRange = useMemo(
+    () => ({
+      startMs: bangkokDayBounds(addDaysToKey(range.startKey, -1)).startMs,
+      endMs: bangkokDayBounds(addDaysToKey(range.endKey, 1)).endMs,
+    }),
+    [range.startKey, range.endKey]
+  );
+
   useEffect(() => {
     if (!shopId) return;
     let cancelled = false;
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setLoading(true);
     orderRepository
-      .listPaidForShopInRange(shopId, range.startMs, range.endMs)
+      .listPaidForShopInRange(shopId, fetchRange.startMs, fetchRange.endMs)
       .then((result) => {
         if (!cancelled) setOrders(result);
       })
@@ -123,7 +138,7 @@ export default function AccountingPage() {
     return () => {
       cancelled = true;
     };
-  }, [shopId, range.startMs, range.endMs]);
+  }, [shopId, fetchRange.startMs, fetchRange.endMs]);
 
   const rows = useMemo(
     () => reconciliationRows(orders, paymentMethods, transfers, expenses, range.startKey, range.endKey, fromHour),
@@ -736,11 +751,12 @@ function TransferQuickAddRow({
     if (!canSave || saving) return;
     setSaving(true);
     try {
-      // Batch 1 (16:00-23:00) settles at 23:00 the calendar day *before* the business-day label
-      // (a shift labeled "19" starts 16:00 on the 18th); batch 2 (23:00-04:00) settles at 23:00
-      // on the label date itself — see this file's businessDayKey comment above.
-      const batch1At = bangkokDayBounds(addDaysToKey(businessDayKey, -1)).startMs + 23 * 60 * 60 * 1000;
-      const batch2At = bangkokDayBounds(businessDayKey).startMs + 23 * 60 * 60 * 1000;
+      // Batch 1 (16:00-23:00) settles at 23:00 on the business-day label date itself (a shift
+      // labeled "18" starts 16:00 on the 18th); batch 2 (23:00-04:00) settles at 23:00 the
+      // *next* calendar day — see `bangkokDateKeyWithCutoff`'s comment for why a business day is
+      // labeled by the date it starts on, not the date it ends on.
+      const batch1At = bangkokDayBounds(businessDayKey).startMs + 23 * 60 * 60 * 1000;
+      const batch2At = bangkokDayBounds(addDaysToKey(businessDayKey, 1)).startMs + 23 * 60 * 60 * 1000;
       const trimmedNote = note.trim();
       await Promise.all([
         hasAmount1
@@ -831,7 +847,9 @@ function TransferQuickAddRow({
  * editing only ever touches one amount, not two — same `isBatch1` classification used for display.
  */
 function TransferRow({ transfer, currency }: { transfer: BankTransfer; currency: string }) {
-  const isBatch1 = bangkokDateKey(transfer.transferredAt) === addDaysToKey(transfer.businessDayKey, -1);
+  // Batch 1 (16:00-23:00) is transferred on the business-day label date itself; batch 2
+  // (23:00-04:00) the next calendar day — see `TransferQuickAddRow`'s batch-timestamp comment.
+  const isBatch1 = bangkokDateKey(transfer.transferredAt) === transfer.businessDayKey;
 
   const [editing, setEditing] = useState(false);
   const [businessDayKey, setBusinessDayKey] = useState(transfer.businessDayKey);

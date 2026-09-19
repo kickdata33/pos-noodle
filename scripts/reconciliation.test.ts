@@ -87,8 +87,11 @@ function makeExpense(overrides: Partial<Expense> & Pick<Expense, "id" | "dateKey
 
 // --- businessDayBounds -------------------------------------------------------------------------
 
-test("businessDayBounds: a 16:00-cutoff business day labeled '19' spans 16:00 the 18th to 16:00 the 19th", () => {
-  const { startMs, endMs } = businessDayBounds("2026-09-19", 16);
+test("businessDayBounds: a 16:00-cutoff business day labeled '18' spans 16:00 the 18th to 16:00 the 19th", () => {
+  // A business day is labeled by the calendar date it *starts* on (see
+  // `bangkokDateKeyWithCutoff`'s comment) — confirmed against how the shop owner actually logs
+  // bank transfers by hand, not how K SHOP's own settlement batches happen to land.
+  const { startMs, endMs } = businessDayBounds("2026-09-18", 16);
   // 16:00 Bangkok on the 18th = 09:00 UTC on the 18th.
   assert.equal(startMs, Date.UTC(2026, 8, 18, 9, 0, 0, 0));
   // Ends one ms before 16:00 Bangkok on the 19th.
@@ -99,45 +102,46 @@ test("businessDayBounds: a 16:00-cutoff business day labeled '19' spans 16:00 th
 
 test("businessDaySales: splits cash vs QR vs other, grouped by business day not midnight", () => {
   const orders = [
-    // 20:00 Bangkok on the 18th -> business day "19" (16:00 cutoff)
+    // 20:00 Bangkok on the 18th -> business day "18" (starts 16:00 the 18th)
     makeOrder({ id: "o1", total: 100, paidAt: Date.UTC(2026, 8, 18, 13, 0), paymentMethodId: "cash1" }),
-    // 01:00 Bangkok on the 19th (already past midnight) -> still business day "19"
+    // 01:00 Bangkok on the 19th (already past midnight, before the 16:00 cutoff) -> still the
+    // *previous* calendar day's shift, business day "18"
     makeOrder({ id: "o2", total: 200, paidAt: Date.UTC(2026, 8, 18, 18, 0), paymentMethodId: "qr1" }),
     // Delivery order, same business day
     makeOrder({ id: "o3", total: 50, paidAt: Date.UTC(2026, 8, 18, 19, 0), paymentMethodId: "delivery1" }),
   ];
-  const days = businessDaySales(orders, METHODS, "2026-09-18", "2026-09-19", 16);
-  const day19 = days.find((d) => d.dateKey === "2026-09-19")!;
-  assert.equal(day19.cash, 100);
-  assert.equal(day19.qr, 200);
-  assert.equal(day19.other, 50);
-  assert.equal(day19.total, 350);
-  assert.equal(day19.orderCount, 3);
+  const days = businessDaySales(orders, METHODS, "2026-09-17", "2026-09-18", 16);
+  const day18 = days.find((d) => d.dateKey === "2026-09-18")!;
+  assert.equal(day18.cash, 100);
+  assert.equal(day18.qr, 200);
+  assert.equal(day18.other, 50);
+  assert.equal(day18.total, 350);
+  assert.equal(day18.orderCount, 3);
 });
 
 // --- transfersForBusinessDay / expensesForDay -----------------------------------------------------
 
 test("transfersForBusinessDay: matches by the logged businessDayKey, not the transfer's own timestamp", () => {
   const transfers = [
-    // 23:00 on the 18th — settles the 16:00-23:00 portion of business day "19"
-    makeTransfer({ id: "t1", transferredAt: Date.UTC(2026, 8, 18, 16, 0), amount: 810, businessDayKey: "2026-09-19" }),
-    // 23:00 on the 19th (a whole calendar day later) — but still logged against business day
-    // "19", since that's the shift it actually pays out, not "20" which a naive time-window
-    // check would wrongly attribute it to.
-    makeTransfer({ id: "t2", transferredAt: Date.UTC(2026, 8, 19, 16, 0), amount: 980, businessDayKey: "2026-09-19" }),
+    // 23:00 on the 18th — settles the 16:00-23:00 portion of business day "18" (calendar date
+    // equals the label itself for this batch)
+    makeTransfer({ id: "t1", transferredAt: Date.UTC(2026, 8, 18, 16, 0), amount: 810, businessDayKey: "2026-09-18" }),
+    // 23:00 on the 19th (the *next* calendar day) — settles the 23:00-04:00 portion of that same
+    // business day "18", not "19" which a naive time-window check would wrongly attribute it to.
+    makeTransfer({ id: "t2", transferredAt: Date.UTC(2026, 8, 19, 16, 0), amount: 980, businessDayKey: "2026-09-18" }),
     // Belongs to a different business day entirely — must not leak in
-    makeTransfer({ id: "t3", transferredAt: Date.UTC(2026, 8, 20, 16, 0), amount: 500, businessDayKey: "2026-09-20" }),
+    makeTransfer({ id: "t3", transferredAt: Date.UTC(2026, 8, 20, 16, 0), amount: 500, businessDayKey: "2026-09-19" }),
   ];
-  assert.equal(transfersForBusinessDay(transfers, "2026-09-19"), 1790);
+  assert.equal(transfersForBusinessDay(transfers, "2026-09-18"), 1790);
 });
 
 test("expensesForDay: matches by plain dateKey", () => {
   const expenses = [
-    makeExpense({ id: "e1", dateKey: "2026-09-19", amount: 300 }),
-    makeExpense({ id: "e2", dateKey: "2026-09-19", amount: 200 }),
-    makeExpense({ id: "e3", dateKey: "2026-09-20", amount: 999 }),
+    makeExpense({ id: "e1", dateKey: "2026-09-18", amount: 300 }),
+    makeExpense({ id: "e2", dateKey: "2026-09-18", amount: 200 }),
+    makeExpense({ id: "e3", dateKey: "2026-09-19", amount: 999 }),
   ];
-  assert.equal(expensesForDay(expenses, "2026-09-19"), 500);
+  assert.equal(expensesForDay(expenses, "2026-09-18"), 500);
 });
 
 // --- reconciliationRows --------------------------------------------------------------------------
@@ -148,9 +152,9 @@ test("reconciliationRows: the exact '980 baht missing' scenario reads as pending
     makeOrder({ id: "o2", total: 980, paidAt: Date.UTC(2026, 8, 18, 19, 0), paymentMethodId: "qr1" }), // 02:00 the 19th
   ];
   // Only the first batch (810) has actually transferred so far — the 980 hasn't hit 23:00 yet.
-  const transfers = [makeTransfer({ id: "t1", transferredAt: Date.UTC(2026, 8, 18, 16, 0), amount: 810, businessDayKey: "2026-09-19" })];
-  const rows = reconciliationRows(orders, METHODS, transfers, [], "2026-09-18", "2026-09-19", 16);
-  const row = rows.find((r) => r.dateKey === "2026-09-19")!;
+  const transfers = [makeTransfer({ id: "t1", transferredAt: Date.UTC(2026, 8, 18, 16, 0), amount: 810, businessDayKey: "2026-09-18" })];
+  const rows = reconciliationRows(orders, METHODS, transfers, [], "2026-09-17", "2026-09-18", 16);
+  const row = rows.find((r) => r.dateKey === "2026-09-18")!;
   assert.equal(row.qrSales, 1790);
   assert.equal(row.transferred, 810);
   assert.equal(row.pendingTransfer, 980);
@@ -163,12 +167,12 @@ test("reconciliationRows: settled once the second transfer batch lands, expenses
     makeOrder({ id: "o2", total: 980, paidAt: Date.UTC(2026, 8, 18, 19, 0), paymentMethodId: "qr1" }),
   ];
   const transfers = [
-    makeTransfer({ id: "t1", transferredAt: Date.UTC(2026, 8, 18, 16, 0), amount: 810, businessDayKey: "2026-09-19" }),
-    makeTransfer({ id: "t2", transferredAt: Date.UTC(2026, 8, 19, 16, 0), amount: 980, businessDayKey: "2026-09-19" }),
+    makeTransfer({ id: "t1", transferredAt: Date.UTC(2026, 8, 18, 16, 0), amount: 810, businessDayKey: "2026-09-18" }),
+    makeTransfer({ id: "t2", transferredAt: Date.UTC(2026, 8, 19, 16, 0), amount: 980, businessDayKey: "2026-09-18" }),
   ];
-  const expenses = [makeExpense({ id: "e1", dateKey: "2026-09-19", amount: 300 })];
-  const rows = reconciliationRows(orders, METHODS, transfers, expenses, "2026-09-18", "2026-09-19", 16);
-  const row = rows.find((r) => r.dateKey === "2026-09-19")!;
+  const expenses = [makeExpense({ id: "e1", dateKey: "2026-09-18", amount: 300 })];
+  const rows = reconciliationRows(orders, METHODS, transfers, expenses, "2026-09-17", "2026-09-18", 16);
+  const row = rows.find((r) => r.dateKey === "2026-09-18")!;
   assert.equal(row.transferred, 1790);
   assert.equal(row.pendingTransfer, 0);
   assert.equal(row.settled, true);
@@ -178,9 +182,9 @@ test("reconciliationRows: settled once the second transfer batch lands, expenses
 
 test("reconciliationRows: a transfer larger than that day's QR sales never produces a negative pending", () => {
   const orders = [makeOrder({ id: "o1", total: 100, paidAt: Date.UTC(2026, 8, 18, 13, 0), paymentMethodId: "qr1" })];
-  const transfers = [makeTransfer({ id: "t1", transferredAt: Date.UTC(2026, 8, 18, 16, 0), amount: 500, businessDayKey: "2026-09-19" })];
-  const rows = reconciliationRows(orders, METHODS, transfers, [], "2026-09-18", "2026-09-19", 16);
-  const row = rows.find((r) => r.dateKey === "2026-09-19")!;
+  const transfers = [makeTransfer({ id: "t1", transferredAt: Date.UTC(2026, 8, 18, 16, 0), amount: 500, businessDayKey: "2026-09-18" })];
+  const rows = reconciliationRows(orders, METHODS, transfers, [], "2026-09-17", "2026-09-18", 16);
+  const row = rows.find((r) => r.dateKey === "2026-09-18")!;
   assert.equal(row.pendingTransfer, 0);
   assert.equal(row.settled, true);
 });

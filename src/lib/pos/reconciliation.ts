@@ -1,16 +1,18 @@
 import type { BankTransfer, Expense, Order, PaymentMethod } from "@/types";
-import { addDaysToKey, bangkokDateKeyWithCutoff, bangkokDayBounds, dateKeysBetween } from "./dateRange";
+import { bangkokDateKeyWithCutoff, bangkokDayBounds, dateKeysBetween } from "./dateRange";
 
 /**
  * บัญชีรายรับ-รายจ่ายรายวัน — reconciles what the POS says was sold against what actually landed
- * in the bank, for a shop whose "day" (16:00–04:00, spanning midnight) doesn't line up with its
- * payment provider's own settlement cutoff (K SHOP settles PromptPay/K PLUS at a fixed 23:00
- * every calendar day). Concretely: one business day's QR sales get split into *two* separate bank
- * transfers on two different calendar dates — the 16:00–23:00 portion transfers that same night,
- * the 23:00–04:00 portion (already past midnight) doesn't transfer until 23:00 the *next*
- * calendar night. Without this file, that gap reads as "980 baht missing" instead of what it
- * actually is: a transfer that just hasn't happened yet. Everything here is pure/synchronous and
- * unit-tested (`scripts/reconciliation.test.ts`) the same way `lib/pos/reports.ts` is.
+ * in the bank, for a shop whose "day" (16:00–04:00, spanning midnight, labeled by the date it
+ * *starts* on — see `bangkokDateKeyWithCutoff`'s comment) doesn't line up with its payment
+ * provider's own settlement cutoff (K SHOP settles PromptPay/K PLUS at a fixed 23:00 every
+ * calendar day). Concretely: one business day's QR sales get split into *two* separate bank
+ * transfers on two different calendar dates — the 16:00–23:00 portion transfers that same
+ * calendar night (23:00 on the label date itself), the 23:00–04:00 portion (already past
+ * midnight) doesn't transfer until 23:00 the *next* calendar night (23:00 on label date + 1).
+ * Without this file, that gap reads as "980 baht missing" instead of what it actually is: a
+ * transfer that just hasn't happened yet. Everything here is pure/synchronous and unit-tested
+ * (`scripts/reconciliation.test.ts`) the same way `lib/pos/reports.ts` is.
  */
 
 const HOUR_MS = 60 * 60 * 1000;
@@ -29,14 +31,14 @@ function round2(n: number): number {
  * (shown next to the "log a transfer" form so a person can double check which business day a
  * bank line actually belongs to; see `BankTransfer.businessDayKey`'s comment for why matching
  * itself is never done by time-window math). `bangkokDateKeyWithCutoff` (see that function's own
- * comment) labels a business day by the calendar date it *ends* on — a shift starting 16:00 on
- * the 18th and running to 04:00 on the 19th is labeled "19", not "18" — so the span runs
- * backwards from there: from `fromHour` on the day *before* the label date, to `fromHour` on the
- * label date itself (a full 24h window; see `dailySales`'s comment for why the grouping only
- * needs one boundary hour, not two).
+ * comment) labels a business day by the calendar date it *starts* on — a shift starting 16:00 on
+ * the 18th and running to 04:00 on the 19th is labeled "18", not "19" — so the span runs forward
+ * from there: from `fromHour` on the label date itself, to `fromHour` on the day *after* (a full
+ * 24h window; see `dailySales`'s comment for why the grouping only needs one boundary hour, not
+ * two).
  */
 export function businessDayBounds(labelKey: string, fromHour: number): { startMs: number; endMs: number } {
-  const startMs = bangkokDayBounds(addDaysToKey(labelKey, -1)).startMs + fromHour * HOUR_MS;
+  const startMs = bangkokDayBounds(labelKey).startMs + fromHour * HOUR_MS;
   return { startMs, endMs: startMs + DAY_MS - 1 };
 }
 
