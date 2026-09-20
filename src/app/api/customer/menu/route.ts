@@ -55,7 +55,11 @@ export async function GET(request: NextRequest) {
     // Shared with `/order/pickup` (the takeaway self-order screen) as well as the dine-in one —
     // harmless extra fields for a consumer that doesn't need them, avoids a whole second
     // near-identical menu endpoint for one more screen.
-    promptPayAvailable: Boolean(settings?.promptPayId),
+    promptPayAvailable: Boolean(settings?.promptPayId || settings?.paymentQrImageUrl),
+    // Sent as part of the menu (not just at order-submit time) since it's a static image with no
+    // amount baked in — `/order/pickup` can show it as soon as the customer picks "transfer",
+    // without waiting on an order to exist. See `ShopSettings.paymentQrImageUrl`'s comment.
+    paymentQrImageUrl: settings?.paymentQrImageUrl ?? null,
     pickupIdentificationMode: settings?.pickupIdentificationMode ?? "queue",
   });
 }

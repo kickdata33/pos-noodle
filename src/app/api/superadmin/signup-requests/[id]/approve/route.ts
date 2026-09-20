@@ -81,6 +81,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     serviceChargeEnabled: false,
     serviceChargeRate: 0,
     promptPayId: null,
+    paymentQrImageUrl: null,
     pickupIdentificationMode: "queue",
     updatedAt: now,
   });

@@ -50,6 +50,7 @@ async function seedShopAndSettings() {
       serviceChargeEnabled: false,
       serviceChargeRate: 0,
       promptPayId: null,
+      paymentQrImageUrl: null,
       pickupIdentificationMode: "queue",
       updatedAt: now,
     });

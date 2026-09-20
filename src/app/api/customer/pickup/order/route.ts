@@ -88,7 +88,7 @@ export async function POST(request: NextRequest) {
   if (!settings || !takeawayChannel) {
     return NextResponse.json({ error: "ร้านยังไม่พร้อมรับออเดอร์ กรุณาแจ้งพนักงาน" }, { status: 503 });
   }
-  if (paymentIntent === "transfer" && !settings.promptPayId) {
+  if (paymentIntent === "transfer" && !settings.promptPayId && !settings.paymentQrImageUrl) {
     return NextResponse.json({ error: "ร้านยังไม่เปิดรับโอนพร้อมเพย์ กรุณาเลือกเงินสด" }, { status: 400 });
   }
 
@@ -155,7 +155,14 @@ export async function POST(request: NextRequest) {
     orderId: orderRef.id,
     customerLabel,
     total: totals.total,
+    // Only generated as a fallback for a shop that hasn't uploaded `paymentQrImageUrl` yet — once
+    // that's set, `/order/pickup` shows that static image directly (already sent with the menu
+    // response) instead of a *different*, dynamically-generated QR, so every QR payment (walk-in
+    // or pickup) always lands through the exact same K SHOP sticker/account. See
+    // `ShopSettings.paymentQrImageUrl`'s comment.
     promptPayPayload:
-      paymentIntent === "transfer" ? generatePromptPayPayload(settings.promptPayId!, totals.total) : null,
+      paymentIntent === "transfer" && !settings.paymentQrImageUrl && settings.promptPayId
+        ? generatePromptPayPayload(settings.promptPayId, totals.total)
+        : null,
   });
 }

@@ -46,6 +46,19 @@ export interface ShopSettings extends WithId {
    */
   promptPayId: string | null;
   /**
+   * A photo of the shop's own static K SHOP QR sticker (the exact same QR code already taped to
+   * the counter for walk-in customers), stored as a compressed data URL the same way
+   * `BillingConfig.qrCodeImage` is — item: "ตั้ง QR code สั่งกลับบ้านให้เป็นตัวเดียวกันกับ kshop".
+   * When set, `/order/pickup`'s "โอนเงิน" option shows this image byte-for-byte instead of
+   * generating a *different* QR from `promptPayId` — the whole point being that every QR
+   * payment, walk-in or pickup, lands through the exact same K SHOP sticker/account, so the
+   * reconciliation numbers this app already tracks (`lib/pos/reconciliation.ts`) never have to
+   * account for two separate QR sources. `promptPayId`-based dynamic generation is kept as the
+   * fallback for a shop that hasn't uploaded this yet — see `/api/customer/pickup/order`'s
+   * comment on `promptPayPayload` for exactly when each path is used.
+   */
+  paymentQrImageUrl: string | null;
+  /**
    * How `/order/pickup` identifies a customer's order to staff — an auto-issued daily queue
    * number ("คิว 12") or a name the customer types in. Admin-configurable and switchable any
    * time; neither is "more correct", shops just call orders out differently.

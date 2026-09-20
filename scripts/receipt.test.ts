@@ -25,6 +25,7 @@ function settings(overrides: Partial<ShopSettings> = {}): ShopSettings {
     serviceChargeEnabled: false,
     serviceChargeRate: 0,
     promptPayId: null,
+    paymentQrImageUrl: null,
     pickupIdentificationMode: "queue",
     receiptPrinterIp: null,
     updatedAt: 1,

@@ -12,6 +12,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { useAuth } from "@/hooks/useAuth";
+import { compressImageFile } from "@/lib/billing/compressImage";
 import { printReceiptViaEpos } from "@/lib/pos/eposPrint";
 import { buildOrderReceipt } from "@/lib/pos/receipt";
 import { shopRepository } from "@/repositories/shopRepository";
@@ -33,6 +34,7 @@ export default function SettingsPage() {
   const [pickupQrOpen, setPickupQrOpen] = useState(false);
   const [testPrinting, setTestPrinting] = useState(false);
   const [testPrintResult, setTestPrintResult] = useState<{ ok: boolean; message: string } | null>(null);
+  const [qrUploadError, setQrUploadError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!shopId) return;
@@ -45,6 +47,7 @@ export default function SettingsPage() {
           ? {
               ...s,
               promptPayId: s.promptPayId ?? null,
+              paymentQrImageUrl: s.paymentQrImageUrl ?? null,
               pickupIdentificationMode: s.pickupIdentificationMode ?? "queue",
               receiptPrinterIp: s.receiptPrinterIp ?? null,
             }
@@ -56,6 +59,19 @@ export default function SettingsPage() {
 
   function update<K extends keyof ShopSettings>(key: K, value: ShopSettings[K]) {
     setSettings((s) => (s ? { ...s, [key]: value } : s));
+  }
+
+  /** Same `compressImageFile` (canvas resize + JPEG quality step-down until it fits a Firestore
+   * field) used for the superadmin's own QR upload in `BillingConfigForm` — a shop photographing
+   * their printed K SHOP sticker is exactly the same "one small image, uploaded rarely" case. */
+  async function handlePaymentQrFileChange(file: File | null) {
+    if (!file) return;
+    setQrUploadError(null);
+    try {
+      update("paymentQrImageUrl", await compressImageFile(file));
+    } catch (err) {
+      setQrUploadError(err instanceof Error ? err.message : "อ่านรูป QR ไม่สำเร็จ");
+    }
   }
 
   /**
@@ -296,6 +312,38 @@ export default function SettingsPage() {
           />
           <p className="text-xs text-muted-foreground">
             ใส่แล้วหน้าสั่งกลับบ้าน (สแกน QR เอง) จะมีตัวเลือก &quot;โอนพร้อมเพย์&quot; ให้ลูกค้า — ถ้าเว้นว่างจะมีแต่ &quot;เงินสด&quot;
+          </p>
+        </div>
+
+        <div className="grid gap-2">
+          <Label htmlFor="s-payment-qr">รูป QR K SHOP (ใช้อันเดียวกับหน้าร้าน)</Label>
+          {settings.paymentQrImageUrl ? (
+            // eslint-disable-next-line @next/next/no-img-element -- data URL, not a Next-optimizable remote asset
+            <img
+              src={settings.paymentQrImageUrl}
+              alt="QR K SHOP ปัจจุบัน"
+              className="h-40 w-40 rounded-md border border-border object-contain"
+            />
+          ) : null}
+          <Input
+            id="s-payment-qr"
+            type="file"
+            accept="image/*"
+            onChange={(e) => handlePaymentQrFileChange(e.target.files?.[0] ?? null)}
+          />
+          {settings.paymentQrImageUrl ? (
+            <button
+              type="button"
+              className="justify-self-start text-sm text-muted-foreground underline"
+              onClick={() => update("paymentQrImageUrl", null)}
+            >
+              ลบรูป QR
+            </button>
+          ) : null}
+          {qrUploadError ? <p className="text-xs text-destructive">{qrUploadError}</p> : null}
+          <p className="text-xs text-muted-foreground">
+            ถ่ายรูป QR สติกเกอร์ K SHOP ที่ติดหน้าร้านมาอัปโหลด — ลูกค้าสั่งกลับบ้านจะเห็น QR อันนี้เป๊ะๆ เงินโอนจะเข้าบัญชีเดียวกับหน้าร้านเสมอ
+            ไม่ต้องเทียบยอดสองที่ (ถ้าไม่อัปโหลด ระบบจะสร้าง QR จากเลข PromptPay ด้านบนแทน)
           </p>
         </div>
 

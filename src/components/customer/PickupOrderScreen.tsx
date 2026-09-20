@@ -24,6 +24,9 @@ interface MenuResponse {
   modifierOptions: ModifierOption[];
   currency: string;
   promptPayAvailable: boolean;
+  /** Static K SHOP QR sticker photo — see `ShopSettings.paymentQrImageUrl`'s comment. When
+   * present, shown byte-for-byte instead of generating a QR from `promptPayPayload`. */
+  paymentQrImageUrl: string | null;
   pickupIdentificationMode: "queue" | "name";
 }
 
@@ -102,9 +105,11 @@ export function PickupOrderScreen() {
 
   // Renders the PromptPay payload the API returned into an actual scannable image — same
   // technique as `TableQrDialog` (the `qrcode` package draws to a canvas/data URL entirely in
-  // the browser, no external QR-image service).
+  // the browser, no external QR-image service). Skipped entirely once the shop has uploaded a
+  // static `paymentQrImageUrl` — that image is shown directly (see the "done" step render below)
+  // and the API never even sends a `promptPayPayload` in that case (see that route's comment).
   useEffect(() => {
-    if (!result?.promptPayPayload) {
+    if (!result?.promptPayPayload || menu?.paymentQrImageUrl) {
       // eslint-disable-next-line react-hooks/set-state-in-effect -- synchronizing with the `qrcode` canvas draw below, not deriving from props; see TableQrDialog's identical comment
       setQrDataUrl(null);
       return;
@@ -116,7 +121,7 @@ export function PickupOrderScreen() {
     return () => {
       cancelled = true;
     };
-  }, [result]);
+  }, [result, menu?.paymentQrImageUrl]);
 
   const activeCategories = useMemo(() => menu?.categories ?? [], [menu]);
   const currentCategoryId = activeCategoryId ?? activeCategories[0]?.id ?? null;
@@ -297,21 +302,36 @@ export function PickupOrderScreen() {
           <p className="max-w-xs text-sm text-muted-foreground">กรุณาชำระเงินสดที่เคาน์เตอร์เมื่อมารับอาหาร</p>
         ) : (
           <div className="flex flex-col items-center gap-3">
-            {qrDataUrl ? (
-              // eslint-disable-next-line @next/next/no-img-element -- locally-generated data: URL, not a remote image
-              <img src={qrDataUrl} alt="QR พร้อมเพย์" className="h-56 w-56 rounded-lg border border-border" />
-            ) : (
-              <div className="flex h-56 w-56 items-center justify-center rounded-lg border border-border text-sm text-muted-foreground">
-                กำลังสร้าง QR...
-              </div>
-            )}
-            <p className="max-w-xs text-sm text-muted-foreground">สแกนจ่ายด้วยแอปธนาคารของคุณ ยอดจะขึ้นให้อัตโนมัติ</p>
-            {qrDataUrl ? (
+            {(() => {
+              // The shop's own static K SHOP sticker wins whenever it's set — same QR/account as
+              // the counter, no amount baked in (customer keys it in like any other QR SHOP scan).
+              // Only a shop that hasn't uploaded one yet falls back to a dynamically-generated
+              // PromptPay QR with the amount already encoded.
+              const staticQr = menu.paymentQrImageUrl;
+              const displayUrl = staticQr ?? qrDataUrl;
+              if (!displayUrl) {
+                return (
+                  <div className="flex h-56 w-56 items-center justify-center rounded-lg border border-border text-sm text-muted-foreground">
+                    กำลังสร้าง QR...
+                  </div>
+                );
+              }
+              return (
+                // eslint-disable-next-line @next/next/no-img-element -- data URL (uploaded photo or locally-generated), not a remote image
+                <img src={displayUrl} alt="QR ชำระเงิน" className="h-56 w-56 rounded-lg border border-border object-contain" />
+              );
+            })()}
+            <p className="max-w-xs text-sm text-muted-foreground">
+              {menu.paymentQrImageUrl
+                ? "สแกนด้วยแอปธนาคารของคุณแล้วกรอกยอดเอง"
+                : "สแกนจ่ายด้วยแอปธนาคารของคุณ ยอดจะขึ้นให้อัตโนมัติ"}
+            </p>
+            {(menu.paymentQrImageUrl ?? qrDataUrl) ? (
               // Same "<a download>" pattern as the shop's own TableQrDialog/PickupQrDialog — lets
               // a customer save the QR to their own phone (e.g. to pay from the banking app's
               // "เลือกจากรูปภาพ" option, or to send it to whoever's paying for them) instead of
               // only being able to scan it live off this screen (item: "ลูกค้าจะได้นำไปสแกนได้เลย").
-              <a href={qrDataUrl} download="promptpay-qr.png">
+              <a href={menu.paymentQrImageUrl ?? qrDataUrl ?? ""} download="qr-payment.png">
                 <Button variant="outline" size="sm">
                   บันทึกรูป QR
                 </Button>
