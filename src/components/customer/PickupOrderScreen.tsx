@@ -311,14 +311,14 @@ export function PickupOrderScreen() {
               const displayUrl = staticQr ?? qrDataUrl;
               if (!displayUrl) {
                 return (
-                  <div className="flex h-56 w-56 items-center justify-center rounded-lg border border-border text-sm text-muted-foreground">
+                  <div className="flex h-72 w-72 items-center justify-center rounded-lg border border-border text-sm text-muted-foreground">
                     กำลังสร้าง QR...
                   </div>
                 );
               }
               return (
                 // eslint-disable-next-line @next/next/no-img-element -- data URL (uploaded photo or locally-generated), not a remote image
-                <img src={displayUrl} alt="QR ชำระเงิน" className="h-56 w-56 rounded-lg border border-border object-contain" />
+                <img src={displayUrl} alt="QR ชำระเงิน" className="h-72 w-72 rounded-lg border border-border object-contain" />
               );
             })()}
             <p className="max-w-xs text-sm text-muted-foreground">
@@ -327,15 +327,27 @@ export function PickupOrderScreen() {
                 : "สแกนจ่ายด้วยแอปธนาคารของคุณ ยอดจะขึ้นให้อัตโนมัติ"}
             </p>
             {(menu.paymentQrImageUrl ?? qrDataUrl) ? (
-              // Same "<a download>" pattern as the shop's own TableQrDialog/PickupQrDialog — lets
-              // a customer save the QR to their own phone (e.g. to pay from the banking app's
-              // "เลือกจากรูปภาพ" option, or to send it to whoever's paying for them) instead of
-              // only being able to scan it live off this screen (item: "ลูกค้าจะได้นำไปสแกนได้เลย").
-              <a href={menu.paymentQrImageUrl ?? qrDataUrl ?? ""} download="qr-payment.png">
-                <Button variant="outline" size="sm">
-                  บันทึกรูป QR
-                </Button>
-              </a>
+              <div className="flex flex-col items-center gap-1">
+                {/* Same "<a download>" pattern as the shop's own TableQrDialog/PickupQrDialog — lets
+                    a customer save the QR to their own phone (e.g. to pay from the banking app's
+                    "เลือกจากรูปภาพ" option, or to send it to whoever's paying for them) instead of
+                    only being able to scan it live off this screen (item: "ลูกค้าจะได้นำไปสแกนได้เลย").
+                    Extension must match the actual data — the static upload is always a JPEG
+                    (`compressImageFile`), the generated fallback is always a PNG (`qrcode`'s
+                    default) — a mismatched extension is what made iOS append its own, real one
+                    on top (e.g. "qr-payment.png.jpeg"). */}
+                <a
+                  href={menu.paymentQrImageUrl ?? qrDataUrl ?? ""}
+                  download={menu.paymentQrImageUrl ? "qr-payment.jpg" : "qr-payment.png"}
+                >
+                  <Button variant="outline" size="sm">
+                    บันทึกรูป QR
+                  </Button>
+                </a>
+                <p className="max-w-xs text-center text-xs text-muted-foreground">
+                  หรือกดรูป QR ค้างไว้แล้วเลือก &quot;บันทึกลงรูปภาพ&quot; เพื่อเก็บในอัลบั้มมือถือโดยตรง
+                </p>
+              </div>
             ) : null}
             {transferNotified ? (
               <p className="text-sm text-success">แจ้งแล้ว — พนักงานจะตรวจสอบยอดโอนให้เร็วที่สุด</p>
