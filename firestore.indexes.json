@@ -121,6 +121,14 @@
         { "fieldPath": "shopId", "order": "ASCENDING" },
         { "fieldPath": "transferredAt", "order": "DESCENDING" }
       ]
+    },
+    {
+      "collectionGroup": "dailyFloats",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "shopId", "order": "ASCENDING" },
+        { "fieldPath": "businessDayKey", "order": "DESCENDING" }
+      ]
     }
   ],
   "fieldOverrides": []
