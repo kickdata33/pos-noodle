@@ -70,7 +70,11 @@ export default function AccountingPage() {
   // are two different things now that transfers are matched by an explicit `businessDayKey`
   // instead of guessed from the clock (see `BankTransfer.businessDayKey`'s comment).
   const [fromHour, setFromHour] = useState(16);
-  const [toHour, setToHour] = useState(4);
+  // 06:00, not 04:00 — some nights a table sits until closer to 6am ("มีลูกค้านั่งยาว"). The
+  // actual business-day math never depended on this value (a business day already spans a full
+  // 24h from `fromHour`, covering any close time up to 16:00 the next day) — `toHour` only
+  // controls what the shift-hours label reads on screen.
+  const [toHour, setToHour] = useState(6);
 
   // The รายจ่าย table has its own single-day filter, independent of the range picker above —
   // that picker can span a week/month for the reconciliation table, but for รายจ่าย the user

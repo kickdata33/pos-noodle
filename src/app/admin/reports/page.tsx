@@ -69,7 +69,10 @@ export default function ReportsPage() {
   // stay on plain calendar days.
   const [useBusinessDay, setUseBusinessDay] = useState(false);
   const [fromHour, setFromHour] = useState(16);
-  const [toHour, setToHour] = useState(4);
+  // 06:00, not 04:00 — matches `/admin/accounting`'s default (some nights a table sits until
+  // closer to 6am); purely a label, the grouping math already covers any close time up to 16:00
+  // the next day regardless of this value — see that page's `toHour` comment for the full story.
+  const [toHour, setToHour] = useState(6);
 
   useEffect(() => {
     if (!shopId) return;
