@@ -6,7 +6,8 @@ import { COLLECTIONS } from "@/lib/firebase/collections";
 import { formatCurrency } from "@/lib/format";
 import { addDaysToKey, bangkokDateKey, bangkokDayBounds, bangkokHour } from "@/lib/pos/dateRange";
 import { summarizeOrders, topProducts } from "@/lib/pos/reports";
-import type { NotificationSettings, Order } from "@/types";
+import { businessDaySales } from "@/lib/pos/reconciliation";
+import type { NotificationSettings, Order, PaymentMethod } from "@/types";
 
 import { notifyShop } from "./notifyShop";
 
@@ -64,6 +65,16 @@ export async function runDailySummaryCron(db: Firestore): Promise<{ sent: number
       .get();
     const orders = ordersSnap.docs.map((d) => ({ ...d.data(), id: d.id }) as Order);
 
+    // แยกเงินสด/เงินโอน — same cash-vs-QR-vs-other split `/admin/accounting`'s reconciliation
+    // table uses, reusing that same pure `businessDaySales` (a single plain calendar day, cutoff
+    // 0, matching how `orders` above was fetched via `bangkokDayBounds`, not a 16:00-cutoff
+    // shift — this cron reports on yesterday's *calendar* day, unchanged from before this split
+    // existed). Needs each `PaymentMethod`'s `code` (cash/qr), which isn't stored on the order
+    // itself, so it's a small extra Admin SDK query alongside the orders one.
+    const paymentMethodsSnap = await db.collection(COLLECTIONS.paymentMethods).where("shopId", "==", shopId).get();
+    const paymentMethods = paymentMethodsSnap.docs.map((d) => ({ ...d.data(), id: d.id }) as PaymentMethod);
+    const [daySales] = businessDaySales(orders, paymentMethods, yesterdayKey, yesterdayKey, 0);
+
     const summary = summarizeOrders(orders);
     // 10 — shop owner asked for "สินค้าขายดีสัก 10 รายการ" (was 5).
     const best = topProducts(orders, 10);
@@ -72,9 +83,13 @@ export async function runDailySummaryCron(db: Firestore): Promise<{ sent: number
       ? best.map((p, i) => `${i + 1}. ${p.productName} — ${p.qty} ชิ้น`).join("\n")
       : "ไม่มีรายการขาย";
 
+    const otherLine = daySales.other > 0 ? `\nอื่นๆ: ${formatCurrency(daySales.other, "THB")}` : "";
+
     const text =
       `📊 สรุปยอดวันที่ ${yesterdayKey}\n\n` +
       `ยอดขายรวม: ${formatCurrency(summary.revenue, "THB")}\n` +
+      `เงินสด: ${formatCurrency(daySales.cash, "THB")}\n` +
+      `เงินโอน: ${formatCurrency(daySales.qr, "THB")}${otherLine}\n` +
       `จำนวนบิล: ${summary.orderCount} บิล\n` +
       `ยอดเฉลี่ยต่อบิล: ${formatCurrency(summary.avgOrderValue, "THB")}\n\n` +
       `🏆 สินค้าขายดี\n${bestLines}`;
