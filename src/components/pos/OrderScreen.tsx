@@ -7,6 +7,7 @@ import { CancelOrderDialog } from "@/components/pos/CancelOrderDialog";
 import { CheckoutDialog } from "@/components/pos/CheckoutDialog";
 import { ItemNoteDialog } from "@/components/pos/ItemNoteDialog";
 import { ModifierPickerDialog } from "@/components/pos/ModifierPickerDialog";
+import { MoveTableDialog } from "@/components/pos/MoveTableDialog";
 import { usePosCatalog } from "@/components/pos/PosCatalogContext";
 import { RemoveItemDialog } from "@/components/pos/RemoveItemDialog";
 import { Button } from "@/components/ui/button";
@@ -25,7 +26,7 @@ import { buildOrderReceipt } from "@/lib/pos/receipt";
 import { auditLogRepository } from "@/repositories/auditLogRepository";
 import { orderRepository } from "@/repositories/orderRepository";
 import { paymentRepository } from "@/repositories/paymentRepository";
-import type { AuditReason, Order, OrderItem, Product, ShopSettings } from "@/types";
+import type { AuditReason, Order, OrderItem, Product, ShopSettings, Table } from "@/types";
 
 type DraftOrder = Omit<Order, "id"> & { id: string | null };
 
@@ -108,6 +109,12 @@ export function OrderScreen({ orderId, initialTableId, initialChannelId }: Props
   const [noteTarget, setNoteTarget] = useState<OrderItem | null>(null);
   const [checkoutOpen, setCheckoutOpen] = useState(false);
   const [cancelOpen, setCancelOpen] = useState(false);
+  const [moveTableOpen, setMoveTableOpen] = useState(false);
+  // Same shop-wide open-orders list `PosHome`'s table grid uses to derive occupied/empty — needed
+  // here only to compute which tables are safe move-targets (see `emptyTables` below), not for
+  // anything else on this screen.
+  const [openOrders, setOpenOrders] = useState<Order[]>([]);
+  useEffect(() => orderRepository.subscribeOpenForShop(shopId, setOpenOrders), [shopId]);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // Brief "บันทึกแล้ว" flash after every successful auto-save (item request: no manual save step,
@@ -228,6 +235,16 @@ export function OrderScreen({ orderId, initialTableId, initialChannelId }: Props
   // id rather than trusted from anywhere else, same as every other channel-derived display value
   // in this app (item 34: never hardcode what should come from data).
   const currentChannel = channels.find((c) => c.id === order?.channelId) ?? null;
+
+  // Move-table targets: active tables with no *other* open order on them right now. Excludes
+  // this order's own table too (nothing to move onto) — `openOrders` still includes this order
+  // itself while it's open, so the `!== order?.id` guard is required, not defensive filler.
+  const occupiedTableIds = new Set(
+    openOrders.filter((o) => o.tableId && o.id !== order?.id).map((o) => o.tableId as string)
+  );
+  const emptyTables = tables.filter(
+    (t) => t.active && t.id !== order?.tableId && !occupiedTableIds.has(t.id)
+  );
 
   /**
    * Applies a new items array: updates local state, and saves — immediately if the order is
@@ -401,6 +418,34 @@ export function OrderScreen({ orderId, initialTableId, initialChannelId }: Props
     });
     notifyOrderEvent("cancelled", current);
     router.push("/pos");
+  }
+
+  /**
+   * Moves this saved dine-in order to a different, currently-empty table (e.g. the customer asks
+   * to switch seats mid-meal) — see `MoveTableDialog`'s comment for why only empty tables are
+   * offered. Writes an `ORDER_TABLE_MOVED` audit entry same as cancel/remove do for their own
+   * significant changes (item 18); no reason prompt though, since nothing about the bill itself
+   * changed. The local `order` state updates itself via the live `subscribeById` above once the
+   * write lands — no need to set it here.
+   */
+  async function confirmMoveTable(newTable: Table) {
+    const current = orderRef.current;
+    if (!current?.id || !current.tableId) return;
+    const fromTableName = current.tableName;
+    const updatedAt = Date.now();
+    await orderRepository.update(current.id, { tableId: newTable.id, tableName: newTable.name, updatedAt });
+    await auditLogRepository.create({
+      shopId,
+      action: "ORDER_TABLE_MOVED",
+      orderId: current.id,
+      description: `ย้ายออเดอร์ ${current.orderNumber} จากโต๊ะ ${fromTableName} ไปโต๊ะ ${newTable.name}`,
+      reason: null,
+      reasonNote: null,
+      performedBy: appUser!.id,
+      performedByName: appUser!.name,
+      createdAt: updatedAt,
+    });
+    setMoveTableOpen(false);
   }
 
   /**
@@ -743,6 +788,18 @@ export function OrderScreen({ orderId, initialTableId, initialChannelId }: Props
               to cancel, staff just tap "กลับหน้าแรก" above and it's gone (see `confirmCancelOrder`'s
               comment). Full-width and visually separated so it doesn't get mistaken for one more
               routine action alongside the two above it. */}
+          {/* Only a dine-in order has a table to move — takeaway/Grab/etc. orders (tableId: null)
+              never show this. Same "already saved" guard as cancel above: an unsaved draft has
+              nothing in Firestore yet to move. */}
+          {order.id && order.tableId ? (
+            <Button
+              variant="outline"
+              className="mt-2 w-full"
+              onClick={() => setMoveTableOpen(true)}
+            >
+              ย้ายโต๊ะ
+            </Button>
+          ) : null}
           {order.id ? (
             <Button
               variant="ghost"
@@ -785,6 +842,16 @@ export function OrderScreen({ orderId, initialTableId, initialChannelId }: Props
           onOpenChange={setCancelOpen}
           orderNumber={order.orderNumber}
           onConfirm={confirmCancelOrder}
+        />
+      ) : null}
+
+      {order.id && order.tableId ? (
+        <MoveTableDialog
+          open={moveTableOpen}
+          onOpenChange={setMoveTableOpen}
+          currentTableName={order.tableName}
+          emptyTables={emptyTables}
+          onConfirm={confirmMoveTable}
         />
       ) : null}
 

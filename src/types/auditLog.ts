@@ -8,7 +8,8 @@ export type AuditAction =
   | "ORDER_AMOUNT_CHANGED"
   | "ORDER_DISCOUNT_APPLIED"
   | "ORDER_REFUNDED"
-  | "ORDER_PAID";
+  | "ORDER_PAID"
+  | "ORDER_TABLE_MOVED";
 
 /** Preset reasons offered when removing an item after an order has been saved (item 19). */
 export type AuditReason = "กดผิด" | "ลูกค้ายกเลิก" | "ทำผิด" | "อื่น ๆ";
