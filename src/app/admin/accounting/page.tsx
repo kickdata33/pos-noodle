@@ -1163,6 +1163,7 @@ function DailyFloatSection({
   const [startingKshopText, setStartingKshopText] = useState(float?.startingKshopBalance != null ? String(float.startingKshopBalance) : "");
   const [checkedKshopText, setCheckedKshopText] = useState(float?.kshopCheckedBalance != null ? String(float.kshopCheckedBalance) : "");
   const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
 
   // Re-seed local text state whenever the day changes or another device's write comes in —
   // otherwise switching from one day's dialog to another (or a live update from a co-worker)
@@ -1186,8 +1187,16 @@ function DailyFloatSection({
 
   async function save(patch: Partial<Pick<DailyFloat, "startingCash" | "startingKshopBalance" | "kshopCheckedBalance" | "kshopCheckedAt">>) {
     setSaving(true);
+    setSaveError(null);
     try {
       await dailyFloatRepository.upsert(shopId, businessDayKey, { ...patch, updatedBy, updatedByName, updatedAt: Date.now() });
+    } catch (err) {
+      // Without this, a failed write (most commonly: `firestore.rules` for the new
+      // `dailyFloats` collection hasn't been deployed yet — permission-denied) reads as "I typed
+      // a number, closed the dialog, and it silently vanished" with nothing on screen to explain
+      // why. Surface it loudly instead — same reasoning as `/admin/reports`' `loadError`.
+      console.error(`[dailyFloats] upsert(${businessDayKey}) failed — is firestore.rules deployed? See "firebase deploy --only firestore:rules".`, err);
+      setSaveError("บันทึกไม่สำเร็จ — ลองใหม่อีกครั้ง");
     } finally {
       setSaving(false);
     }
@@ -1274,6 +1283,7 @@ function DailyFloatSection({
         </p>
       </div>
       {saving ? <p className="mt-1 text-xs text-muted-foreground">กำลังบันทึก...</p> : null}
+      {saveError ? <p className="mt-1 text-xs text-destructive">{saveError}</p> : null}
     </div>
   );
 }
