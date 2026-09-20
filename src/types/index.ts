@@ -14,3 +14,4 @@ export * from "./auditLog";
 export * from "./notificationSettings";
 export * from "./expense";
 export * from "./bankTransfer";
+export * from "./dailyFloat";

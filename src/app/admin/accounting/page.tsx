@@ -26,11 +26,20 @@ import {
 } from "@/lib/pos/dateRange";
 import { reconciliationRows } from "@/lib/pos/reconciliation";
 import { bankTransferRepository } from "@/repositories/bankTransferRepository";
+import { dailyFloatRepository } from "@/repositories/dailyFloatRepository";
 import { expenseRepository } from "@/repositories/expenseRepository";
 import { orderRepository } from "@/repositories/orderRepository";
 import { paymentMethodRepository } from "@/repositories/paymentMethodRepository";
 import { shopRepository } from "@/repositories/shopRepository";
-import { EXPENSE_CATEGORIES, type BankTransfer, type Expense, type ExpenseCategory, type Order, type PaymentMethod } from "@/types";
+import {
+  EXPENSE_CATEGORIES,
+  type BankTransfer,
+  type DailyFloat,
+  type Expense,
+  type ExpenseCategory,
+  type Order,
+  type PaymentMethod,
+} from "@/types";
 
 const PRESETS: { value: ReportPreset; label: string }[] = [
   { value: "today", label: "วันนี้" },
@@ -79,6 +88,7 @@ export default function AccountingPage() {
   const [paymentMethods, setPaymentMethods] = useState<PaymentMethod[]>([]);
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [transfers, setTransfers] = useState<BankTransfer[]>([]);
+  const [floats, setFloats] = useState<DailyFloat[]>([]);
   const [currency, setCurrency] = useState("THB");
   const [loading, setLoading] = useState(true);
 
@@ -105,6 +115,11 @@ export default function AccountingPage() {
   useEffect(() => {
     if (!shopId) return;
     return bankTransferRepository.subscribeForShop(shopId, setTransfers);
+  }, [shopId]);
+
+  useEffect(() => {
+    if (!shopId) return;
+    return dailyFloatRepository.subscribeForShop(shopId, setFloats);
   }, [shopId]);
 
   const range: DateRange = useMemo(() => {
@@ -177,6 +192,8 @@ export default function AccountingPage() {
   );
 
   const selectedDayRow = useMemo(() => rows.find((r) => r.dateKey === selectedDay) ?? null, [rows, selectedDay]);
+
+  const selectedDayFloat = useMemo(() => floats.find((f) => f.businessDayKey === selectedDay) ?? null, [floats, selectedDay]);
 
   const selectedDayTransfers = useMemo(
     () =>
@@ -421,6 +438,18 @@ export default function AccountingPage() {
               {selectedDayRow.pendingTransfer > 0 ? formatCurrency(selectedDayRow.pendingTransfer, currency) : "-"} ·{" "}
               <Badge variant={selectedDayRow.settled ? "success" : "default"}>{selectedDayRow.settled ? "ครบ" : "รอ"}</Badge>
             </p>
+          ) : null}
+
+          {shopId && appUser && selectedDay ? (
+            <DailyFloatSection
+              shopId={shopId}
+              businessDayKey={selectedDay}
+              float={selectedDayFloat}
+              cashSales={selectedDayRow?.cashSales ?? 0}
+              currency={currency}
+              updatedBy={appUser.id}
+              updatedByName={appUser.name}
+            />
           ) : null}
 
           <div>
@@ -1101,5 +1130,150 @@ function TransferRow({ transfer, currency }: { transfer: BankTransfer; currency:
         </div>
       </TableCell>
     </TableRow>
+  );
+}
+
+/**
+ * ยอดเริ่มต้นประจำวัน — the two numbers this app has no way to derive on its own: the cash float
+ * placed in the drawer before the shift, and the K SHOP wallet-balance reading at shift start
+ * (needed because that reading is cumulative, not a per-shift total — item: "ในระบบขึ้น 690 มันเป็น
+ * ของเมื่อคืนล้นมา", see `DailyFloat`'s own comment). Shown inside the day-detail dialog since
+ * both only make sense next to that day's already-known `cashSales`. Three independent fields,
+ * each auto-saved on blur — there's no single "submit" moment since any one of them might get
+ * filled in hours before the others (starting numbers at ~16:00, the K SHOP check at 23:00).
+ */
+function DailyFloatSection({
+  shopId,
+  businessDayKey,
+  float,
+  cashSales,
+  currency,
+  updatedBy,
+  updatedByName,
+}: {
+  shopId: string;
+  businessDayKey: string;
+  float: DailyFloat | null;
+  cashSales: number;
+  currency: string;
+  updatedBy: string;
+  updatedByName: string;
+}) {
+  const [startingCashText, setStartingCashText] = useState(float?.startingCash != null ? String(float.startingCash) : "");
+  const [startingKshopText, setStartingKshopText] = useState(float?.startingKshopBalance != null ? String(float.startingKshopBalance) : "");
+  const [checkedKshopText, setCheckedKshopText] = useState(float?.kshopCheckedBalance != null ? String(float.kshopCheckedBalance) : "");
+  const [saving, setSaving] = useState(false);
+
+  // Re-seed local text state whenever the day changes or another device's write comes in —
+  // otherwise switching from one day's dialog to another (or a live update from a co-worker)
+  // would keep showing stale text still sitting in these inputs.
+  // Re-seeding local edit buffers from a prop change (a new day, or a live Firestore update from
+  // another device), not deriving fresh state — same reasoning as the page's other
+  // setLoading(true)-in-effect, which is why each line below needs the same disable.
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setStartingCashText(float?.startingCash != null ? String(float.startingCash) : "");
+    setStartingKshopText(float?.startingKshopBalance != null ? String(float.startingKshopBalance) : "");
+    setCheckedKshopText(float?.kshopCheckedBalance != null ? String(float.kshopCheckedBalance) : "");
+  }, [businessDayKey, float?.startingCash, float?.startingKshopBalance, float?.kshopCheckedBalance]);
+
+  function parseOrNull(text: string): number | null {
+    const trimmed = text.trim();
+    if (trimmed === "") return null;
+    const n = Number(trimmed);
+    return Number.isFinite(n) ? n : null;
+  }
+
+  async function save(patch: Partial<Pick<DailyFloat, "startingCash" | "startingKshopBalance" | "kshopCheckedBalance" | "kshopCheckedAt">>) {
+    setSaving(true);
+    try {
+      await dailyFloatRepository.upsert(shopId, businessDayKey, { ...patch, updatedBy, updatedByName, updatedAt: Date.now() });
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const startingCash = parseOrNull(startingCashText);
+  const startingKshop = parseOrNull(startingKshopText);
+  const checkedKshop = parseOrNull(checkedKshopText);
+
+  // เงินสดที่ควรมีปลายกะ — a check-figure only, never fed back into `reconciliationRows`' own
+  // `cashSales` (that number always comes from actual paid orders, untouched by this).
+  const expectedCashAtClose = startingCash != null ? startingCash + cashSales : null;
+  // K SHOP's wallet balance is cumulative (see this component's file comment) — subtracting the
+  // shift's own starting reading is what turns "the number on screen right now" into "what this
+  // shift actually sold", independent of this POS's own QR figure (a useful second check, not a
+  // replacement for it).
+  const kshopCountedThisShift = startingKshop != null && checkedKshop != null ? checkedKshop - startingKshop : null;
+
+  return (
+    <div className="rounded-md border border-border p-3">
+      <h3 className="mb-2 text-sm font-semibold">ยอดเริ่มต้นประจำวัน</h3>
+      <div className="grid gap-3 sm:grid-cols-3">
+        <div>
+          <Label className="mb-1 block text-xs text-muted-foreground">เงินสดเริ่มต้น (ทอน)</Label>
+          <Input
+            type="number"
+            inputMode="decimal"
+            min={0}
+            value={startingCashText}
+            onChange={(e) => setStartingCashText(e.target.value)}
+            onBlur={() => save({ startingCash: parseOrNull(startingCashText) })}
+            onKeyDown={(e) => e.key === "Enter" && (e.currentTarget as HTMLInputElement).blur()}
+            placeholder="0.00"
+            className="h-9 text-right"
+          />
+        </div>
+        <div>
+          <Label className="mb-1 block text-xs text-muted-foreground">ยอด K SHOP ตอนเริ่มกะ</Label>
+          <Input
+            type="number"
+            inputMode="decimal"
+            min={0}
+            value={startingKshopText}
+            onChange={(e) => setStartingKshopText(e.target.value)}
+            onBlur={() => save({ startingKshopBalance: parseOrNull(startingKshopText) })}
+            onKeyDown={(e) => e.key === "Enter" && (e.currentTarget as HTMLInputElement).blur()}
+            placeholder="0.00"
+            className="h-9 text-right"
+          />
+        </div>
+        <div>
+          <Label className="mb-1 block text-xs text-muted-foreground">ยอด K SHOP ที่เช็คล่าสุด</Label>
+          <Input
+            type="number"
+            inputMode="decimal"
+            min={0}
+            value={checkedKshopText}
+            onChange={(e) => setCheckedKshopText(e.target.value)}
+            onBlur={() => {
+              const checked = parseOrNull(checkedKshopText);
+              save({ kshopCheckedBalance: checked, kshopCheckedAt: checked != null ? Date.now() : null });
+            }}
+            onKeyDown={(e) => e.key === "Enter" && (e.currentTarget as HTMLInputElement).blur()}
+            placeholder="0.00"
+            className="h-9 text-right"
+          />
+        </div>
+      </div>
+      <div className="mt-3 grid gap-1 text-sm text-muted-foreground sm:grid-cols-2">
+        <p>
+          เงินสดที่ควรมีปลายกะ:{" "}
+          <span className="font-medium text-foreground">
+            {expectedCashAtClose != null ? formatCurrency(expectedCashAtClose, currency) : "-"}
+          </span>
+          {startingCash != null
+            ? ` (เริ่มต้น ${formatCurrency(startingCash, currency)} + ขายเงินสด ${formatCurrency(cashSales, currency)})`
+            : ""}
+        </p>
+        <p>
+          QR ที่ขายได้กะนี้ (ตาม K SHOP):{" "}
+          <span className="font-medium text-foreground">
+            {kshopCountedThisShift != null ? formatCurrency(kshopCountedThisShift, currency) : "-"}
+          </span>
+        </p>
+      </div>
+      {saving ? <p className="mt-1 text-xs text-muted-foreground">กำลังบันทึก...</p> : null}
+    </div>
   );
 }

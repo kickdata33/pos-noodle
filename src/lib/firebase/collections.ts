@@ -60,4 +60,9 @@ export const COLLECTIONS = {
    * against business-day sales for reconciliation — see `types/bankTransfer.ts`. Same access
    * model as `expenses`. */
   bankTransfers: "bankTransfers",
+  /** Admin-entered per-business-day starting balances (cash float + K SHOP wallet reading) used
+   * to turn a raw K SHOP balance/cash-drawer count into an actual sales figure — see
+   * `types/dailyFloat.ts`. One doc per shop per business day, id `${shopId}_${businessDayKey}`.
+   * Same access model as `expenses`/`bankTransfers`. */
+  dailyFloats: "dailyFloats",
 } as const;
