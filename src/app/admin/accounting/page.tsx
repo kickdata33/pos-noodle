@@ -412,7 +412,9 @@ export default function AccountingPage() {
                     )}
                   </TableCell>
                   <TableCell className="text-right">{formatCurrency(r.expenses, currency)}</TableCell>
-                  <TableCell className="text-right font-medium">{formatCurrency(r.net, currency)}</TableCell>
+                  <TableCell className={cn("whitespace-nowrap text-right font-medium", netClassName(r.net))}>
+                    {formatCurrency(r.net, currency)}
+                  </TableCell>
                   <TableCell>
                     <Badge variant={r.settled ? "success" : "default"}>{r.settled ? "ครบ" : "รอ"}</Badge>
                   </TableCell>
@@ -430,7 +432,7 @@ export default function AccountingPage() {
           <p className="mt-3 text-xs text-muted-foreground">
             รวมช่วงนี้ — ยอดขาย {formatCurrency(totals.totalSales, currency)}, รอโอน {formatCurrency(totals.pendingTransfer, currency)},
             รายจ่าย {formatCurrency(totals.expenses, currency)} (เฉลี่ย {formatCurrency(avgExpensePerDay, currency)}/วัน), สุทธิ{" "}
-            {formatCurrency(totals.net, currency)}
+            <span className={cn("font-medium", netClassName(totals.net))}>{formatCurrency(totals.net, currency)}</span>
           </p>
         </CardContent>
       </Card>
@@ -812,6 +814,21 @@ function formatKey(dateKey: string): string {
 
 function todayKey(): string {
   return bangkokDateKey(Date.now());
+}
+
+/**
+ * Color-codes a สุทธิ (net) figure so it reads unambiguously without relying on spotting a
+ * lone "-" — item request: a negative amount's minus sign was wrapping onto its own line in the
+ * narrow สุทธิ column (`whitespace-nowrap` above fixes the wrap itself), and losing/dropping the
+ * "-" for one careless glance is exactly the kind of bookkeeping mistake a color makes hard to
+ * make. Red for a loss uses the same `text-destructive` token every other negative/dangerous
+ * value in this app uses; blue for a profit is a deliberate one-off here (not the app's existing
+ * green `success` token) per the shop owner's explicit color choice for this specific figure.
+ */
+function netClassName(net: number): string {
+  if (net < 0) return "text-destructive";
+  if (net > 0) return "text-blue-600 dark:text-blue-400";
+  return "";
 }
 
 /**
