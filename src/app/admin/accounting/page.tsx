@@ -290,6 +290,42 @@ export default function AccountingPage() {
       ),
     [rows]
   );
+  // เฉลี่ยรายจ่าย/วัน (item request) — over every business day actually shown, not just the ones
+  // with a nonzero expense, so a run of "day off, no expense" days pulls the average down same as
+  // it would pull down a real bookkeeper's mental average.
+  const avgExpensePerDay = rows.length > 0 ? totals.expenses / rows.length : 0;
+
+  // Marks a day's outstanding QR-not-yet-transferred amount as settled without requiring the
+  // owner to re-type it into the เงินโอนเข้าบัญชี form below — item request: "ยอดรอโอน ทำให้กดติ๊ก
+  // ได้แล้วหายไป เท่ากับว่าโอนแล้ว". Writes a real `BankTransfer` for exactly today's outstanding
+  // amount (so it sums correctly with anything logged normally), tagged so it's obviously a
+  // manual confirmation rather than a real bank-line entry if anyone reviews the โอนเข้าบัญชี list
+  // later. `confirmingDays` just disables the checkbox mid-write — no undo here, same as every
+  // other "log a transfer" action; fixing a mistaken confirmation means deleting that transfer row
+  // from the เงินโอนเข้าบัญชี table below, same as any other logged transfer.
+  const [confirmingDays, setConfirmingDays] = useState<Set<string>>(new Set());
+  async function confirmPendingTransfer(row: (typeof rows)[number]) {
+    if (!shopId || !appUser || row.pendingTransfer <= 0 || confirmingDays.has(row.dateKey)) return;
+    setConfirmingDays((prev) => new Set(prev).add(row.dateKey));
+    try {
+      await bankTransferRepository.create({
+        shopId,
+        transferredAt: Date.now(),
+        amount: row.pendingTransfer,
+        businessDayKey: row.dateKey,
+        note: "ยืนยันด้วยตนเองว่าโอนเข้าแล้ว (ติ๊กจากตารางกระทบยอด)",
+        createdBy: appUser.id,
+        createdByName: appUser.name,
+        createdAt: Date.now(),
+      });
+    } finally {
+      setConfirmingDays((prev) => {
+        const next = new Set(prev);
+        next.delete(row.dateKey);
+        return next;
+      });
+    }
+  }
 
   return (
     <AdminSection
@@ -340,6 +376,7 @@ export default function AccountingPage() {
             <TableHeader>
               <TableRow>
                 <TableHead>วันทำการ</TableHead>
+                <TableHead className="text-right">ยอดทั้งหมด</TableHead>
                 <TableHead className="text-right">เงินสด</TableHead>
                 <TableHead className="text-right">QR</TableHead>
                 <TableHead className="text-right">โอนเข้าแล้ว</TableHead>
@@ -353,11 +390,26 @@ export default function AccountingPage() {
               {rows.map((r) => (
                 <TableRow key={r.dateKey} className="cursor-pointer hover:bg-accent/50" onClick={() => setSelectedDay(r.dateKey)}>
                   <TableCell className="font-medium">{formatKey(r.dateKey)}</TableCell>
+                  <TableCell className="text-right font-medium">{formatCurrency(r.totalSales, currency)}</TableCell>
                   <TableCell className="text-right">{formatCurrency(r.cashSales, currency)}</TableCell>
                   <TableCell className="text-right">{formatCurrency(r.qrSales, currency)}</TableCell>
                   <TableCell className="text-right">{formatCurrency(r.transferred, currency)}</TableCell>
                   <TableCell className="text-right">
-                    {r.pendingTransfer > 0 ? formatCurrency(r.pendingTransfer, currency) : "-"}
+                    {r.pendingTransfer > 0 ? (
+                      <span className="inline-flex items-center justify-end gap-2">
+                        {formatCurrency(r.pendingTransfer, currency)}
+                        <input
+                          type="checkbox"
+                          className="h-4 w-4 cursor-pointer accent-primary"
+                          title="ติ๊กถ้าโอนเข้าบัญชีแล้ว (ยืนยันด้วยตนเอง ไม่ต้องกรอกฟอร์มด้านล่าง)"
+                          disabled={confirmingDays.has(r.dateKey)}
+                          onClick={(e) => e.stopPropagation()}
+                          onChange={(e) => e.target.checked && confirmPendingTransfer(r)}
+                        />
+                      </span>
+                    ) : (
+                      "-"
+                    )}
                   </TableCell>
                   <TableCell className="text-right">{formatCurrency(r.expenses, currency)}</TableCell>
                   <TableCell className="text-right font-medium">{formatCurrency(r.net, currency)}</TableCell>
@@ -368,7 +420,7 @@ export default function AccountingPage() {
               ))}
               {rows.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={8} className="text-center text-muted-foreground">
+                  <TableCell colSpan={9} className="text-center text-muted-foreground">
                     ไม่มีข้อมูลในช่วงนี้
                   </TableCell>
                 </TableRow>
@@ -377,7 +429,8 @@ export default function AccountingPage() {
           </Table>
           <p className="mt-3 text-xs text-muted-foreground">
             รวมช่วงนี้ — ยอดขาย {formatCurrency(totals.totalSales, currency)}, รอโอน {formatCurrency(totals.pendingTransfer, currency)},
-            รายจ่าย {formatCurrency(totals.expenses, currency)}, สุทธิ {formatCurrency(totals.net, currency)}
+            รายจ่าย {formatCurrency(totals.expenses, currency)} (เฉลี่ย {formatCurrency(avgExpensePerDay, currency)}/วัน), สุทธิ{" "}
+            {formatCurrency(totals.net, currency)}
           </p>
         </CardContent>
       </Card>
