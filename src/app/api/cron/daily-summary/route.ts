@@ -15,8 +15,12 @@ import { runDailySummaryCron } from "@/lib/notifications/dailySummaryCron";
  * in the settings UI while the cron only ever fired at 04:00 Bangkok, so the summary silently
  * never sent) — if a shop's chosen hour ever changes, `vercel.json`'s schedule has to change
  * with it, in the same commit. Same auth pattern as `/api/cron/billing`: Vercel Cron sends
- * `Authorization: Bearer $CRON_SECRET` automatically. Also callable manually for testing:
- *   curl -H "Authorization: Bearer $CRON_SECRET" https://<domain>/api/cron/daily-summary
+ * `Authorization: Bearer $CRON_SECRET` automatically. Also callable manually for testing, or to
+ * force-send an already-closed business day's summary that got missed for some reason (e.g. the
+ * hour-mismatch bug above, or the server being down at the scheduled time) without waiting for
+ * tomorrow's fire — `?force=1` skips the "is this my hour" check but not the "already sent
+ * today" dedupe, so it's safe to run any time and can never double-send:
+ *   curl -H "Authorization: Bearer $CRON_SECRET" "https://<domain>/api/cron/daily-summary?force=1"
  */
 function constantTimeEquals(a: string, b: string): boolean {
   const bufA = Buffer.from(a);
@@ -34,6 +38,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
 
-  const result = await runDailySummaryCron(getAdminDb());
+  const force = request.nextUrl.searchParams.get("force") === "1";
+  const result = await runDailySummaryCron(getAdminDb(), { force });
   return NextResponse.json(result);
 }

@@ -39,7 +39,16 @@ const BUSINESS_DAY_FROM_HOUR = 16;
  * (this runs with no signed-in user, so the client SDK + Security Rules path isn't available
  * here — same reasoning as every other cron/Admin-SDK-only route in this codebase).
  */
-export async function runDailySummaryCron(db: Firestore): Promise<{ sent: number; skipped: number }> {
+export async function runDailySummaryCron(
+  db: Firestore,
+  // Bypasses the `isTheirHour` check below — for a manual `curl`/superadmin-triggered catch-up
+  // send (e.g. the vercel.json/dailySummaryHour mismatch bug that shipped before this flag
+  // existed: a shop's summary silently never sent for days, and once the mismatch is fixed
+  // there's still an already-closed business day sitting unsent with no cron fire left to catch
+  // it until tomorrow). `notSentToday`'s dedupe guard still applies even when forced, so this can
+  // never double-send a business day the real hourly-matched run already covered.
+  options: { force?: boolean } = {}
+): Promise<{ sent: number; skipped: number }> {
   const now = Date.now();
   const currentHour = bangkokHour(now);
   // At any hour before 16:00 (which covers every reasonable `dailySummaryHour` a shop would
@@ -59,7 +68,7 @@ export async function runDailySummaryCron(db: Firestore): Promise<{ sent: number
   for (const doc of settingsSnap.docs) {
     const settings = doc.data() as Omit<NotificationSettings, "id">;
     const notSentToday = settings.lastDailySummaryDateKey !== businessDayKey;
-    const isTheirHour = (settings.dailySummaryHour ?? DEFAULT_DAILY_SUMMARY_HOUR) === currentHour;
+    const isTheirHour = options.force || (settings.dailySummaryHour ?? DEFAULT_DAILY_SUMMARY_HOUR) === currentHour;
     if (
       !settings.telegramBotToken ||
       !settings.telegramChatId ||
