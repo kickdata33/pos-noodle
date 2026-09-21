@@ -65,4 +65,12 @@ export const COLLECTIONS = {
    * `types/dailyFloat.ts`. One doc per shop per business day, id `${shopId}_${businessDayKey}`.
    * Same access model as `expenses`/`bankTransfers`. */
   dailyFloats: "dailyFloats",
+  /** Templates for expenses that recur every day (rent/wages/internet) — see
+   * `types/recurringExpense.ts`. Same access model as `expenses`. Never read for anything but
+   * generating that day's actual `expenses` row; the รายจ่าย list itself never queries this. */
+  recurringExpenses: "recurringExpenses",
+  /** One doc per (recurring expense, day) that was explicitly skipped — see
+   * `types/recurringExpenseSkip.ts`. Id is deterministic (`${recurringExpenseId}_${dateKey}`).
+   * Same access model as `expenses`. */
+  recurringExpenseSkips: "recurringExpenseSkips",
 } as const;

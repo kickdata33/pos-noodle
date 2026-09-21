@@ -25,11 +25,14 @@ import {
   type ReportPreset,
 } from "@/lib/pos/dateRange";
 import { reconciliationRows } from "@/lib/pos/reconciliation";
+import { computeMissingRecurringExpenses, recurringExpenseDayKey } from "@/lib/pos/recurringExpenses";
 import { bankTransferRepository } from "@/repositories/bankTransferRepository";
 import { dailyFloatRepository } from "@/repositories/dailyFloatRepository";
 import { expenseRepository } from "@/repositories/expenseRepository";
 import { orderRepository } from "@/repositories/orderRepository";
 import { paymentMethodRepository } from "@/repositories/paymentMethodRepository";
+import { recurringExpenseRepository } from "@/repositories/recurringExpenseRepository";
+import { recurringExpenseSkipRepository } from "@/repositories/recurringExpenseSkipRepository";
 import { shopRepository } from "@/repositories/shopRepository";
 import {
   EXPENSE_CATEGORIES,
@@ -39,6 +42,8 @@ import {
   type ExpenseCategory,
   type Order,
   type PaymentMethod,
+  type RecurringExpense,
+  type RecurringExpenseSkip,
 } from "@/types";
 
 const PRESETS: { value: ReportPreset; label: string }[] = [
@@ -93,6 +98,8 @@ export default function AccountingPage() {
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [transfers, setTransfers] = useState<BankTransfer[]>([]);
   const [floats, setFloats] = useState<DailyFloat[]>([]);
+  const [recurringExpenses, setRecurringExpenses] = useState<RecurringExpense[]>([]);
+  const [recurringSkips, setRecurringSkips] = useState<RecurringExpenseSkip[]>([]);
   const [currency, setCurrency] = useState("THB");
   const [loading, setLoading] = useState(true);
 
@@ -125,6 +132,53 @@ export default function AccountingPage() {
     if (!shopId) return;
     return dailyFloatRepository.subscribeForShop(shopId, setFloats);
   }, [shopId]);
+
+  useEffect(() => {
+    if (!shopId) return;
+    return recurringExpenseRepository.subscribeForShop(shopId, setRecurringExpenses);
+  }, [shopId]);
+
+  useEffect(() => {
+    if (!shopId) return;
+    return recurringExpenseSkipRepository.subscribeForShop(shopId, setRecurringSkips);
+  }, [shopId]);
+
+  // Auto-fills today's (and, catching up after a few days offline, the recent past's) row for
+  // every active รายจ่ายประจำ template — item: "ต้องการให้รายจ่ายประจำ ขึ้นอัตโนมัติเลยหากวันไหน
+  // ไม่มีจะออกเอง". Runs on every mount/data change but is a no-op once everything's already
+  // generated (`computeMissingRecurringExpenses` only ever returns what's actually missing), so
+  // this is safe to leave running passively rather than gating it behind a button. 30 days is an
+  // arbitrary but generous catch-up window — far enough to cover the shop being unattended for a
+  // while, not so far that a brand-new template silently backfills months of history (it also
+  // never backfills earlier than its own `createdDateKey` regardless of this window).
+  const generatingRecurringRef = useRef(false);
+  useEffect(() => {
+    if (!shopId || generatingRecurringRef.current || recurringExpenses.length === 0) return;
+    const today = todayKey();
+    const dateKeys = Array.from({ length: 30 }, (_, i) => addDaysToKey(today, -i));
+    const existingKeys = new Set(
+      expenses
+        .filter((e): e is Expense & { recurringExpenseId: string } => Boolean(e.recurringExpenseId))
+        .map((e) => recurringExpenseDayKey(e.recurringExpenseId, e.dateKey))
+    );
+    const skippedKeys = new Set(recurringSkips.map((s) => recurringExpenseDayKey(s.recurringExpenseId, s.dateKey)));
+    const missing = computeMissingRecurringExpenses(recurringExpenses, existingKeys, skippedKeys, dateKeys);
+    if (missing.length === 0) return;
+
+    generatingRecurringRef.current = true;
+    Promise.all(
+      missing.map((m) =>
+        expenseRepository.create({
+          ...m,
+          createdBy: "system-recurring",
+          createdByName: "รายจ่ายประจำ (อัตโนมัติ)",
+          createdAt: Date.now(),
+        })
+      )
+    ).finally(() => {
+      generatingRecurringRef.current = false;
+    });
+  }, [shopId, recurringExpenses, recurringSkips, expenses]);
 
   const range: DateRange = useMemo(() => {
     if (preset === "custom") {
@@ -389,6 +443,52 @@ export default function AccountingPage() {
           <p className="mt-3 text-right text-sm font-medium">
             ยอดรวมวันที่ {formatKey(expenseDay)} {formatCurrency(expenseDayTotal, currency)}
           </p>
+        </CardContent>
+      </Card>
+
+      <Card className="mt-4">
+        <CardHeader>
+          <CardTitle>รายจ่ายประจำ</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <p className="mb-3 text-sm text-muted-foreground">
+            รายการที่ตั้งไว้ที่นี่จะถูกสร้างเป็นแถวในตาราง &quot;รายจ่าย&quot; ด้านบนให้อัตโนมัติทุกวัน
+            (เช่น ค่าเช่าที่ ค่าพนักงาน ค่าเน็ต) — ถ้าวันไหนหยุด ให้ไปลบแถวของวันนั้นในตาราง
+            &quot;รายจ่าย&quot; ได้เลย ระบบจะไม่สร้างซ้ำให้วันนั้นอีก
+          </p>
+          <Table className="table-fixed">
+            <colgroup>
+              <col className="w-[16%]" />
+              <col className="w-[32%]" />
+              <col className="w-[16%]" />
+              <col className="w-[14%]" />
+              <col className="w-[10%]" />
+              <col className="w-[12%]" />
+            </colgroup>
+            <TableHeader>
+              <TableRow>
+                <TableHead>หมวด</TableHead>
+                <TableHead>รายการ</TableHead>
+                <TableHead className="text-right">จำนวนเงิน/วัน</TableHead>
+                <TableHead>จ่ายด้วย</TableHead>
+                <TableHead>สถานะ</TableHead>
+                <TableHead />
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {shopId ? <RecurringExpenseQuickAddRow shopId={shopId} /> : null}
+              {recurringExpenses.map((t) => (
+                <RecurringExpenseRow key={t.id} template={t} currency={currency} />
+              ))}
+              {recurringExpenses.length === 0 ? (
+                <TableRow>
+                  <TableCell colSpan={6} className="text-center text-muted-foreground">
+                    ยังไม่มีรายจ่ายประจำ
+                  </TableCell>
+                </TableRow>
+              ) : null}
+            </TableBody>
+          </Table>
         </CardContent>
       </Card>
 
@@ -705,6 +805,7 @@ function ExpenseQuickAddRow({
         description: description.trim(),
         amount,
         paymentMethod,
+        recurringExpenseId: null,
         createdBy,
         createdByName,
         createdAt: Date.now(),
@@ -817,7 +918,18 @@ function ExpenseRow({ expense, currency }: { expense: Expense; currency: string 
 
   async function handleDelete() {
     const label = expense.description || expense.category;
-    if (!window.confirm(`ลบรายจ่าย "${label}" ${formatCurrency(expense.amount, currency)}?`)) return;
+    // A row auto-generated from a รายจ่ายประจำ template needs an explicit skip record *first* —
+    // otherwise the generation effect above would just recreate this exact row on its very next
+    // run, since "no Expense doc" and "not generated yet" are otherwise indistinguishable (item:
+    // "ถ้าวันไหนหยุด เดี๋ยวลบออกเอง"). A manually-entered row has nothing to skip; deleting it is
+    // final, same as always.
+    const confirmMessage = expense.recurringExpenseId
+      ? `ลบรายจ่ายประจำวันที่ ${formatKey(expense.dateKey)} "${label}" ${formatCurrency(expense.amount, currency)}? (จะไม่สร้างรายการนี้ซ้ำสำหรับวันนี้อีก)`
+      : `ลบรายจ่าย "${label}" ${formatCurrency(expense.amount, currency)}?`;
+    if (!window.confirm(confirmMessage)) return;
+    if (expense.recurringExpenseId) {
+      await recurringExpenseSkipRepository.skip(expense.shopId, expense.recurringExpenseId, expense.dateKey);
+    }
     await expenseRepository.remove(expense.id);
   }
 
@@ -892,7 +1004,14 @@ function ExpenseRow({ expense, currency }: { expense: Expense; currency: string 
       <TableCell className="truncate">
         <Badge variant="muted">{expense.category}</Badge>
       </TableCell>
-      <TableCell className="truncate text-muted-foreground">{expense.description || "-"}</TableCell>
+      <TableCell className="truncate text-muted-foreground">
+        {expense.description || "-"}
+        {expense.recurringExpenseId ? (
+          <Badge variant="muted" className="ml-2 align-middle text-[10px]">
+            ประจำ
+          </Badge>
+        ) : null}
+      </TableCell>
       <TableCell className="truncate">{expense.paymentMethod === "cash" ? "เงินสด" : "โอน"}</TableCell>
       <TableCell className="text-right">{formatCurrency(expense.amount, currency)}</TableCell>
       <TableCell>
@@ -904,6 +1023,155 @@ function ExpenseRow({ expense, currency }: { expense: Expense; currency: string 
             ลบ
           </Button>
         </div>
+      </TableCell>
+    </TableRow>
+  );
+}
+
+/**
+ * Same quick-add pattern as `ExpenseQuickAddRow`, for setting up a new รายจ่ายประจำ template
+ * (item request: "ต้องการให้รายจ่ายประจำ ขึ้นอัตโนมัติเลย"). No dateKey field — a template isn't
+ * itself pinned to one day, it *generates* a row for every day from today on (see the accounting
+ * page's `generatingRecurringRef` effect and `createdDateKey`'s comment for why "from today" and
+ * not earlier).
+ */
+function RecurringExpenseQuickAddRow({ shopId }: { shopId: string }) {
+  const [category, setCategory] = useState<ExpenseCategory>(EXPENSE_CATEGORIES[0]);
+  const [description, setDescription] = useState("");
+  const [amountText, setAmountText] = useState("");
+  const [paymentMethod, setPaymentMethod] = useState<"cash" | "transfer">("cash");
+  const [saving, setSaving] = useState(false);
+
+  const amount = Number(amountText);
+  const canSave = Number.isFinite(amount) && amount > 0;
+
+  async function handleAdd() {
+    if (!canSave || saving) return;
+    setSaving(true);
+    try {
+      const now = Date.now();
+      await recurringExpenseRepository.create({
+        shopId,
+        category,
+        description: description.trim(),
+        amount,
+        paymentMethod,
+        active: true,
+        createdDateKey: todayKey(),
+        createdAt: now,
+        updatedAt: now,
+      });
+      setDescription("");
+      setAmountText("");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <TableRow className="bg-muted/30">
+      <TableCell>
+        <Select value={category} onValueChange={(v) => setCategory(v as ExpenseCategory)}>
+          <SelectTrigger className="h-9 w-full text-sm">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {EXPENSE_CATEGORIES.map((c) => (
+              <SelectItem key={c} value={c}>
+                {c}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </TableCell>
+      <TableCell>
+        <Input
+          value={description}
+          onChange={(e) => setDescription(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && handleAdd()}
+          placeholder="เช่น ค่าเช่าที่, ค่าพนักงาน 2 คน"
+          className="h-9 w-full"
+        />
+      </TableCell>
+      <TableCell>
+        <Input
+          type="number"
+          inputMode="decimal"
+          min={0}
+          value={amountText}
+          onChange={(e) => setAmountText(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && handleAdd()}
+          placeholder="0.00"
+          className="h-9 w-full text-right"
+        />
+      </TableCell>
+      <TableCell>
+        <Select value={paymentMethod} onValueChange={(v) => setPaymentMethod(v as "cash" | "transfer")}>
+          <SelectTrigger className="h-9 w-full text-sm">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="cash">เงินสด</SelectItem>
+            <SelectItem value="transfer">โอน</SelectItem>
+          </SelectContent>
+        </Select>
+      </TableCell>
+      <TableCell />
+      <TableCell>
+        <Button size="sm" onClick={handleAdd} disabled={!canSave || saving} className="w-full">
+          +
+        </Button>
+      </TableCell>
+    </TableRow>
+  );
+}
+
+/**
+ * One รายจ่ายประจำ template — a toggle to pause it without losing the setup/history, and a
+ * delete that only removes the template itself. Every `Expense` row it already generated stays
+ * exactly as-is either way (see `RecurringExpense.active`'s comment) — deleting the template just
+ * means no *future* days get a new row from it.
+ */
+function RecurringExpenseRow({ template, currency }: { template: RecurringExpense; currency: string }) {
+  const [busy, setBusy] = useState(false);
+
+  async function toggleActive() {
+    setBusy(true);
+    try {
+      await recurringExpenseRepository.update(template.id, { active: !template.active, updatedAt: Date.now() });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleDelete() {
+    const label = template.description || template.category;
+    if (
+      !window.confirm(
+        `ลบรายจ่ายประจำ "${label}" ${formatCurrency(template.amount, currency)}/วัน? (รายการที่สร้างไปแล้วในตาราง "รายจ่าย" จะยังอยู่เหมือนเดิม แค่จะไม่สร้างวันใหม่ๆ ให้อีก)`
+      )
+    )
+      return;
+    await recurringExpenseRepository.remove(template.id);
+  }
+
+  return (
+    <TableRow className={template.active ? undefined : "opacity-50"}>
+      <TableCell className="truncate">
+        <Badge variant="muted">{template.category}</Badge>
+      </TableCell>
+      <TableCell className="truncate text-muted-foreground">{template.description || "-"}</TableCell>
+      <TableCell className="text-right">{formatCurrency(template.amount, currency)}</TableCell>
+      <TableCell className="truncate">{template.paymentMethod === "cash" ? "เงินสด" : "โอน"}</TableCell>
+      <TableCell>
+        <Button size="sm" variant="ghost" className="px-2" onClick={toggleActive} disabled={busy}>
+          {template.active ? "ใช้งานอยู่" : "ปิดอยู่"}
+        </Button>
+      </TableCell>
+      <TableCell>
+        <Button size="sm" variant="ghost" className="px-2 text-destructive" onClick={handleDelete}>
+          ลบ
+        </Button>
       </TableCell>
     </TableRow>
   );

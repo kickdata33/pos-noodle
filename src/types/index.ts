@@ -13,5 +13,7 @@ export * from "./order";
 export * from "./auditLog";
 export * from "./notificationSettings";
 export * from "./expense";
+export * from "./recurringExpense";
+export * from "./recurringExpenseSkip";
 export * from "./bankTransfer";
 export * from "./dailyFloat";

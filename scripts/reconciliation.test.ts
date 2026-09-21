@@ -78,6 +78,7 @@ function makeExpense(overrides: Partial<Expense> & Pick<Expense, "id" | "dateKey
     category: "กลุ่มสั่งหมู",
     description: "หมู",
     paymentMethod: "cash",
+    recurringExpenseId: null,
     createdBy: "u1",
     createdByName: "เจ้าของร้าน",
     createdAt: 0,

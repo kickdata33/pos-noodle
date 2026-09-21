@@ -141,6 +141,20 @@ service cloud.firestore {
       allow delete: if isAdmin() && ownsExisting();
     }
 
+    match /recurringExpenses/{recurringExpenseId} {
+      allow read: if isAdmin() && ownsExisting();
+      allow create: if isAdmin() && ownsIncoming();
+      allow update: if isAdmin() && ownsExisting() && ownsIncoming();
+      allow delete: if isAdmin() && ownsExisting();
+    }
+
+    match /recurringExpenseSkips/{skipId} {
+      allow read: if isAdmin() && ownsExisting();
+      allow create: if isAdmin() && ownsIncoming();
+      allow update: if isAdmin() && ownsExisting() && ownsIncoming();
+      allow delete: if isAdmin() && ownsExisting();
+    }
+
     // --- Users: everyone can read their own doc (needed at login to resolve role/active);
     //     Admin can read every user *in their own shop* (item 11 staff management) — never
     //     another shop's staff list. No one edits their own role/active/shopId. Creation always

@@ -37,6 +37,12 @@ export interface Expense extends WithId {
   description: string;
   amount: number;
   paymentMethod: "cash" | "transfer";
+  /** Set only for a row auto-created from a `RecurringExpense` template (e.g. daily rent/staff
+   * wages) — `null` for anything the owner typed in by hand. This is what lets deleting *this
+   * one day's* row register as "skip this day" instead of just disappearing until the next
+   * auto-fill recreates it — see `recurringExpenseSkipRepository` and
+   * `computeMissingRecurringExpenses`'s comment. */
+  recurringExpenseId: string | null;
   createdBy: string;
   createdByName: string;
   createdAt: EpochMillis;
