@@ -20,12 +20,17 @@ const DEFAULT_DAILY_SUMMARY_HOUR = 4;
 const BUSINESS_DAY_FROM_HOUR = 16;
 
 /**
- * Runs every hour (see `vercel.json`'s cron entry and `/api/cron/daily-summary`) rather than
- * once at a fixed time — each shop now picks its own send hour
- * (`NotificationSettings.dailySummaryHour`, "สามารถเลือกเวลาสรุปบิลรายวันได้"), so this sweeps
- * every shop every hour and only actually sends to the ones whose chosen hour matches *now*,
- * skipping the rest. `lastDailySummaryDateKey` guards against sending the same day's summary
- * twice if the cron ever fires more than once within that hour (a Vercel retry, a manual curl).
+ * Meant to sweep every shop every hour and only actually send to the ones whose chosen hour
+ * (`NotificationSettings.dailySummaryHour`, "สามารถเลือกเวลาสรุปบิลรายวันได้") matches *now* — but
+ * `vercel.json`'s cron entry only ever fires this once a day (Vercel Hobby plan limit — see
+ * `/api/cron/daily-summary`'s comment), at one single fixed UTC time. So in practice a shop's
+ * `dailySummaryHour` pick only works if it happens to equal that one fire time; anything else
+ * silently never sends (this bit a real shop: picked 06:00 in the settings UI, cron only ever
+ * fired at 04:00 Bangkok, summary never went out). `lastDailySummaryDateKey` guards against
+ * sending the same day's summary twice if the cron ever fires more than once within that hour
+ * (a Vercel retry, a manual curl) — not against the "wrong hour" problem above, which is a
+ * config-alignment issue between this file's per-shop-hour design and `vercel.json`'s
+ * once-a-day-only reality, not a logic bug in the comparison itself.
  * Reports on the *business day that most recently closed* (16:00-cutoff shift, not a plain
  * midnight-to-midnight calendar day — item: "ทำไมสรุปมาไม่เท่ากัน", the LINE/Telegram summary used
  * to disagree with `/admin/reports`' business-day-toggle numbers over exactly this), reusing the

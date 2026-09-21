@@ -164,22 +164,36 @@ export function TelegramNotificationSettings() {
             <Switch checked={notifyDailySummary} onCheckedChange={setNotifyDailySummary} />
           </div>
           {notifyDailySummary ? (
-            <div className="flex items-center justify-between pl-4">
-              <Label htmlFor="tg-summary-hour" className="text-sm text-muted-foreground">
-                ส่งเวลา
-              </Label>
-              <Select value={String(dailySummaryHour)} onValueChange={(v) => setDailySummaryHour(Number(v))}>
-                <SelectTrigger id="tg-summary-hour" className="w-28">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {HOURS.map((h) => (
-                    <SelectItem key={h} value={String(h)}>
-                      {String(h).padStart(2, "0")}:00
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+            <div className="pl-4">
+              <div className="flex items-center justify-between">
+                <Label htmlFor="tg-summary-hour" className="text-sm text-muted-foreground">
+                  ส่งเวลา
+                </Label>
+                <Select value={String(dailySummaryHour)} onValueChange={(v) => setDailySummaryHour(Number(v))}>
+                  <SelectTrigger id="tg-summary-hour" className="w-28">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {HOURS.map((h) => (
+                      <SelectItem key={h} value={String(h)}>
+                        {String(h).padStart(2, "0")}:00
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              {/* Real constraint, not a cosmetic note: on the shop's current (free/Hobby) Vercel
+                  plan, the actual once-a-day cron job only fires at one fixed time — 06:00 right
+                  now (see `vercel.json`). Picking any other hour here silently never sends (this
+                  already bit the shop once — see `dailySummaryCron.ts`'s comment). If this needs
+                  to change, the developer has to update `vercel.json`'s schedule to match, in the
+                  same change. */}
+              {dailySummaryHour !== 6 ? (
+                <p className="mt-1 text-xs text-destructive">
+                  ตอนนี้ระบบส่งจริงได้แค่เวลา 06:00 น. เท่านั้น (ข้อจำกัดแผนฟรีของ Vercel — ตั้งเวลาอื่นแล้วจะไม่ส่งจริง)
+                  ถ้าต้องการเปลี่ยนเวลาส่งจริง ต้องแจ้งให้แก้ไขระบบเพิ่มด้วย
+                </p>
+              ) : null}
             </div>
           ) : null}
         </div>
