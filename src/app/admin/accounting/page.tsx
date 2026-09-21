@@ -451,10 +451,15 @@ export default function AccountingPage() {
             <DateField value={expenseDay} onChange={setExpenseDay} className="h-9 w-36" />
             <span className="text-sm font-medium">{formatKey(expenseDay)}</span>
           </div>
-          <Table className="table-fixed">
-            {/* Fixed, percentage-based column widths (sum to 100%) so the row never needs to
-                grow past the card's own width and force a horizontal scrollbar — every cell's
-                Input/Select below fills its column with `w-full` instead of a fixed px width. */}
+          <Table className="table-fixed min-w-[640px]">
+            {/* Fixed, percentage-based column widths (sum to 100%) so every cell's Input/Select
+                below can fill its column with `w-full` instead of a fixed px width. `min-w-[640px]`
+                is what actually matters on a phone: without it, `table-fixed` + `w-full` shrinks
+                the table down to the screen's own width, squeezing every Select/Input/Badge below
+                the space they need and making them visually overlap. With a minimum width, the
+                table instead stays usable-sized and the surrounding `Table` component's own
+                `overflow-x-auto` wrapper (see `components/ui/table.tsx`) scrolls it horizontally —
+                the same "ซ้อนกันทั้งช่องกรอกข้อมูล" bug report this fixes. */}
             <colgroup>
               <col className="w-[16%]" />
               <col className="w-[15%]" />
@@ -511,7 +516,9 @@ export default function AccountingPage() {
             (เช่น ค่าเช่าที่ ค่าพนักงาน ค่าเน็ต) — ถ้าวันไหนหยุด ให้ไปลบแถวของวันนั้นในตาราง
             &quot;รายจ่าย&quot; ได้เลย ระบบจะไม่สร้างซ้ำให้วันนั้นอีก
           </p>
-          <Table className="table-fixed">
+          <Table className="table-fixed min-w-[640px]">
+            {/* Same `min-w-[640px]` fix as the รายจ่าย table above — without it this table's Select
+                (จ่ายด้วย), and the สถานะ/ลบ buttons collapse into overlapping slivers on a phone. */}
             <colgroup>
               <col className="w-[16%]" />
               <col className="w-[32%]" />
