@@ -497,7 +497,10 @@ export default function AccountingPage() {
             </TableBody>
           </Table>
           <p className="mt-3 text-right text-sm font-medium">
-            ยอดรวมวันที่ {formatKey(expenseDay)} {formatCurrency(expenseDayTotal, currency)}
+            ยอดรวมวันที่ {formatKey(expenseDay)}{" "}
+            <span className={expenseDayTotal < 0 ? "text-destructive" : undefined}>
+              {formatCurrency(expenseDayTotal, currency)}
+            </span>
           </p>
         </CardContent>
       </Card>
