@@ -335,6 +335,9 @@ function EmployeeCard({
   const [editingWage, setEditingWage] = useState(false);
   const [wageText, setWageText] = useState(String(employee.dailyWage));
   const [savingWage, setSavingWage] = useState(false);
+  const [editingStart, setEditingStart] = useState(false);
+  const [startDateText, setStartDateText] = useState(employee.createdDateKey);
+  const [savingStart, setSavingStart] = useState(false);
 
   const today = todayKey();
 
@@ -381,6 +384,24 @@ function EmployeeCard({
 
   async function toggleActive() {
     await payrollEmployeeRepository.update(employee.id, { active: !employee.active, updatedAt: Date.now() });
+  }
+
+  // Only meaningful before the first "ตัดจ่าย" — once a settlement exists, `periodStart` derives
+  // from that settlement's `periodEnd` instead (see `computeCurrentPeriodStart`), so changing
+  // `createdDateKey` at that point would no longer affect anything and would just be confusing to
+  // offer. Item: "เริ่มงานวันที่ 17" — an employee enrolled a few days after their actual first day
+  // needs this correctable, not locked to whatever the enroll dialog happened to default to.
+  const canEditStart = settlements.length === 0;
+
+  async function saveStart() {
+    if (!startDateText || savingStart) return;
+    setSavingStart(true);
+    try {
+      await payrollEmployeeRepository.update(employee.id, { createdDateKey: startDateText, updatedAt: Date.now() });
+      setEditingStart(false);
+    } finally {
+      setSavingStart(false);
+    }
   }
 
   return (
@@ -435,9 +456,45 @@ function EmployeeCard({
           )}
         </div>
 
-        <p className="text-sm text-muted-foreground">
-          งวดปัจจุบัน {formatKey(periodStart)} – {formatKey(today)} ({accrual.daysWorked} วันทำงาน)
-        </p>
+        <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
+          {editingStart ? (
+            <>
+              <span>เริ่มงานวันที่</span>
+              <Input
+                type="date"
+                value={startDateText}
+                onChange={(e) => setStartDateText(e.target.value)}
+                className="h-8 w-40"
+                autoFocus
+              />
+              <Button size="sm" className="h-8 px-2" onClick={saveStart} disabled={savingStart || !startDateText}>
+                บันทึก
+              </Button>
+              <Button size="sm" variant="ghost" className="h-8 px-2" onClick={() => setEditingStart(false)}>
+                ยกเลิก
+              </Button>
+            </>
+          ) : (
+            <>
+              <span>
+                งวดปัจจุบัน {formatKey(periodStart)} – {formatKey(today)} ({accrual.daysWorked} วันทำงาน)
+              </span>
+              {canEditStart ? (
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="h-6 px-2 text-xs"
+                  onClick={() => {
+                    setStartDateText(employee.createdDateKey);
+                    setEditingStart(true);
+                  }}
+                >
+                  แก้วันเริ่มงาน
+                </Button>
+              ) : null}
+            </>
+          )}
+        </div>
 
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
           <Stat label="ค่าจ้างสะสม" value={formatCurrency(accrual.accruedWage, currency)} />
