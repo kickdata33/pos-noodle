@@ -155,6 +155,34 @@ service cloud.firestore {
       allow delete: if isAdmin() && ownsExisting();
     }
 
+    match /payrollEmployees/{payrollEmployeeId} {
+      allow read: if isAdmin() && ownsExisting();
+      allow create: if isAdmin() && ownsIncoming();
+      allow update: if isAdmin() && ownsExisting() && ownsIncoming();
+      allow delete: if isAdmin() && ownsExisting();
+    }
+
+    match /payrollAdvances/{advanceId} {
+      allow read: if isAdmin() && ownsExisting();
+      allow create: if isAdmin() && ownsIncoming();
+      allow update: if isAdmin() && ownsExisting() && ownsIncoming();
+      allow delete: if isAdmin() && ownsExisting();
+    }
+
+    match /payrollAbsences/{absenceId} {
+      allow read: if isAdmin() && ownsExisting();
+      allow create: if isAdmin() && ownsIncoming();
+      allow update: if isAdmin() && ownsExisting() && ownsIncoming();
+      allow delete: if isAdmin() && ownsExisting();
+    }
+
+    match /payrollSettlements/{settlementId} {
+      allow read: if isAdmin() && ownsExisting();
+      allow create: if isAdmin() && ownsIncoming();
+      allow update: if isAdmin() && ownsExisting() && ownsIncoming();
+      allow delete: if isAdmin() && ownsExisting();
+    }
+
     // --- Users: everyone can read their own doc (needed at login to resolve role/active);
     //     Admin can read every user *in their own shop* (item 11 staff management) — never
     //     another shop's staff list. No one edits their own role/active/shopId. Creation always

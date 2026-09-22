@@ -73,4 +73,18 @@ export const COLLECTIONS = {
    * `types/recurringExpenseSkip.ts`. Id is deterministic (`${recurringExpenseId}_${dateKey}`).
    * Same access model as `expenses`. */
   recurringExpenseSkips: "recurringExpenseSkips",
+  /** Staff enrolled in the weekly payroll ledger (item: "สร้างตารางพนักงานแยก") — see
+   * `types/payrollEmployee.ts`. Doc id is deterministic (`= staffId`). Same access model as
+   * `expenses`. */
+  payrollEmployees: "payrollEmployees",
+  /** Cash advances (เบิกเงินล่วงหน้า) against a payroll employee's currently accruing wage — see
+   * `types/payrollAdvance.ts`. Same access model as `expenses`. */
+  payrollAdvances: "payrollAdvances",
+  /** One doc per (payroll employee, day) explicitly marked as not worked — see
+   * `types/payrollAbsence.ts`. Id is deterministic (`${staffId}_${dateKey}`). Same access model
+   * as `expenses`. */
+  payrollAbsences: "payrollAbsences",
+  /** Completed weekly "ตัดจ่าย" (pay period settlements), one doc per settlement — see
+   * `types/payrollSettlement.ts`. Same access model as `expenses`. */
+  payrollSettlements: "payrollSettlements",
 } as const;
