@@ -25,6 +25,7 @@ import {
   computeAvailableAdvance,
   computeCurrentPeriodStart,
   computeSettlementPreview,
+  suggestedSettlementEnd,
 } from "@/lib/pos/payroll";
 import { payrollAbsenceRepository } from "@/repositories/payrollAbsenceRepository";
 import { payrollAdvanceRepository } from "@/repositories/payrollAdvanceRepository";
@@ -116,8 +117,8 @@ export default function PayrollPage() {
 
   return (
     <AdminSection
-      title="ตารางพนักงาน"
-      description="ค่าจ้างรายวัน เบิกล่วงหน้า และตัดจ่ายรายสัปดาห์ — แยกจากรายจ่ายทั่วไป"
+      title="เงินเดือนพนักงาน"
+      description="ค่าจ้างรายวัน เบิกล่วงหน้า และตัดจ่ายทุกวันที่ 1 และ 16 — แยกจากรายจ่ายทั่วไป"
       actionLabel={enrollableStaff.length > 0 ? "+ เพิ่มพนักงาน" : undefined}
       onAction={() => setEnrollOpen(true)}
     >
@@ -210,6 +211,11 @@ function EnrollDialog({
 }) {
   const [staffId, setStaffId] = useState("");
   const [wageText, setWageText] = useState("");
+  // Defaults to today, but editable — an employee is often enrolled a few days *after* they
+  // actually started (item: "เริ่มทำงานตั้งแต่วันที่ 17" said about someone being set up here
+  // after the fact), and this is the day wage accrual starts counting from, so it has to be
+  // correctable rather than always locked to "today".
+  const [startDateKey, setStartDateKey] = useState(() => todayKey());
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
@@ -217,12 +223,13 @@ function EnrollDialog({
       // eslint-disable-next-line react-hooks/set-state-in-effect
       setStaffId(candidates[0]?.id ?? "");
       setWageText("");
+      setStartDateKey(todayKey());
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
   const wage = Number(wageText);
-  const canSave = Boolean(shopId) && Boolean(staffId) && Number.isFinite(wage) && wage > 0;
+  const canSave = Boolean(shopId) && Boolean(staffId) && Number.isFinite(wage) && wage > 0 && Boolean(startDateKey);
 
   async function handleSave() {
     if (!canSave || saving) return;
@@ -237,7 +244,7 @@ function EnrollDialog({
         staffName: person.name,
         dailyWage: wage,
         active: true,
-        createdDateKey: todayKey(),
+        createdDateKey: startDateKey,
         createdAt: now,
         updatedAt: now,
       });
@@ -280,6 +287,16 @@ function EnrollDialog({
               onChange={(e) => setWageText(e.target.value)}
               placeholder="เช่น 350"
             />
+          </div>
+          <div className="grid gap-2">
+            <Label htmlFor="start-date">เริ่มทำงานตั้งแต่วันที่</Label>
+            <Input
+              id="start-date"
+              type="date"
+              value={startDateKey}
+              onChange={(e) => setStartDateKey(e.target.value)}
+            />
+            <p className="text-xs text-muted-foreground">ค่าจ้างจะเริ่มนับสะสมจากวันนี้เป็นต้นไป</p>
           </div>
         </div>
         <DialogFooter>
@@ -708,13 +725,20 @@ function SettleDialog({
   paidBy: string;
   paidByName: string;
 }) {
-  const [periodEnd, setPeriodEnd] = useState(today);
+  // Defaults to the nearest 1st/16th cutoff (see `suggestedSettlementEnd`'s comment) when today
+  // is payday, clamped so it never lands before the period even started (an employee enrolled
+  // partway through the current half-month has no "yesterday's cutoff" to suggest).
+  const defaultPeriodEnd = useMemo(() => {
+    const suggested = suggestedSettlementEnd(today);
+    return suggested < periodStart ? today : suggested;
+  }, [today, periodStart]);
+  const [periodEnd, setPeriodEnd] = useState(defaultPeriodEnd);
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
-    if (open) setPeriodEnd(today);
-  }, [open, today]);
+    if (open) setPeriodEnd(defaultPeriodEnd);
+  }, [open, defaultPeriodEnd]);
 
   // Advances taken strictly within [periodStart, periodEnd] — if periodEnd is pulled back
   // earlier than today (settling a bit late, not counting today's not-yet-worked day), any

@@ -1,9 +1,9 @@
 import { addDaysToKey, dateKeysBetween } from "./dateRange";
 
 /**
- * Weekly payroll math (item: "สร้างตารางพนักงานแยก เพราะจะตัดจ่ายทุกอาทิตย์"). Every function here
- * is pure and only ever sees plain "YYYY-MM-DD" date keys / numbers — no Firestore, no `Date.now()`
- * — so it's unit-tested directly (`scripts/payroll.test.ts`), same split as `recurringExpenses.ts`.
+ * Payroll math (item: "สร้างตารางพนักงานแยก"). Every function here is pure and only ever sees plain
+ * "YYYY-MM-DD" date keys / numbers — no Firestore, no `Date.now()` — so it's unit-tested directly
+ * (`scripts/payroll.test.ts`), same split as `recurringExpenses.ts`.
  *
  * Confirmed design (from discussion with the shop owner):
  * - Wage accrues per day worked ("คิดตามจำนวนวัน"), at that employee's own `dailyWage`.
@@ -12,8 +12,12 @@ import { addDaysToKey, dateKeysBetween } from "./dateRange";
  * - An advance (เบิก) can never exceed what's already been earned and not yet advanced
  *   ("เบิกได้ไม่เกินยอดที่ค้างจ่าย") — `computeAvailableAdvance` is what the UI checks before
  *   allowing one to be saved.
- * - Payday is every Monday, but "ตัดจ่าย" itself can happen whenever an Admin actually gets to
- *   it — the period just keeps accruing until they do.
+ * - Payday is the 1st and 16th of every month ("ตัดจ่าย เปลี่ยนเป็น วันที่ 1 กับวันที่ 16" — this
+ *   replaced an earlier weekly-Monday plan discussed before any employee was actually enrolled).
+ *   Nothing here hardcodes that cadence though: a period is just "whatever comes after the
+ *   previous settlement's `periodEnd`", so "ตัดจ่าย" itself can happen whenever an Admin actually
+ *   gets to it — `suggestedSettlementEnd` below only *suggests* the 15th/end-of-month boundary
+ *   when today happens to be the 1st or the 16th; it never blocks settling on any other day.
  */
 
 /**
@@ -78,4 +82,24 @@ export function computeSettlementPreview(
 ): SettlementPreview {
   const { daysWorked, accruedWage } = computeAccrual(periodStart, periodEnd, dailyWage, absentDateKeys);
   return { daysWorked, accruedWage, totalAdvances, netPaid: accruedWage - totalAdvances };
+}
+
+/**
+ * The "ตัดจ่าย" dialog's default `periodEnd` — a small convenience, not a rule. If today is
+ * payday (the 1st or the 16th), the period being paid out obviously ended *yesterday*
+ * (the 1st closes out "16th..end of previous month"; the 16th closes out "1st..15th"), so
+ * default to that instead of making the Admin manually back the date up by one every single
+ * time. Any other day (settling a bit late, or the shop just wants a different cutoff this one
+ * time) falls back to today — still freely editable in the dialog either way.
+ */
+export function suggestedSettlementEnd(todayKey: string): string {
+  const [year, month, day] = todayKey.split("-").map(Number);
+  if (day === 1) {
+    const firstOfThisMonth = `${String(year).padStart(4, "0")}-${String(month).padStart(2, "0")}-01`;
+    return addDaysToKey(firstOfThisMonth, -1);
+  }
+  if (day === 16) {
+    return `${String(year).padStart(4, "0")}-${String(month).padStart(2, "0")}-15`;
+  }
+  return todayKey;
 }

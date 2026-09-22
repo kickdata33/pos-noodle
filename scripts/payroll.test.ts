@@ -9,6 +9,7 @@ import {
   computeAvailableAdvance,
   computeCurrentPeriodStart,
   computeSettlementPreview,
+  suggestedSettlementEnd,
 } from "../src/lib/pos/payroll";
 
 test("computeCurrentPeriodStart: never-settled employee starts on their own createdDateKey", () => {
@@ -68,4 +69,20 @@ test("computeSettlementPreview: netPaid can go negative if advances somehow exce
   const preview = computeSettlementPreview("2026-09-15", "2026-09-21", 300, new Set(), 3000);
   assert.equal(preview.accruedWage, 2100);
   assert.equal(preview.netPaid, -900);
+});
+
+test("suggestedSettlementEnd: on the 16th, suggests the 15th of the same month", () => {
+  assert.equal(suggestedSettlementEnd("2026-09-16"), "2026-09-15");
+});
+
+test("suggestedSettlementEnd: on the 1st, suggests the last day of the previous month", () => {
+  assert.equal(suggestedSettlementEnd("2026-10-01"), "2026-09-30");
+});
+
+test("suggestedSettlementEnd: on the 1st of January, rolls back to Dec 31 of the previous year", () => {
+  assert.equal(suggestedSettlementEnd("2026-01-01"), "2025-12-31");
+});
+
+test("suggestedSettlementEnd: any other day just suggests today (freely editable, not a hard cutoff)", () => {
+  assert.equal(suggestedSettlementEnd("2026-09-10"), "2026-09-10");
 });
