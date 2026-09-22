@@ -443,34 +443,36 @@ export default function AccountingPage() {
         </CardHeader>
         <CardContent>
           {/* Its own single-day filter, separate from the range picker above — เลือกวันไหน โชว์
-              แค่วันนั้น, never mixed with any other day. The quick-add row's own date field below
-              doubles as this filter (`dateKey`/`onDateKeyChange`), so picking a day to view and
-              picking which day a new entry belongs to are the same action. */}
+              แค่วันนั้น, never mixed with any other day. Every row in the table below (including
+              new ones from the quick-add row) belongs to this same day — there's no per-row date
+              field/column, since that would just repeat this picker. */}
           <div className="mb-3 flex items-center gap-2">
             <Label className="text-sm text-muted-foreground">วันที่</Label>
             <DateField value={expenseDay} onChange={setExpenseDay} className="h-9 w-36" />
             <span className="text-sm font-medium">{formatKey(expenseDay)}</span>
           </div>
-          <Table className="table-fixed min-w-[640px]">
+          <Table className="table-fixed min-w-[560px]">
             {/* Fixed, percentage-based column widths (sum to 100%) so every cell's Input/Select
-                below can fill its column with `w-full` instead of a fixed px width. `min-w-[640px]`
+                below can fill its column with `w-full` instead of a fixed px width. `min-w-[560px]`
                 is what actually matters on a phone: without it, `table-fixed` + `w-full` shrinks
                 the table down to the screen's own width, squeezing every Select/Input/Badge below
                 the space they need and making them visually overlap. With a minimum width, the
                 table instead stays usable-sized and the surrounding `Table` component's own
                 `overflow-x-auto` wrapper (see `components/ui/table.tsx`) scrolls it horizontally —
-                the same "ซ้อนกันทั้งช่องกรอกข้อมูล" bug report this fixes. */}
+                the same "ซ้อนกันทั้งช่องกรอกข้อมูล" bug report this fixes. No วันที่ column here —
+                the "วันที่" field above the table already picks the one day every row in it
+                belongs to, so repeating it per-row (and in the quick-add row) was a pure
+                duplicate of that same picker ("วันที่มีเลือกด้านบนแล้วไม่จำเป็นต้องมีซ้ำ") and, being the
+                narrowest column, the first thing to visibly overlap on a phone. */}
             <colgroup>
+              <col className="w-[18%]" />
+              <col className="w-[32%]" />
               <col className="w-[16%]" />
-              <col className="w-[15%]" />
-              <col className="w-[27%]" />
-              <col className="w-[12%]" />
-              <col className="w-[15%]" />
-              <col className="w-[15%]" />
+              <col className="w-[18%]" />
+              <col className="w-[16%]" />
             </colgroup>
             <TableHeader>
               <TableRow>
-                <TableHead>วันที่</TableHead>
                 <TableHead>หมวด</TableHead>
                 <TableHead>รายการ</TableHead>
                 <TableHead>จ่ายด้วย</TableHead>
@@ -480,20 +482,14 @@ export default function AccountingPage() {
             </TableHeader>
             <TableBody>
               {shopId && appUser ? (
-                <ExpenseQuickAddRow
-                  shopId={shopId}
-                  createdBy={appUser.id}
-                  createdByName={appUser.name}
-                  dateKey={expenseDay}
-                  onDateKeyChange={setExpenseDay}
-                />
+                <ExpenseQuickAddRow shopId={shopId} createdBy={appUser.id} createdByName={appUser.name} dateKey={expenseDay} />
               ) : null}
               {visibleExpenses.map((e) => (
                 <ExpenseRow key={e.id} expense={e} currency={currency} />
               ))}
               {visibleExpenses.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={6} className="text-center text-muted-foreground">
+                  <TableCell colSpan={5} className="text-center text-muted-foreground">
                     ยังไม่มีรายจ่ายวันนี้
                   </TableCell>
                 </TableRow>
@@ -795,7 +791,12 @@ function DateField({
         type="date"
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        className="h-full w-full pr-9"
+        // Android's native date-input calendar icon (`::-webkit-calendar-picker-indicator`) draws
+        // itself at the same right-edge spot as our own 📅 button below, regardless of `pr-9` —
+        // on some devices (MIUI/Samsung) it even renders its own mini month/day badge, not just a
+        // plain icon, so the two visibly overlapped ("วันที่ ยังทับกันอยู่"). We already provide our
+        // own trigger (openPicker/showPicker), so hide the native one instead of fighting it.
+        className="h-full w-full pr-9 [&::-webkit-calendar-picker-indicator]:hidden"
       />
       <button
         type="button"
@@ -850,15 +851,14 @@ function ExpenseQuickAddRow({
   createdBy,
   createdByName,
   dateKey,
-  onDateKeyChange,
 }: {
   shopId: string;
   createdBy: string;
   createdByName: string;
-  // Controlled from the parent, not local state — this date field IS the "which day am I
-  // looking at" filter for the table below it, so changing it here also changes what's shown.
+  // Whichever day the "วันที่" filter above the table is set to — new entries always land on
+  // that day, no separate date field here (removing the duplicate picker was the point: "วันที่มี
+  // เลือกด้านบนแล้วไม่จำเป็นต้องมีซ้ำ").
   dateKey: string;
-  onDateKeyChange: (dateKey: string) => void;
 }) {
   const [category, setCategory] = useState<ExpenseCategory>(EXPENSE_CATEGORIES[0]);
   const [description, setDescription] = useState("");
@@ -896,9 +896,6 @@ function ExpenseQuickAddRow({
 
   return (
     <TableRow className="bg-muted/30">
-      <TableCell>
-        <DateField value={dateKey} onChange={onDateKeyChange} className="h-9 w-full" />
-      </TableCell>
       <TableCell>
         <Select value={category} onValueChange={(v) => setCategory(v as ExpenseCategory)}>
           <SelectTrigger className="h-9 w-full text-sm">
@@ -957,13 +954,12 @@ function ExpenseQuickAddRow({
 /**
  * One row of the รายจ่าย table — a plain read row by default, or (after "แก้ไข") the same fields
  * as `ExpenseQuickAddRow` inline for correcting a typo or amount, plus "ลบ" for a mistaken entry
- * entirely. Both dateKey inputs (here and in the quick-add row) use `DateField`, which has no
- * `min`, so backdating a missed entry has always worked — this just adds the ability to
- * fix one after the fact.
+ * entirely. No date field to edit — every row shown is already filtered to the one day picked
+ * above, so a per-row date column/input was a pure duplicate of that same picker; to move an
+ * entry to a different day, delete it here and re-add it under that day instead.
  */
 function ExpenseRow({ expense, currency }: { expense: Expense; currency: string }) {
   const [editing, setEditing] = useState(false);
-  const [dateKey, setDateKey] = useState(expense.dateKey);
   const [category, setCategory] = useState<ExpenseCategory>(expense.category);
   const [description, setDescription] = useState(expense.description);
   const [paymentMethod, setPaymentMethod] = useState<"cash" | "transfer">(expense.paymentMethod);
@@ -971,7 +967,6 @@ function ExpenseRow({ expense, currency }: { expense: Expense; currency: string 
   const [saving, setSaving] = useState(false);
 
   function startEdit() {
-    setDateKey(expense.dateKey);
     setCategory(expense.category);
     setDescription(expense.description);
     setPaymentMethod(expense.paymentMethod);
@@ -980,13 +975,13 @@ function ExpenseRow({ expense, currency }: { expense: Expense; currency: string 
   }
 
   const amount = Number(amountText);
-  const canSave = Boolean(dateKey) && Number.isFinite(amount) && amount > 0;
+  const canSave = Number.isFinite(amount) && amount > 0;
 
   async function handleSave() {
     if (!canSave || saving) return;
     setSaving(true);
     try {
-      await expenseRepository.update(expense.id, { dateKey, category, description: description.trim(), paymentMethod, amount });
+      await expenseRepository.update(expense.id, { category, description: description.trim(), paymentMethod, amount });
       setEditing(false);
     } finally {
       setSaving(false);
@@ -1013,9 +1008,6 @@ function ExpenseRow({ expense, currency }: { expense: Expense; currency: string 
   if (editing) {
     return (
       <TableRow className="bg-muted/20">
-        <TableCell>
-          <DateField value={dateKey} onChange={setDateKey} className="h-9 w-full" />
-        </TableCell>
         <TableCell>
           <Select value={category} onValueChange={(v) => setCategory(v as ExpenseCategory)}>
             <SelectTrigger className="h-9 w-full text-sm">
@@ -1077,7 +1069,6 @@ function ExpenseRow({ expense, currency }: { expense: Expense; currency: string 
 
   return (
     <TableRow>
-      <TableCell className="truncate">{formatKey(expense.dateKey)}</TableCell>
       <TableCell className="truncate">
         <Badge variant="muted">{expense.category}</Badge>
       </TableCell>
