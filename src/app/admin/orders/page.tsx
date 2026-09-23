@@ -3,7 +3,9 @@
 import { useEffect, useMemo, useState } from "react";
 
 import { AdminSection } from "@/components/admin/AdminSection";
+import { DateField } from "@/components/admin/DateField";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import {
   Dialog,
   DialogContent,
@@ -15,6 +17,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { formatCurrency } from "@/lib/format";
 import { useAuth } from "@/hooks/useAuth";
+import { bangkokDateKey } from "@/lib/pos/dateRange";
 import { orderRepository } from "@/repositories/orderRepository";
 import { shopRepository } from "@/repositories/shopRepository";
 import type { Order, OrderStatus } from "@/types";
@@ -38,7 +41,13 @@ const STATUS_VARIANT: Record<OrderStatus, "default" | "success" | "muted" | "des
  * `/admin` rather than the staff `/pos/history` — same underlying data, same read-only detail
  * dialog, just reachable from the Admin nav for whoever manages the shop day to day). Search by
  * order number and filter by status, since an admin scrolling months of orders needs to find one
- * bill quickly far more often than a cook glancing at today's list does on the POS side.
+ * bill quickly far more often than a cook glancing at today's list does on the POS side. The date
+ * filter (item: "เลือกวันที่ได้ และยอดรวมของบิลทั้งหมดในวันนั้น") defaults to today rather than
+ * showing full history, since "how much did we bill today" is the far more common question than
+ * "find this one bill from months ago" — "ทั้งหมด" switches back to the old unfiltered view for
+ * that search-by-number case. Grouped by plain calendar date (`bangkokDateKey`), not the
+ * 16:00-cutoff business day `/admin/accounting` uses — this list is "bills opened on this
+ * calendar day," not a shift reconciliation.
  */
 export default function AdminOrdersPage() {
   const { appUser } = useAuth();
@@ -48,6 +57,7 @@ export default function AdminOrdersPage() {
   const [selected, setSelected] = useState<Order | null>(null);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<OrderStatus | "all">("all");
+  const [dateFilter, setDateFilter] = useState<string>(() => bangkokDateKey(Date.now()));
 
   useEffect(() => {
     if (!shopId) return;
@@ -64,10 +74,15 @@ export default function AdminOrdersPage() {
     const q = search.trim().toLowerCase();
     return orders.filter((order) => {
       if (statusFilter !== "all" && order.status !== statusFilter) return false;
+      if (dateFilter && bangkokDateKey(order.createdAt) !== dateFilter) return false;
       if (q && !order.orderNumber.toLowerCase().includes(q)) return false;
       return true;
     });
-  }, [orders, search, statusFilter]);
+  }, [orders, search, statusFilter, dateFilter]);
+
+  // Sum of whatever is currently on screen — every filter (date, status, search) narrows this the
+  // same way it narrows the table, so the two can never disagree.
+  const filteredTotal = useMemo(() => filtered.reduce((sum, o) => sum + o.total, 0), [filtered]);
 
   return (
     <AdminSection title="รายการบิล" description="ดูบิลย้อนหลังทั้งหมด — ค้นหาเลขที่บิลหรือกรองตามสถานะ แล้วกดแถวเพื่อดูรายละเอียด">
@@ -90,7 +105,19 @@ export default function AdminOrdersPage() {
             <SelectItem value="VOID">ยกเลิก (Void)</SelectItem>
           </SelectContent>
         </Select>
+        <DateField value={dateFilter} onChange={setDateFilter} className="h-12 w-36" />
+        {dateFilter ? (
+          <Button type="button" variant="outline" className="h-12" onClick={() => setDateFilter("")}>
+            ทั้งหมด
+          </Button>
+        ) : null}
       </div>
+
+      <p className="mb-2 text-sm text-muted-foreground">
+        {dateFilter ? `บิลวันที่ ${formatDateKey(dateFilter)}` : "บิลทั้งหมด"} — {filtered.length} บิล ·
+        ยอดรวม{" "}
+        <span className="font-medium text-foreground">{formatCurrency(filteredTotal, currency)}</span>
+      </p>
 
       <Table>
         <TableHeader>
@@ -204,4 +231,14 @@ export default function AdminOrdersPage() {
       </Dialog>
     </AdminSection>
   );
+}
+
+function formatDateKey(dateKey: string): string {
+  const [y, m, d] = dateKey.split("-").map(Number);
+  return new Date(Date.UTC(y, m - 1, d)).toLocaleDateString("th-TH", {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+    timeZone: "UTC",
+  });
 }
