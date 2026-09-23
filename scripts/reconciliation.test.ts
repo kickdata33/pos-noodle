@@ -159,6 +159,7 @@ test("reconciliationRows: the exact '980 baht missing' scenario reads as pending
   assert.equal(row.qrSales, 1790);
   assert.equal(row.transferred, 810);
   assert.equal(row.pendingTransfer, 980);
+  assert.equal(row.overTransferred, 0);
   assert.equal(row.settled, false);
 });
 
@@ -176,16 +177,18 @@ test("reconciliationRows: settled once the second transfer batch lands, expenses
   const row = rows.find((r) => r.dateKey === "2026-09-18")!;
   assert.equal(row.transferred, 1790);
   assert.equal(row.pendingTransfer, 0);
+  assert.equal(row.overTransferred, 0);
   assert.equal(row.settled, true);
   assert.equal(row.expenses, 300);
   assert.equal(row.net, 1790 - 300);
 });
 
-test("reconciliationRows: a transfer larger than that day's QR sales never produces a negative pending", () => {
+test("reconciliationRows: a transfer larger than that day's QR sales never produces a negative pending, and is reported as overTransferred instead", () => {
   const orders = [makeOrder({ id: "o1", total: 100, paidAt: Date.UTC(2026, 8, 18, 13, 0), paymentMethodId: "qr1" })];
   const transfers = [makeTransfer({ id: "t1", transferredAt: Date.UTC(2026, 8, 18, 16, 0), amount: 500, businessDayKey: "2026-09-18" })];
   const rows = reconciliationRows(orders, METHODS, transfers, [], "2026-09-17", "2026-09-18", 16);
   const row = rows.find((r) => r.dateKey === "2026-09-18")!;
   assert.equal(row.pendingTransfer, 0);
+  assert.equal(row.overTransferred, 400);
   assert.equal(row.settled, true);
 });

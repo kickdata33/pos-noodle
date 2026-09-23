@@ -110,8 +110,18 @@ export interface ReconciliationRow {
   transferred: number;
   /** QR sales not yet matched by a logged transfer — the number that used to read as "missing".
    * Floored at 0: a transfer logged *larger* than that day's QR sales (e.g. it actually belongs
-   * to the previous day's leftover portion) never shows as a negative "pending". */
+   * to the previous day's leftover portion) never shows as a negative "pending" — see
+   * `overTransferred` for that case instead of just silently dropping it. */
   pendingTransfer: number;
+  /** The flip side of `pendingTransfer`, floored at 0 the same way: how much *more* was logged
+   * as transferred than this day's own QR sales account for. This should basically never happen
+   * for a correctly-entered day (a business day's transfer can be logged late, but never more
+   * than it actually sold), so a nonzero value here is a real red flag worth surfacing rather
+   * than letting `pendingTransfer` silently swallow it as "0, all settled" — it has caught a
+   * real bug (a cash-deposit row mistakenly logged into the QR-transfer table) and, separately,
+   * QR sales the POS never recorded at all (a bill paid by QR but rung in as another method, or
+   * not rung in at all) — both surface as this same symptom and need to be told apart by hand. */
+  overTransferred: number;
   expenses: number;
   /** totalSales - expenses for this business day — cash + QR + other, regardless of whether the
    * QR portion has actually landed in the bank yet (that's what `pendingTransfer` is for). */
@@ -136,6 +146,7 @@ export function reconciliationRows(
   return businessDaySales(orders, paymentMethods, startKey, endKey, fromHour).map((day) => {
     const transferred = transfersForBusinessDay(transfers, day.dateKey);
     const pendingTransfer = round2(Math.max(0, day.qr - transferred));
+    const overTransferred = round2(Math.max(0, transferred - day.qr));
     const dayExpenses = expensesForDay(expenses, day.dateKey);
     return {
       dateKey: day.dateKey,
@@ -145,6 +156,7 @@ export function reconciliationRows(
       totalSales: day.total,
       transferred,
       pendingTransfer,
+      overTransferred,
       expenses: dayExpenses,
       net: round2(day.total - dayExpenses),
       settled: pendingTransfer <= SETTLE_TOLERANCE_THB,

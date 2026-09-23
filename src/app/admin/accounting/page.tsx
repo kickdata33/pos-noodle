@@ -407,6 +407,13 @@ export default function AccountingPage() {
                           onChange={(e) => e.target.checked && confirmPendingTransfer(r)}
                         />
                       </span>
+                    ) : r.overTransferred > 0 ? (
+                      <span
+                        className="inline-flex items-center justify-end gap-1 text-destructive"
+                        title="ยอดที่กรอกไว้ในตาราง &quot;เงินโอนเข้าบัญชี&quot; ของวันนี้ มากกว่ายอด QR ที่ระบบคำนวณ — เช็คว่ามีแถวกรอกผิด/กรอกซ้ำ หรือมี QR ที่ขายจริงแต่ระบบไม่ได้บันทึกไว้"
+                      >
+                        เกิน {formatCurrency(r.overTransferred, currency)}
+                      </span>
                     ) : (
                       "-"
                     )}
