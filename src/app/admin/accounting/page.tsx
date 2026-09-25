@@ -1435,13 +1435,21 @@ function TransferRow({ transfer, currency }: { transfer: BankTransfer; currency:
 }
 
 /**
- * ยอดเริ่มต้นประจำวัน — the two numbers this app has no way to derive on its own: the cash float
- * placed in the drawer before the shift, and the K SHOP wallet-balance reading at shift start
- * (needed because that reading is cumulative, not a per-shift total — item: "ในระบบขึ้น 690 มันเป็น
- * ของเมื่อคืนล้นมา", see `DailyFloat`'s own comment). Shown inside the day-detail dialog since
- * both only make sense next to that day's already-known `cashSales`. Three independent fields,
- * each auto-saved on blur — there's no single "submit" moment since any one of them might get
- * filled in hours before the others (starting numbers at ~16:00, the K SHOP check at 23:00).
+ * ยอดเริ่มต้นประจำวัน — the numbers this app has no way to derive on its own: the cash float placed
+ * in the drawer before the shift, and how much cash is actually sitting in the drawer at close.
+ * Shown inside the day-detail dialog since it only makes sense next to that day's already-known
+ * `cashSales`. Fields are auto-saved on blur — there's no single "submit" moment since any one of
+ * them might get filled in hours before the others.
+ *
+ * Deliberate ordering, chosen after "เงินสดที่โยกออก" being subtracted *inside* the expected-close
+ * figure caused real confusion (a user typed -1000 for "money leaving", expecting a minus sign,
+ * when the field already only ever subtracts): "เงินสดรวมปลายกะ" is the plain physical count at
+ * the end of the shift, taken *before* any cash is set aside — the discrepancy check
+ * (`ควรมี`/`ผลต่าง`) compares against that raw total, with `เงินสดที่โยกออกเก็บ` never entering it.
+ * `โยกออกเก็บ` only ever matters for the separate, clearly-labeled "ยอดคงเหลือสำหรับเริ่มวันใหม่"
+ * figure — the one actual number to copy into tomorrow's "เงินสดเริ่มต้น (ทอน)". Always entered and
+ * treated as a plain positive magnitude (never typed as negative — a stray "-" is normalized away
+ * on blur) since there's nothing here it could logically make more of.
  */
 function DailyFloatSection({
   shopId,
@@ -1488,6 +1496,15 @@ function DailyFloatSection({
     return Number.isFinite(n) ? n : null;
   }
 
+  // "เงินสดที่โยกออกเก็บ" is always a plain magnitude — there's no meaningful "negative amount
+  // moved out" — so a stray minus sign (someone thinking of it as "money leaving, so negative")
+  // is normalized away here rather than silently flipping the sign of every calculation that
+  // uses it, which is what caused the confusing +1,360 "เงินเกิน" reading this replaces.
+  function parseNonNegativeOrNull(text: string): number | null {
+    const n = parseOrNull(text);
+    return n != null ? Math.abs(n) : null;
+  }
+
   async function save(
     patch: Partial<
       Pick<DailyFloat, "startingCash" | "cashMovedOut" | "cashTransferAdjustment" | "closingCashCounted" | "closingCashCountedAt">
@@ -1513,17 +1530,22 @@ function DailyFloatSection({
   const cashMovedOut = parseOrNull(cashMovedOutText);
   const closingCash = parseOrNull(closingCashText);
 
-  // เงินสดที่ควรมีปลายกะ — a check-figure only, never fed back into `reconciliationRows`' own
-  // `cashSales` (that number always comes from actual paid orders, untouched by this). A blank
-  // "โยกออก" reads as 0 moved out (the common case), not as "unknown" — unlike `startingCash`,
-  // whose absence blocks the whole calculation instead of being assumed away. `cashSales` itself
-  // already has `cashTransferAdjustment` baked in (see `reconciliationRows`), so a misclassified
-  // bill corrects this figure automatically without a second calculation here.
-  const expectedCashAtClose = startingCash != null ? startingCash + cashSales - (cashMovedOut ?? 0) : null;
-  // นับได้จริง - ที่ควรมี — positive means เงินเกิน, negative means เงินขาด. Only shown once both
-  // sides of the comparison exist; a missing starting-cash entry makes "ควรมี" undefined, and
-  // there's nothing meaningful to diff against yet.
-  const cashDifference = closingCash != null && expectedCashAtClose != null ? closingCash - expectedCashAtClose : null;
+  // เงินสดที่ควรมี (ก่อนโยกออก) — a check-figure only, never fed back into `reconciliationRows`'s
+  // own `cashSales` (that number always comes from actual paid orders, untouched by this).
+  // Deliberately never subtracts `cashMovedOut` — this is compared against the *raw* end-of-shift
+  // count (see `closingCash`'s field comment), so moving cash out mid-shift never looks like a
+  // shortage here. `cashSales` itself already has `cashTransferAdjustment` baked in (see
+  // `reconciliationRows`), so a misclassified bill corrects this figure automatically without a
+  // second calculation here.
+  const expectedCashBeforeMoveOut = startingCash != null ? startingCash + cashSales : null;
+  // นับจริง (ก่อนโยกออก) - ที่ควรมี — positive means เงินเกิน, negative means เงินขาด. Only shown
+  // once both sides of the comparison exist; a missing starting-cash entry makes "ควรมี" undefined,
+  // and there's nothing meaningful to diff against yet.
+  const cashDifference = closingCash != null && expectedCashBeforeMoveOut != null ? closingCash - expectedCashBeforeMoveOut : null;
+  // ยอดคงเหลือสำหรับเริ่มวันใหม่ — the one number this whole card exists to produce: what's
+  // actually left in the drawer after setting cash aside, ready to copy straight into tomorrow's
+  // "เงินสดเริ่มต้น (ทอน)". A blank "โยกออก" reads as 0 moved out (the common case), not "unknown".
+  const carryForwardCash = closingCash != null ? closingCash - (cashMovedOut ?? 0) : null;
 
   return (
     <div className="rounded-md border border-border p-3">
@@ -1544,21 +1566,7 @@ function DailyFloatSection({
           />
         </div>
         <div>
-          <Label className="mb-1 block text-xs text-muted-foreground">เงินสดที่โยกออกระหว่างกะ</Label>
-          <Input
-            type="number"
-            inputMode="decimal"
-            min={0}
-            value={cashMovedOutText}
-            onChange={(e) => setCashMovedOutText(e.target.value)}
-            onBlur={() => save({ cashMovedOut: parseOrNull(cashMovedOutText) })}
-            onKeyDown={(e) => e.key === "Enter" && (e.currentTarget as HTMLInputElement).blur()}
-            placeholder="0.00"
-            className="h-9 text-right"
-          />
-        </div>
-        <div>
-          <Label className="mb-1 block text-xs text-muted-foreground">เงินสดนับจริงปลายกะ</Label>
+          <Label className="mb-1 block text-xs text-muted-foreground">เงินสดรวมปลายกะ (ก่อนโยกออก)</Label>
           <Input
             type="number"
             inputMode="decimal"
@@ -1573,6 +1581,26 @@ function DailyFloatSection({
             placeholder="0.00"
             className="h-9 text-right"
           />
+          <p className="mt-1 text-[11px] leading-tight text-muted-foreground">นับทั้งหมดในลิ้นชักตอนปิดกะ ก่อนแบ่งเก็บ</p>
+        </div>
+        <div>
+          <Label className="mb-1 block text-xs text-muted-foreground">เงินสดที่โยกออกเก็บ</Label>
+          <Input
+            type="number"
+            inputMode="decimal"
+            min={0}
+            value={cashMovedOutText}
+            onChange={(e) => setCashMovedOutText(e.target.value)}
+            onBlur={() => {
+              const normalized = parseNonNegativeOrNull(cashMovedOutText);
+              setCashMovedOutText(normalized != null ? String(normalized) : "");
+              save({ cashMovedOut: normalized });
+            }}
+            onKeyDown={(e) => e.key === "Enter" && (e.currentTarget as HTMLInputElement).blur()}
+            placeholder="0.00"
+            className="h-9 text-right"
+          />
+          <p className="mt-1 text-[11px] leading-tight text-muted-foreground">ใส่เป็นจำนวนบวกเสมอ (ไม่ต้องใส่ -)</p>
         </div>
         <div>
           <Label className="mb-1 block text-xs text-muted-foreground">ยอดปรับ (สลับเงินสด/โอน)</Label>
@@ -1593,18 +1621,16 @@ function DailyFloatSection({
       </div>
       <div className="mt-3 grid gap-1 text-sm text-muted-foreground sm:grid-cols-2">
         <p className="sm:col-span-2">
-          เงินสดที่ควรมีปลายกะ:{" "}
+          เงินสดที่ควรมี (ก่อนโยกออก):{" "}
           <span className="font-medium text-foreground">
-            {expectedCashAtClose != null ? formatCurrency(expectedCashAtClose, currency) : "-"}
+            {expectedCashBeforeMoveOut != null ? formatCurrency(expectedCashBeforeMoveOut, currency) : "-"}
           </span>
           {startingCash != null
-            ? ` (เริ่มต้น ${formatCurrency(startingCash, currency)} + ขายเงินสด ${formatCurrency(cashSales, currency)}${
-                cashMovedOut ? ` - โยกออก ${formatCurrency(cashMovedOut, currency)}` : ""
-              })`
+            ? ` (เริ่มต้น ${formatCurrency(startingCash, currency)} + ขายเงินสด ${formatCurrency(cashSales, currency)})`
             : ""}
         </p>
         <p className="sm:col-span-2">
-          ผลต่างเงินสด (นับจริง - ที่ควรมี):{" "}
+          ผลต่างเงินสด (รวมปลายกะ - ที่ควรมี):{" "}
           <span
             className={cn(
               "font-medium",
@@ -1617,6 +1643,16 @@ function DailyFloatSection({
                 }`
               : "-"}
           </span>
+        </p>
+        <p className="sm:col-span-2 mt-1 border-t border-border pt-2 text-sm">
+          <span className="text-foreground">ยอดคงเหลือสำหรับเริ่มวันใหม่:</span>{" "}
+          <span className="font-semibold text-foreground">{carryForwardCash != null ? formatCurrency(carryForwardCash, currency) : "-"}</span>
+          {closingCash != null
+            ? ` (รวมปลายกะ ${formatCurrency(closingCash, currency)}${
+                cashMovedOut ? ` - โยกออก ${formatCurrency(cashMovedOut, currency)}` : ""
+              })`
+            : ""}
+          <span className="block text-xs">เอาตัวเลขนี้ไปกรอกเป็น &quot;เงินสดเริ่มต้น (ทอน)&quot; ของวันทำการถัดไป</span>
         </p>
       </div>
       {saving ? <p className="mt-1 text-xs text-muted-foreground">กำลังบันทึก...</p> : null}
