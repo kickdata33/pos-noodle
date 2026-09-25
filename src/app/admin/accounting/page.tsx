@@ -234,6 +234,20 @@ export default function AccountingPage() {
     return map;
   }, [floats]);
 
+  // Cash-paid รายจ่าย (จ่ายด้วยเงินสด) physically leave the till the same as a cash sale coming
+  // in — needed so `DailyFloatSection`'s "เงินสดที่ควรมี" doesn't read as a mysterious shortage
+  // every time the owner pays a supplier out of the drawer (item: ยอดขาด 490 ตรงกับรายจ่ายเงินสด
+  // ถั่วงอก 90 + แก๊ส 400 พอดี). Keyed by `Expense.dateKey` (plain calendar date, same string the
+  // day-detail dialog's businessDayKey uses in normal operation) — a transfer-paid expense never
+  // touches actual cash in the drawer, so only `paymentMethod === "cash"` counts here.
+  const cashExpensesByDay = useMemo(() => {
+    const map: Record<string, number> = {};
+    for (const e of expenses) {
+      if (e.paymentMethod === "cash") map[e.dateKey] = (map[e.dateKey] ?? 0) + e.amount;
+    }
+    return map;
+  }, [expenses]);
+
   const rows = useMemo(
     () => reconciliationRows(orders, paymentMethods, transfers, expenses, range.startKey, range.endKey, fromHour, cashTransferAdjustments),
     [orders, paymentMethods, transfers, expenses, range.startKey, range.endKey, fromHour, cashTransferAdjustments]
@@ -631,6 +645,7 @@ export default function AccountingPage() {
               businessDayKey={selectedDay}
               float={selectedDayFloat}
               cashSales={selectedDayRow?.cashSales ?? 0}
+              cashExpenses={cashExpensesByDay[selectedDay] ?? 0}
               currency={currency}
               updatedBy={appUser.id}
               updatedByName={appUser.name}
@@ -1450,12 +1465,18 @@ function TransferRow({ transfer, currency }: { transfer: BankTransfer; currency:
  * figure — the one actual number to copy into tomorrow's "เงินสดเริ่มต้น (ทอน)". Always entered and
  * treated as a plain positive magnitude (never typed as negative — a stray "-" is normalized away
  * on blur) since there's nothing here it could logically make more of.
+ *
+ * `cashExpenses` (รายจ่ายที่จ่ายด้วยเงินสด, from the accounting page's own รายจ่าย table) is
+ * subtracted inside "เงินสดที่ควรมี" itself, unlike `cashMovedOut` — paying a supplier out of the
+ * drawer really does reduce what should be left at close, so without this every cash-paid รายจ่าย
+ * read as an equally-sized cash shortage.
  */
 function DailyFloatSection({
   shopId,
   businessDayKey,
   float,
   cashSales,
+  cashExpenses,
   currency,
   updatedBy,
   updatedByName,
@@ -1464,6 +1485,10 @@ function DailyFloatSection({
   businessDayKey: string;
   float: DailyFloat | null;
   cashSales: number;
+  // รายจ่ายที่จ่ายด้วยเงินสดของวันนี้ (จากตาราง "รายจ่าย" — เฉพาะแถวที่ "จ่ายด้วย" เป็นเงินสด) — เงินก้อน
+  // นี้ออกจากลิ้นชักจริงระหว่างกะ เหมือนขายเงินสดที่เข้ามา แค่ตรงข้ามทิศทาง จึงต้องหักออกจาก "ควรมี"
+  // ไม่งั้นจะดูเหมือนเงินขาดทั้งที่จ่ายค่าของไปแล้ว.
+  cashExpenses: number;
   currency: string;
   updatedBy: string;
   updatedByName: string;
@@ -1536,8 +1561,11 @@ function DailyFloatSection({
   // count (see `closingCash`'s field comment), so moving cash out mid-shift never looks like a
   // shortage here. `cashSales` itself already has `cashTransferAdjustment` baked in (see
   // `reconciliationRows`), so a misclassified bill corrects this figure automatically without a
-  // second calculation here.
-  const expectedCashBeforeMoveOut = startingCash != null ? startingCash + cashSales : null;
+  // second calculation here. DOES subtract `cashExpenses` though — unlike setting cash aside,
+  // paying a supplier out of the drawer really does reduce what should physically be left, and
+  // skipping this made every cash-paid รายจ่าย look exactly like a shortage of the same size
+  // (item: เงินขาด ฿490 ตรงกับถั่วงอก ฿90 + แก๊ส ฿400 พอดี).
+  const expectedCashBeforeMoveOut = startingCash != null ? startingCash + cashSales - cashExpenses : null;
   // นับจริง (ก่อนโยกออก) - ที่ควรมี — positive means เงินเกิน, negative means เงินขาด. Only shown
   // once both sides of the comparison exist; a missing starting-cash entry makes "ควรมี" undefined,
   // and there's nothing meaningful to diff against yet.
@@ -1626,7 +1654,9 @@ function DailyFloatSection({
             {expectedCashBeforeMoveOut != null ? formatCurrency(expectedCashBeforeMoveOut, currency) : "-"}
           </span>
           {startingCash != null
-            ? ` (เริ่มต้น ${formatCurrency(startingCash, currency)} + ขายเงินสด ${formatCurrency(cashSales, currency)})`
+            ? ` (เริ่มต้น ${formatCurrency(startingCash, currency)} + ขายเงินสด ${formatCurrency(cashSales, currency)}${
+                cashExpenses ? ` - รายจ่ายเงินสด ${formatCurrency(cashExpenses, currency)}` : ""
+              })`
             : ""}
         </p>
         <p className="sm:col-span-2">
