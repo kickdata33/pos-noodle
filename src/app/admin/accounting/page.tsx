@@ -1451,6 +1451,7 @@ function DailyFloatSection({
   const [startingCashText, setStartingCashText] = useState(float?.startingCash != null ? String(float.startingCash) : "");
   const [startingKshopText, setStartingKshopText] = useState(float?.startingKshopBalance != null ? String(float.startingKshopBalance) : "");
   const [checkedKshopText, setCheckedKshopText] = useState(float?.kshopCheckedBalance != null ? String(float.kshopCheckedBalance) : "");
+  const [closingCashText, setClosingCashText] = useState(float?.closingCashCounted != null ? String(float.closingCashCounted) : "");
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
 
@@ -1465,7 +1466,8 @@ function DailyFloatSection({
     setStartingCashText(float?.startingCash != null ? String(float.startingCash) : "");
     setStartingKshopText(float?.startingKshopBalance != null ? String(float.startingKshopBalance) : "");
     setCheckedKshopText(float?.kshopCheckedBalance != null ? String(float.kshopCheckedBalance) : "");
-  }, [businessDayKey, float?.startingCash, float?.startingKshopBalance, float?.kshopCheckedBalance]);
+    setClosingCashText(float?.closingCashCounted != null ? String(float.closingCashCounted) : "");
+  }, [businessDayKey, float?.startingCash, float?.startingKshopBalance, float?.kshopCheckedBalance, float?.closingCashCounted]);
 
   function parseOrNull(text: string): number | null {
     const trimmed = text.trim();
@@ -1474,7 +1476,14 @@ function DailyFloatSection({
     return Number.isFinite(n) ? n : null;
   }
 
-  async function save(patch: Partial<Pick<DailyFloat, "startingCash" | "startingKshopBalance" | "kshopCheckedBalance" | "kshopCheckedAt">>) {
+  async function save(
+    patch: Partial<
+      Pick<
+        DailyFloat,
+        "startingCash" | "startingKshopBalance" | "kshopCheckedBalance" | "kshopCheckedAt" | "closingCashCounted" | "closingCashCountedAt"
+      >
+    >
+  ) {
     setSaving(true);
     setSaveError(null);
     try {
@@ -1494,6 +1503,7 @@ function DailyFloatSection({
   const startingCash = parseOrNull(startingCashText);
   const startingKshop = parseOrNull(startingKshopText);
   const checkedKshop = parseOrNull(checkedKshopText);
+  const closingCash = parseOrNull(closingCashText);
 
   // เงินสดที่ควรมีปลายกะ — a check-figure only, never fed back into `reconciliationRows`' own
   // `cashSales` (that number always comes from actual paid orders, untouched by this).
@@ -1503,11 +1513,15 @@ function DailyFloatSection({
   // shift actually sold", independent of this POS's own QR figure (a useful second check, not a
   // replacement for it).
   const kshopCountedThisShift = startingKshop != null && checkedKshop != null ? checkedKshop - startingKshop : null;
+  // นับได้จริง - ที่ควรมี — positive means เงินเกิน, negative means เงินขาด. Only shown once both
+  // sides of the comparison exist; a missing starting-cash entry makes "ควรมี" undefined, and
+  // there's nothing meaningful to diff against yet.
+  const cashDifference = closingCash != null && expectedCashAtClose != null ? closingCash - expectedCashAtClose : null;
 
   return (
     <div className="rounded-md border border-border p-3">
       <h3 className="mb-2 text-sm font-semibold">ยอดเริ่มต้นประจำวัน</h3>
-      <div className="grid gap-3 sm:grid-cols-3">
+      <div className="grid gap-3 sm:grid-cols-4">
         <div>
           <Label className="mb-1 block text-xs text-muted-foreground">เงินสดเริ่มต้น (ทอน)</Label>
           <Input
@@ -1553,6 +1567,23 @@ function DailyFloatSection({
             className="h-9 text-right"
           />
         </div>
+        <div>
+          <Label className="mb-1 block text-xs text-muted-foreground">เงินสดนับจริงปลายกะ</Label>
+          <Input
+            type="number"
+            inputMode="decimal"
+            min={0}
+            value={closingCashText}
+            onChange={(e) => setClosingCashText(e.target.value)}
+            onBlur={() => {
+              const counted = parseOrNull(closingCashText);
+              save({ closingCashCounted: counted, closingCashCountedAt: counted != null ? Date.now() : null });
+            }}
+            onKeyDown={(e) => e.key === "Enter" && (e.currentTarget as HTMLInputElement).blur()}
+            placeholder="0.00"
+            className="h-9 text-right"
+          />
+        </div>
       </div>
       <div className="mt-3 grid gap-1 text-sm text-muted-foreground sm:grid-cols-2">
         <p>
@@ -1568,6 +1599,21 @@ function DailyFloatSection({
           QR ที่ขายได้กะนี้ (ตาม K SHOP):{" "}
           <span className="font-medium text-foreground">
             {kshopCountedThisShift != null ? formatCurrency(kshopCountedThisShift, currency) : "-"}
+          </span>
+        </p>
+        <p className="sm:col-span-2">
+          ผลต่างเงินสด (นับจริง - ที่ควรมี):{" "}
+          <span
+            className={cn(
+              "font-medium",
+              cashDifference == null ? "text-foreground" : cashDifference < 0 ? "text-destructive" : cashDifference > 0 ? "text-emerald-600" : "text-foreground"
+            )}
+          >
+            {cashDifference != null
+              ? `${cashDifference > 0 ? "+" : ""}${formatCurrency(cashDifference, currency)}${
+                  cashDifference < 0 ? " (เงินขาด)" : cashDifference > 0 ? " (เงินเกิน)" : " (ตรง)"
+                }`
+              : "-"}
           </span>
         </p>
       </div>

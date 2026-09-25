@@ -32,6 +32,15 @@ export interface DailyFloat extends WithId {
    * POS's own order records, not the K SHOP app) — a useful second, independent check. */
   kshopCheckedBalance: number | null;
   kshopCheckedAt: EpochMillis | null;
+  /**
+   * เงินสดที่นับได้จริงตอนปิดกะ — the physical count from the drawer, entered once at close.
+   * Compared against `startingCash + cashSales` ("เงินสดที่ควรมีปลายกะ", computed in
+   * `DailyFloatSection`, never stored) the same way `kshopCheckedBalance` is compared against the
+   * POS's own QR figure: a second, independent number to catch a shortage/overage, not something
+   * this app derives or corrects on its own.
+   */
+  closingCashCounted: number | null;
+  closingCashCountedAt: EpochMillis | null;
   updatedBy: string;
   updatedByName: string;
   updatedAt: EpochMillis;
