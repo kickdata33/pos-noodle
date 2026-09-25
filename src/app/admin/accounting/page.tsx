@@ -20,8 +20,6 @@ import {
   bangkokDateKey,
   bangkokDateKeyWithCutoff,
   bangkokDayBounds,
-  bangkokHour,
-  bangkokWallTimeToEpoch,
   customRange,
   resolvePreset,
   type DateRange,
@@ -571,9 +569,9 @@ export default function AccountingPage() {
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>เวลาโอน (จากการ์ดแจ้งเตือน)</TableHead>
-                <TableHead>วันทำการ</TableHead>
-                <TableHead className="text-right">จำนวนเงิน</TableHead>
+                <TableHead>สำหรับวันทำการ</TableHead>
+                <TableHead className="text-right">ยอด 16:00-23:00</TableHead>
+                <TableHead className="text-right">ยอด 23:00-04:00</TableHead>
                 <TableHead>หมายเหตุ</TableHead>
                 <TableHead className="w-32" />
               </TableRow>
@@ -588,7 +586,7 @@ export default function AccountingPage() {
                 />
               ) : null}
               {visibleTransfers.map((t) => (
-                <TransferRow key={t.id} transfer={t} currency={currency} fromHour={fromHour} />
+                <TransferRow key={t.id} transfer={t} currency={currency} />
               ))}
               {visibleTransfers.length === 0 ? (
                 <TableRow>
@@ -632,16 +630,16 @@ export default function AccountingPage() {
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>เวลาโอน (จากการ์ดแจ้งเตือน)</TableHead>
-                  <TableHead>วันทำการ</TableHead>
-                  <TableHead className="text-right">จำนวนเงิน</TableHead>
+                  <TableHead>สำหรับวันทำการ</TableHead>
+                  <TableHead className="text-right">ยอด 16:00-23:00</TableHead>
+                  <TableHead className="text-right">ยอด 23:00-04:00</TableHead>
                   <TableHead>หมายเหตุ</TableHead>
                   <TableHead className="w-32" />
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {selectedDayTransfers.map((t) => (
-                  <TransferRow key={t.id} transfer={t} currency={currency} fromHour={fromHour} />
+                  <TransferRow key={t.id} transfer={t} currency={currency} />
                 ))}
                 {selectedDayTransfers.length === 0 ? (
                   <TableRow>
@@ -1196,20 +1194,7 @@ function RecurringExpenseRow({ template, currency }: { template: RecurringExpens
   );
 }
 
-/**
- * Same quick-add pattern as `ExpenseQuickAddRow`, for the เงินโอนเข้าบัญชี table — one row per
- * *individual* payment (item: "เชื่อมกับ K SHOP เวลามีคนโอน"). K SHOP's own payment-notification
- * card fires in real time per transaction (not per bank-settlement batch) and shows exactly two
- * numbers: the amount and the moment it happened ("24 ก.ย. 69, 04:05 น."). There's no text to
- * copy off that card (it's a LINE Flex-message card, confirmed with the shop owner) and no OCR
- * pipeline here, so the person still types it in — but now they type *what the card says*
- * (amount + time), never a guess about which business-day bucket it belongs to. That guess is
- * exactly what caused a real production mismatch earlier (a transfer filed under the wrong day),
- * so it's now `bangkokDateKeyWithCutoff`'s job, not a human's — see `bangkokWallTimeToEpoch`'s
- * comment. Logging every payment individually instead of one lump end-of-day total also means
- * `transfersForBusinessDay`'s sum-by-day naturally still adds them all up correctly with zero
- * changes to `reconciliation.ts`.
- */
+/** Same quick-add pattern as `ExpenseQuickAddRow`, for the เงินโอนเข้าบัญชี table. */
 function TransferQuickAddRow({
   shopId,
   fromHour,
@@ -1221,34 +1206,65 @@ function TransferQuickAddRow({
   createdBy: string;
   createdByName: string;
 }) {
-  const [dateKey, setDateKey] = useState(() => bangkokDateKey(Date.now()));
-  const [timeText, setTimeText] = useState(() => currentTimeHHMM());
-  const [amountText, setAmountText] = useState("");
+  // Guess which business day is "currently open" right now, given the chosen start hour — just
+  // a starting point the person can change, not a claim of correctness (see
+  // `BankTransfer.businessDayKey`'s comment on why this is always a human decision).
+  const [businessDayKey, setBusinessDayKey] = useState(() => bangkokDateKeyWithCutoff(Date.now(), fromHour));
+  // Split into the two real K SHOP settlement batches a single business day actually receives
+  // (see `lib/pos/reconciliation.ts`'s file comment) — the 16:00-23:00 portion transfers that
+  // same night, the 23:00-04:00 portion transfers the *next* night. Either can be left blank if
+  // only one has landed so far; each filled-in amount becomes its own `BankTransfer` doc, both
+  // tagged with the same `businessDayKey` so the reconciliation table sums them together.
+  const [amount1Text, setAmount1Text] = useState("");
+  const [amount2Text, setAmount2Text] = useState("");
   const [note, setNote] = useState("");
   const [saving, setSaving] = useState(false);
 
-  const amount = Number(amountText);
-  const hasAmount = amountText.trim() !== "" && Number.isFinite(amount) && amount > 0;
-  const parsedTime = parseHHMM(timeText);
-  const canSave = Boolean(dateKey) && parsedTime !== null && hasAmount;
-  const transferredAt = parsedTime ? bangkokWallTimeToEpoch(dateKey, parsedTime.hour, parsedTime.minute) : null;
-  const previewBusinessDayKey = transferredAt !== null ? bangkokDateKeyWithCutoff(transferredAt, fromHour) : null;
+  const amount1 = Number(amount1Text);
+  const amount2 = Number(amount2Text);
+  const hasAmount1 = amount1Text.trim() !== "" && Number.isFinite(amount1) && amount1 > 0;
+  const hasAmount2 = amount2Text.trim() !== "" && Number.isFinite(amount2) && amount2 > 0;
+  const canSave = Boolean(businessDayKey) && (hasAmount1 || hasAmount2);
 
   async function handleAdd() {
-    if (!canSave || transferredAt === null || previewBusinessDayKey === null || saving) return;
+    if (!canSave || saving) return;
     setSaving(true);
     try {
-      await bankTransferRepository.create({
-        shopId,
-        transferredAt,
-        amount,
-        businessDayKey: previewBusinessDayKey,
-        note: note.trim(),
-        createdBy,
-        createdByName,
-        createdAt: Date.now(),
-      });
-      setAmountText("");
+      // Batch 1 (16:00-23:00) settles at 23:00 on the business-day label date itself (a shift
+      // labeled "18" starts 16:00 on the 18th); batch 2 (23:00-04:00) settles at 23:00 the
+      // *next* calendar day — see `bangkokDateKeyWithCutoff`'s comment for why a business day is
+      // labeled by the date it starts on, not the date it ends on.
+      const batch1At = bangkokDayBounds(businessDayKey).startMs + 23 * 60 * 60 * 1000;
+      const batch2At = bangkokDayBounds(addDaysToKey(businessDayKey, 1)).startMs + 23 * 60 * 60 * 1000;
+      const trimmedNote = note.trim();
+      await Promise.all([
+        hasAmount1
+          ? bankTransferRepository.create({
+              shopId,
+              transferredAt: batch1At,
+              amount: amount1,
+              businessDayKey,
+              note: trimmedNote ? `${trimmedNote} (16:00-23:00)` : "รอบ 16:00-23:00",
+              createdBy,
+              createdByName,
+              createdAt: Date.now(),
+            })
+          : Promise.resolve(),
+        hasAmount2
+          ? bankTransferRepository.create({
+              shopId,
+              transferredAt: batch2At,
+              amount: amount2,
+              businessDayKey,
+              note: trimmedNote ? `${trimmedNote} (23:00-04:00)` : "รอบ 23:00-04:00",
+              createdBy,
+              createdByName,
+              createdAt: Date.now(),
+            })
+          : Promise.resolve(),
+      ]);
+      setAmount1Text("");
+      setAmount2Text("");
       setNote("");
     } finally {
       setSaving(false);
@@ -1258,30 +1274,29 @@ function TransferQuickAddRow({
   return (
     <TableRow className="bg-muted/30">
       <TableCell>
-        <div className="flex items-center gap-1">
-          <DateField value={dateKey} onChange={setDateKey} className="h-9 w-32" />
-          <Input
-            value={timeText}
-            onChange={(e) => setTimeText(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && handleAdd()}
-            placeholder="04:05"
-            inputMode="numeric"
-            className="h-9 w-16 text-center"
-          />
-        </div>
-      </TableCell>
-      <TableCell className="text-xs text-muted-foreground">
-        {previewBusinessDayKey ? formatKey(previewBusinessDayKey) : "—"}
+        <DateField value={businessDayKey} onChange={setBusinessDayKey} className="h-9 w-36" />
       </TableCell>
       <TableCell>
         <Input
           type="number"
           inputMode="decimal"
           min={0}
-          value={amountText}
-          onChange={(e) => setAmountText(e.target.value)}
+          value={amount1Text}
+          onChange={(e) => setAmount1Text(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && handleAdd()}
-          placeholder="จำนวนเงิน"
+          placeholder="ยอด 16:00-23:00"
+          className="h-9 min-w-24 text-right"
+        />
+      </TableCell>
+      <TableCell>
+        <Input
+          type="number"
+          inputMode="decimal"
+          min={0}
+          value={amount2Text}
+          onChange={(e) => setAmount2Text(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && handleAdd()}
+          placeholder="ยอด 23:00-04:00"
           className="h-9 min-w-24 text-right"
         />
       </TableCell>
@@ -1303,72 +1318,42 @@ function TransferQuickAddRow({
   );
 }
 
-/** "HH:mm" for right now, Bangkok time — the quick-add row's default before the person overwrites
- * it with whatever the notification card actually says. */
-function currentTimeHHMM(): string {
-  const hour = bangkokHour(Date.now());
-  const minute = new Date(Date.now() + 7 * 60 * 60 * 1000).getUTCMinutes();
-  return `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
-}
-
-/** Parses a typed "H:mm"/"HH:mm" into its parts, or null if it isn't a valid time — used to gate
- * the quick-add button rather than silently falling back to midnight on a typo. */
-function parseHHMM(text: string): { hour: number; minute: number } | null {
-  const match = /^(\d{1,2}):(\d{2})$/.exec(text.trim());
-  if (!match) return null;
-  const hour = Number(match[1]);
-  const minute = Number(match[2]);
-  if (hour < 0 || hour > 23 || minute < 0 || minute > 59) return null;
-  return { hour, minute };
-}
-
 
 /**
  * One row of the เงินโอนเข้าบัญชี table — a plain read row by default, or (after "แก้ไข") lets
- * correcting the payment's own date/time, amount, or note. The business day is always re-derived
- * from that date/time (`bangkokDateKeyWithCutoff`), never edited directly — same reasoning as
- * `TransferQuickAddRow`'s comment: what a person can misjudge is which bucket a moment falls
- * into, not the moment itself, so only the moment is ever a text field.
+ * correcting the business day, this one batch's amount, or the note; "ลบ" removes a mistaken or
+ * duplicate entry entirely. Each logged transfer is always exactly one settlement batch, so
+ * editing only ever touches one amount, not two — same `isBatch1` classification used for display.
  */
-function TransferRow({
-  transfer,
-  currency,
-  fromHour,
-}: {
-  transfer: BankTransfer;
-  currency: string;
-  fromHour: number;
-}) {
+function TransferRow({ transfer, currency }: { transfer: BankTransfer; currency: string }) {
+  // Batch 1 (16:00-23:00) is transferred on the business-day label date itself; batch 2
+  // (23:00-04:00) the next calendar day — see `TransferQuickAddRow`'s batch-timestamp comment.
+  const isBatch1 = bangkokDateKey(transfer.transferredAt) === transfer.businessDayKey;
+
   const [editing, setEditing] = useState(false);
-  const [dateKey, setDateKey] = useState(() => bangkokDateKey(transfer.transferredAt));
-  const [timeText, setTimeText] = useState(() => formatHHMM(transfer.transferredAt));
+  const [businessDayKey, setBusinessDayKey] = useState(transfer.businessDayKey);
   const [amountText, setAmountText] = useState(String(transfer.amount));
   const [note, setNote] = useState(transfer.note);
   const [saving, setSaving] = useState(false);
 
   function startEdit() {
-    setDateKey(bangkokDateKey(transfer.transferredAt));
-    setTimeText(formatHHMM(transfer.transferredAt));
+    setBusinessDayKey(transfer.businessDayKey);
     setAmountText(String(transfer.amount));
     setNote(transfer.note);
     setEditing(true);
   }
 
   const amount = Number(amountText);
-  const parsedTime = parseHHMM(timeText);
-  const canSave = Boolean(dateKey) && parsedTime !== null && Number.isFinite(amount) && amount > 0;
+  const canSave = Boolean(businessDayKey) && Number.isFinite(amount) && amount > 0;
 
   async function handleSave() {
-    if (!canSave || parsedTime === null || saving) return;
+    if (!canSave || saving) return;
     setSaving(true);
     try {
-      const transferredAt = bangkokWallTimeToEpoch(dateKey, parsedTime.hour, parsedTime.minute);
-      await bankTransferRepository.update(transfer.id, {
-        transferredAt,
-        businessDayKey: bangkokDateKeyWithCutoff(transferredAt, fromHour),
-        amount,
-        note: note.trim(),
-      });
+      // Editing the business day alone doesn't move `transferredAt` (which real-world date the
+      // transfer landed on) — only which shift it's credited against, same as the quick-add row
+      // logging it there in the first place.
+      await bankTransferRepository.update(transfer.id, { businessDayKey, amount, note: note.trim() });
       setEditing(false);
     } finally {
       setSaving(false);
@@ -1384,31 +1369,21 @@ function TransferRow({
     return (
       <TableRow className="bg-muted/20">
         <TableCell>
-          <div className="flex items-center gap-1">
-            <DateField value={dateKey} onChange={setDateKey} className="h-9 w-32" />
+          <DateField value={businessDayKey} onChange={setBusinessDayKey} className="h-9 w-36" />
+        </TableCell>
+        <TableCell colSpan={2}>
+          <div className="flex items-center justify-end gap-2">
+            <span className="text-xs text-muted-foreground">{isBatch1 ? "16:00-23:00" : "23:00-04:00"}</span>
             <Input
-              value={timeText}
-              onChange={(e) => setTimeText(e.target.value)}
+              type="number"
+              inputMode="decimal"
+              min={0}
+              value={amountText}
+              onChange={(e) => setAmountText(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && handleSave()}
-              placeholder="04:05"
-              inputMode="numeric"
-              className="h-9 w-16 text-center"
+              className="h-9 w-28 text-right"
             />
           </div>
-        </TableCell>
-        <TableCell className="text-xs text-muted-foreground">
-          {parsedTime ? formatKey(bangkokDateKeyWithCutoff(bangkokWallTimeToEpoch(dateKey, parsedTime.hour, parsedTime.minute), fromHour)) : "—"}
-        </TableCell>
-        <TableCell>
-          <Input
-            type="number"
-            inputMode="decimal"
-            min={0}
-            value={amountText}
-            onChange={(e) => setAmountText(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && handleSave()}
-            className="h-9 w-28 text-right"
-          />
         </TableCell>
         <TableCell>
           <Input value={note} onChange={(e) => setNote(e.target.value)} onKeyDown={(e) => e.key === "Enter" && handleSave()} className="h-9" />
@@ -1429,11 +1404,9 @@ function TransferRow({
 
   return (
     <TableRow>
-      <TableCell>
-        {formatKey(bangkokDateKey(transfer.transferredAt))} {formatHHMM(transfer.transferredAt)}
-      </TableCell>
-      <TableCell className="text-xs text-muted-foreground">{formatKey(transfer.businessDayKey)}</TableCell>
-      <TableCell className="text-right">{formatCurrency(transfer.amount, currency)}</TableCell>
+      <TableCell>{formatKey(transfer.businessDayKey)}</TableCell>
+      <TableCell className="text-right">{isBatch1 ? formatCurrency(transfer.amount, currency) : "-"}</TableCell>
+      <TableCell className="text-right">{isBatch1 ? "-" : formatCurrency(transfer.amount, currency)}</TableCell>
       <TableCell className="text-muted-foreground">{transfer.note || "-"}</TableCell>
       <TableCell>
         <div className="flex justify-end gap-1">
@@ -1447,14 +1420,6 @@ function TransferRow({
       </TableCell>
     </TableRow>
   );
-}
-
-/** "HH:mm" (Bangkok local) from an epoch-ms timestamp — the display/edit counterpart to
- * `parseHHMM`. */
-function formatHHMM(epochMs: number): string {
-  const hour = bangkokHour(epochMs);
-  const minute = new Date(epochMs + 7 * 60 * 60 * 1000).getUTCMinutes();
-  return `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
 }
 
 /**

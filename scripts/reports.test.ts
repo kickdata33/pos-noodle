@@ -7,9 +7,7 @@ import test from "node:test";
 import {
   addDaysToKey,
   bangkokDateKey,
-  bangkokDateKeyWithCutoff,
   bangkokHour,
-  bangkokWallTimeToEpoch,
   bangkokWeekday,
   customRange,
   dateKeysBetween,
@@ -91,23 +89,6 @@ test("bangkokWeekday: Monday is 0, Sunday is 6", () => {
 test("addDaysToKey / dateKeysBetween round-trip across a month boundary", () => {
   assert.equal(addDaysToKey("2026-01-31", 1), "2026-02-01");
   assert.deepEqual(dateKeysBetween("2026-01-30", "2026-02-01"), ["2026-01-30", "2026-01-31", "2026-02-01"]);
-});
-
-// --- bangkokWallTimeToEpoch --------------------------------------------------------------------
-
-test("bangkokWallTimeToEpoch: round-trips through bangkokDateKey/bangkokHour", () => {
-  // "24 ก.ย. 69, 04:05 น." — straight off a K SHOP payment-notification card.
-  const epochMs = bangkokWallTimeToEpoch("2026-09-24", 4, 5);
-  assert.equal(bangkokDateKey(epochMs), "2026-09-24");
-  assert.equal(bangkokHour(epochMs), 4);
-});
-
-test("bangkokWallTimeToEpoch: a card timestamp just after midnight still resolves to the previous business day", () => {
-  // The whole point of this helper: the person types the real card time (04:05 on the 24th), not
-  // a guess about which business day it belongs to — a 16:00 cutoff should place this in the
-  // shift that *started* on the 23rd, exactly like a POS order paid at the same real moment would.
-  const epochMs = bangkokWallTimeToEpoch("2026-09-24", 4, 5);
-  assert.equal(bangkokDateKeyWithCutoff(epochMs, 16), "2026-09-23");
 });
 
 test("resolvePreset: 'today' and 'thisWeek' anchor correctly to a known Wednesday", () => {

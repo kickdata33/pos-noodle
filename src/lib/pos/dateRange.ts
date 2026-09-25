@@ -55,19 +55,6 @@ export function bangkokDayBounds(dateKey: string): { startMs: number; endMs: num
   return { startMs, endMs: startMs + DAY_MS - 1 };
 }
 
-/**
- * The inverse of `bangkokDateKey`/`bangkokHour`: turns a Bangkok wall-clock date + hour + minute
- * (the numbers a person reads straight off a K SHOP payment-notification card, e.g. "24 ก.ย. 69,
- * 04:05 น.") back into an epoch-ms timestamp. Exists so a person logging a bank transfer can type
- * exactly what the card says instead of first working out which "business day" bucket that
- * moment belongs to — `bangkokDateKeyWithCutoff(bangkokWallTimeToEpoch(...), fromHour)` does that
- * derivation instead of a human guess (see `TransferQuickAddRow` in the accounting page, and
- * `bangkokDateKeyWithCutoff`'s own comment on why that derivation is safety-critical to get right).
- */
-export function bangkokWallTimeToEpoch(dateKey: string, hour: number, minute: number): number {
-  return bangkokDayBounds(dateKey).startMs + hour * 60 * 60 * 1000 + minute * 60 * 1000;
-}
-
 export function addDaysToKey(dateKey: string, days: number): string {
   const { startMs } = bangkokDayBounds(dateKey);
   return bangkokDateKey(startMs + days * DAY_MS);
