@@ -17,6 +17,8 @@ export * from "./recurringExpense";
 export * from "./recurringExpenseSkip";
 export * from "./bankTransfer";
 export * from "./dailyFloat";
+export * from "./deliveryPayout";
+export * from "./deliveryFloatTopUp";
 export * from "./payrollEmployee";
 export * from "./payrollAdvance";
 export * from "./payrollAbsence";

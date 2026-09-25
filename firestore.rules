@@ -141,6 +141,20 @@ service cloud.firestore {
       allow delete: if isAdmin() && ownsExisting();
     }
 
+    match /deliveryPayouts/{payoutId} {
+      allow read: if isAdmin() && ownsExisting();
+      allow create: if isAdmin() && ownsIncoming();
+      allow update: if isAdmin() && ownsExisting() && ownsIncoming();
+      allow delete: if isAdmin() && ownsExisting();
+    }
+
+    match /deliveryFloatTopUps/{topUpId} {
+      allow read: if isAdmin() && ownsExisting();
+      allow create: if isAdmin() && ownsIncoming();
+      allow update: if isAdmin() && ownsExisting() && ownsIncoming();
+      allow delete: if isAdmin() && ownsExisting();
+    }
+
     match /recurringExpenses/{recurringExpenseId} {
       allow read: if isAdmin() && ownsExisting();
       allow create: if isAdmin() && ownsIncoming();

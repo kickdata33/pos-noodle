@@ -9,6 +9,7 @@ const NAV_ITEMS = [
   { href: "/admin", label: "ภาพรวม" },
   { href: "/admin/reports", label: "รายงานสรุปยอด" },
   { href: "/admin/accounting", label: "บัญชีรายรับ-รายจ่าย" },
+  { href: "/admin/delivery", label: "ยอดขาย Delivery" },
   { href: "/admin/payroll", label: "เงินเดือนพนักงาน" },
   { href: "/admin/orders", label: "รายการบิล" },
   { href: "/admin/categories", label: "หมวดหมู่" },

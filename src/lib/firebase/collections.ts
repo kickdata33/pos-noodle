@@ -65,6 +65,14 @@ export const COLLECTIONS = {
    * `types/dailyFloat.ts`. One doc per shop per business day, id `${shopId}_${businessDayKey}`.
    * Same access model as `expenses`/`bankTransfers`. */
   dailyFloats: "dailyFloats",
+  /** Admin-entered delivery-aggregator payouts (Grab/Line man/Shopee/...) — see
+   * `types/deliveryPayout.ts`. Matched by plain calendar `dateKey`, not a business day, since a
+   * payout's schedule has no fixed relationship to the shop's shift. Same access model as
+   * `expenses`. */
+  deliveryPayouts: "deliveryPayouts",
+  /** Admin-entered cash top-ups for the delivery change float — see
+   * `types/deliveryFloatTopUp.ts`. Same access model as `expenses`. */
+  deliveryFloatTopUps: "deliveryFloatTopUps",
   /** Templates for expenses that recur every day (rent/wages/internet) — see
    * `types/recurringExpense.ts`. Same access model as `expenses`. Never read for anything but
    * generating that day's actual `expenses` row; the รายจ่าย list itself never queries this. */
