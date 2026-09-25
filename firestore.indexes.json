@@ -129,6 +129,22 @@
         { "fieldPath": "shopId", "order": "ASCENDING" },
         { "fieldPath": "businessDayKey", "order": "DESCENDING" }
       ]
+    },
+    {
+      "collectionGroup": "deliveryPayouts",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "shopId", "order": "ASCENDING" },
+        { "fieldPath": "dateKey", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "deliveryFloatTopUps",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "shopId", "order": "ASCENDING" },
+        { "fieldPath": "dateKey", "order": "DESCENDING" }
+      ]
     }
   ],
   "fieldOverrides": []
