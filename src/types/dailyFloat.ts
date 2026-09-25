@@ -14,10 +14,20 @@ export interface DailyFloat extends WithId {
   /**
    * เงินสดเริ่มต้น (ทอน) — the change float placed in the drawer before the shift opens. Combined
    * with that business day's own `cashSales` (already computed by `reconciliationRows`, never
-   * re-derived here) to show "เงินสดที่ควรมีปลายกะ" = startingCash + cashSales — the number to
-   * check a physical count against at closing, not something this app counts itself.
+   * re-derived here) and `cashMovedOut` to show "เงินสดที่ควรมีปลายกะ" =
+   * startingCash + cashSales - cashMovedOut — the number to check a physical count against at
+   * closing, not something this app counts itself.
    */
   startingCash: number | null;
+  /**
+   * เงินสดที่โยกออกระหว่างกะ (item: "ยอดเงินสดโยกออก") — cash physically pulled from the drawer
+   * mid-shift for something other than a logged `Expense` (most commonly: taken to the bank, or
+   * moved to a safe) — money that's genuinely gone from the till without being a cost of running
+   * the shop, so it doesn't belong in `รายจ่าย`. Subtracted from "เงินสดที่ควรมีปลายกะ" so a
+   * legitimate cash pull doesn't read as a shortage when counted at close. A single running total
+   * for the day, not itemized — same "one number, entered once" shape as `startingCash`.
+   */
+  cashMovedOut: number | null;
   /**
    * ยอดคงเหลือในแอป K SHOP ตอนเริ่มกะ (~16:00) — K SHOP's own wallet-balance display is
    * cumulative (it keeps whatever hasn't been swept to the bank yet), so a same-day reading

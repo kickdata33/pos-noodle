@@ -1449,6 +1449,7 @@ function DailyFloatSection({
   updatedByName: string;
 }) {
   const [startingCashText, setStartingCashText] = useState(float?.startingCash != null ? String(float.startingCash) : "");
+  const [cashMovedOutText, setCashMovedOutText] = useState(float?.cashMovedOut != null ? String(float.cashMovedOut) : "");
   const [startingKshopText, setStartingKshopText] = useState(float?.startingKshopBalance != null ? String(float.startingKshopBalance) : "");
   const [checkedKshopText, setCheckedKshopText] = useState(float?.kshopCheckedBalance != null ? String(float.kshopCheckedBalance) : "");
   const [closingCashText, setClosingCashText] = useState(float?.closingCashCounted != null ? String(float.closingCashCounted) : "");
@@ -1464,10 +1465,18 @@ function DailyFloatSection({
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setStartingCashText(float?.startingCash != null ? String(float.startingCash) : "");
+    setCashMovedOutText(float?.cashMovedOut != null ? String(float.cashMovedOut) : "");
     setStartingKshopText(float?.startingKshopBalance != null ? String(float.startingKshopBalance) : "");
     setCheckedKshopText(float?.kshopCheckedBalance != null ? String(float.kshopCheckedBalance) : "");
     setClosingCashText(float?.closingCashCounted != null ? String(float.closingCashCounted) : "");
-  }, [businessDayKey, float?.startingCash, float?.startingKshopBalance, float?.kshopCheckedBalance, float?.closingCashCounted]);
+  }, [
+    businessDayKey,
+    float?.startingCash,
+    float?.cashMovedOut,
+    float?.startingKshopBalance,
+    float?.kshopCheckedBalance,
+    float?.closingCashCounted,
+  ]);
 
   function parseOrNull(text: string): number | null {
     const trimmed = text.trim();
@@ -1480,7 +1489,13 @@ function DailyFloatSection({
     patch: Partial<
       Pick<
         DailyFloat,
-        "startingCash" | "startingKshopBalance" | "kshopCheckedBalance" | "kshopCheckedAt" | "closingCashCounted" | "closingCashCountedAt"
+        | "startingCash"
+        | "cashMovedOut"
+        | "startingKshopBalance"
+        | "kshopCheckedBalance"
+        | "kshopCheckedAt"
+        | "closingCashCounted"
+        | "closingCashCountedAt"
       >
     >
   ) {
@@ -1501,13 +1516,16 @@ function DailyFloatSection({
   }
 
   const startingCash = parseOrNull(startingCashText);
+  const cashMovedOut = parseOrNull(cashMovedOutText);
   const startingKshop = parseOrNull(startingKshopText);
   const checkedKshop = parseOrNull(checkedKshopText);
   const closingCash = parseOrNull(closingCashText);
 
   // เงินสดที่ควรมีปลายกะ — a check-figure only, never fed back into `reconciliationRows`' own
-  // `cashSales` (that number always comes from actual paid orders, untouched by this).
-  const expectedCashAtClose = startingCash != null ? startingCash + cashSales : null;
+  // `cashSales` (that number always comes from actual paid orders, untouched by this). A blank
+  // "โยกออก" reads as 0 moved out (the common case), not as "unknown" — unlike `startingCash`,
+  // whose absence blocks the whole calculation instead of being assumed away.
+  const expectedCashAtClose = startingCash != null ? startingCash + cashSales - (cashMovedOut ?? 0) : null;
   // K SHOP's wallet balance is cumulative (see this component's file comment) — subtracting the
   // shift's own starting reading is what turns "the number on screen right now" into "what this
   // shift actually sold", independent of this POS's own QR figure (a useful second check, not a
@@ -1521,7 +1539,7 @@ function DailyFloatSection({
   return (
     <div className="rounded-md border border-border p-3">
       <h3 className="mb-2 text-sm font-semibold">ยอดเริ่มต้นประจำวัน</h3>
-      <div className="grid gap-3 sm:grid-cols-4">
+      <div className="grid gap-3 sm:grid-cols-3">
         <div>
           <Label className="mb-1 block text-xs text-muted-foreground">เงินสดเริ่มต้น (ทอน)</Label>
           <Input
@@ -1531,6 +1549,37 @@ function DailyFloatSection({
             value={startingCashText}
             onChange={(e) => setStartingCashText(e.target.value)}
             onBlur={() => save({ startingCash: parseOrNull(startingCashText) })}
+            onKeyDown={(e) => e.key === "Enter" && (e.currentTarget as HTMLInputElement).blur()}
+            placeholder="0.00"
+            className="h-9 text-right"
+          />
+        </div>
+        <div>
+          <Label className="mb-1 block text-xs text-muted-foreground">เงินสดที่โยกออกระหว่างกะ</Label>
+          <Input
+            type="number"
+            inputMode="decimal"
+            min={0}
+            value={cashMovedOutText}
+            onChange={(e) => setCashMovedOutText(e.target.value)}
+            onBlur={() => save({ cashMovedOut: parseOrNull(cashMovedOutText) })}
+            onKeyDown={(e) => e.key === "Enter" && (e.currentTarget as HTMLInputElement).blur()}
+            placeholder="0.00"
+            className="h-9 text-right"
+          />
+        </div>
+        <div>
+          <Label className="mb-1 block text-xs text-muted-foreground">เงินสดนับจริงปลายกะ</Label>
+          <Input
+            type="number"
+            inputMode="decimal"
+            min={0}
+            value={closingCashText}
+            onChange={(e) => setClosingCashText(e.target.value)}
+            onBlur={() => {
+              const counted = parseOrNull(closingCashText);
+              save({ closingCashCounted: counted, closingCashCountedAt: counted != null ? Date.now() : null });
+            }}
             onKeyDown={(e) => e.key === "Enter" && (e.currentTarget as HTMLInputElement).blur()}
             placeholder="0.00"
             className="h-9 text-right"
@@ -1567,23 +1616,6 @@ function DailyFloatSection({
             className="h-9 text-right"
           />
         </div>
-        <div>
-          <Label className="mb-1 block text-xs text-muted-foreground">เงินสดนับจริงปลายกะ</Label>
-          <Input
-            type="number"
-            inputMode="decimal"
-            min={0}
-            value={closingCashText}
-            onChange={(e) => setClosingCashText(e.target.value)}
-            onBlur={() => {
-              const counted = parseOrNull(closingCashText);
-              save({ closingCashCounted: counted, closingCashCountedAt: counted != null ? Date.now() : null });
-            }}
-            onKeyDown={(e) => e.key === "Enter" && (e.currentTarget as HTMLInputElement).blur()}
-            placeholder="0.00"
-            className="h-9 text-right"
-          />
-        </div>
       </div>
       <div className="mt-3 grid gap-1 text-sm text-muted-foreground sm:grid-cols-2">
         <p>
@@ -1592,7 +1624,9 @@ function DailyFloatSection({
             {expectedCashAtClose != null ? formatCurrency(expectedCashAtClose, currency) : "-"}
           </span>
           {startingCash != null
-            ? ` (เริ่มต้น ${formatCurrency(startingCash, currency)} + ขายเงินสด ${formatCurrency(cashSales, currency)})`
+            ? ` (เริ่มต้น ${formatCurrency(startingCash, currency)} + ขายเงินสด ${formatCurrency(cashSales, currency)}${
+                cashMovedOut ? ` - โยกออก ${formatCurrency(cashMovedOut, currency)}` : ""
+              })`
             : ""}
         </p>
         <p>
