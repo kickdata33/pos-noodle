@@ -134,6 +134,20 @@ export interface ReconciliationRow {
 /** Rounding/float slop tolerance in baht — never a real discrepancy worth flagging as "รอ". */
 const SETTLE_TOLERANCE_THB = 1;
 
+/**
+ * ยอดปรับ (สลับเงินสด/โอน) — item: "กดผิด ยอดเงินโอนเกินบ้าง ยอดเงินสดเกินบ้าง ขาดโอน เกินสด ขาดสด
+ * เกินโอน". A bill rung in under the wrong payment method (a QR payment mistakenly rung in as
+ * "เงินสด", or the reverse) doesn't change what actually happened at the bank or in the drawer —
+ * it just makes `cashSales`/`qrSales` (both derived from the POS's own order records) wrong in a
+ * matched pair: cash reads too high by exactly the amount QR reads too low, or vice versa, which
+ * is exactly why it shows up as "เงินสดเกิน" alongside "รอโอน"/"ขาดโอน" together rather than either
+ * looking wrong on its own. Rather than hunting down and re-editing the original order (which may
+ * not even be possible after the fact — a payment method can be locked once paid), one signed
+ * adjustment per business day moves that amount between the two columns: positive shifts money
+ * *from* cashSales *into* qrSales (something rung in as cash was actually a transfer), negative
+ * the other way. `cashSales + qrSales` (and so `totalSales`) is unchanged either way — only the
+ * split between them moves — so `net` and every other total this file computes still balance.
+ */
 export function reconciliationRows(
   orders: Order[],
   paymentMethods: PaymentMethod[],
@@ -141,17 +155,21 @@ export function reconciliationRows(
   expenses: Expense[],
   startKey: string,
   endKey: string,
-  fromHour: number
+  fromHour: number,
+  cashTransferAdjustments: Record<string, number> = {}
 ): ReconciliationRow[] {
   return businessDaySales(orders, paymentMethods, startKey, endKey, fromHour).map((day) => {
+    const adjustment = cashTransferAdjustments[day.dateKey] ?? 0;
+    const cashSales = round2(day.cash - adjustment);
+    const qrSales = round2(day.qr + adjustment);
     const transferred = transfersForBusinessDay(transfers, day.dateKey);
-    const pendingTransfer = round2(Math.max(0, day.qr - transferred));
-    const overTransferred = round2(Math.max(0, transferred - day.qr));
+    const pendingTransfer = round2(Math.max(0, qrSales - transferred));
+    const overTransferred = round2(Math.max(0, transferred - qrSales));
     const dayExpenses = expensesForDay(expenses, day.dateKey);
     return {
       dateKey: day.dateKey,
-      cashSales: day.cash,
-      qrSales: day.qr,
+      cashSales,
+      qrSales,
       otherSales: day.other,
       totalSales: day.total,
       transferred,

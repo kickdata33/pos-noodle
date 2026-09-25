@@ -222,9 +222,21 @@ export default function AccountingPage() {
     };
   }, [shopId, fetchRange.startMs, fetchRange.endMs]);
 
+  // One signed correction per business day for a bill rung in under the wrong payment method —
+  // see `DailyFloat.cashTransferAdjustment`'s comment. Built from the already-loaded `floats`
+  // rather than a separate fetch, since every business day's adjustment (if any) lives on the
+  // same doc as its starting-cash/closing-count fields.
+  const cashTransferAdjustments = useMemo(() => {
+    const map: Record<string, number> = {};
+    for (const f of floats) {
+      if (f.cashTransferAdjustment) map[f.businessDayKey] = f.cashTransferAdjustment;
+    }
+    return map;
+  }, [floats]);
+
   const rows = useMemo(
-    () => reconciliationRows(orders, paymentMethods, transfers, expenses, range.startKey, range.endKey, fromHour),
-    [orders, paymentMethods, transfers, expenses, range.startKey, range.endKey, fromHour]
+    () => reconciliationRows(orders, paymentMethods, transfers, expenses, range.startKey, range.endKey, fromHour, cashTransferAdjustments),
+    [orders, paymentMethods, transfers, expenses, range.startKey, range.endKey, fromHour, cashTransferAdjustments]
   );
 
   // เลือกวันไหน โชว์แค่วันนั้น — filtered by `expenseDay` alone, not the range picker above, so
@@ -1450,8 +1462,7 @@ function DailyFloatSection({
 }) {
   const [startingCashText, setStartingCashText] = useState(float?.startingCash != null ? String(float.startingCash) : "");
   const [cashMovedOutText, setCashMovedOutText] = useState(float?.cashMovedOut != null ? String(float.cashMovedOut) : "");
-  const [startingKshopText, setStartingKshopText] = useState(float?.startingKshopBalance != null ? String(float.startingKshopBalance) : "");
-  const [checkedKshopText, setCheckedKshopText] = useState(float?.kshopCheckedBalance != null ? String(float.kshopCheckedBalance) : "");
+  const [adjustmentText, setAdjustmentText] = useState(float?.cashTransferAdjustment != null ? String(float.cashTransferAdjustment) : "");
   const [closingCashText, setClosingCashText] = useState(float?.closingCashCounted != null ? String(float.closingCashCounted) : "");
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
@@ -1466,17 +1477,9 @@ function DailyFloatSection({
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setStartingCashText(float?.startingCash != null ? String(float.startingCash) : "");
     setCashMovedOutText(float?.cashMovedOut != null ? String(float.cashMovedOut) : "");
-    setStartingKshopText(float?.startingKshopBalance != null ? String(float.startingKshopBalance) : "");
-    setCheckedKshopText(float?.kshopCheckedBalance != null ? String(float.kshopCheckedBalance) : "");
+    setAdjustmentText(float?.cashTransferAdjustment != null ? String(float.cashTransferAdjustment) : "");
     setClosingCashText(float?.closingCashCounted != null ? String(float.closingCashCounted) : "");
-  }, [
-    businessDayKey,
-    float?.startingCash,
-    float?.cashMovedOut,
-    float?.startingKshopBalance,
-    float?.kshopCheckedBalance,
-    float?.closingCashCounted,
-  ]);
+  }, [businessDayKey, float?.startingCash, float?.cashMovedOut, float?.cashTransferAdjustment, float?.closingCashCounted]);
 
   function parseOrNull(text: string): number | null {
     const trimmed = text.trim();
@@ -1487,16 +1490,7 @@ function DailyFloatSection({
 
   async function save(
     patch: Partial<
-      Pick<
-        DailyFloat,
-        | "startingCash"
-        | "cashMovedOut"
-        | "startingKshopBalance"
-        | "kshopCheckedBalance"
-        | "kshopCheckedAt"
-        | "closingCashCounted"
-        | "closingCashCountedAt"
-      >
+      Pick<DailyFloat, "startingCash" | "cashMovedOut" | "cashTransferAdjustment" | "closingCashCounted" | "closingCashCountedAt">
     >
   ) {
     setSaving(true);
@@ -1517,20 +1511,15 @@ function DailyFloatSection({
 
   const startingCash = parseOrNull(startingCashText);
   const cashMovedOut = parseOrNull(cashMovedOutText);
-  const startingKshop = parseOrNull(startingKshopText);
-  const checkedKshop = parseOrNull(checkedKshopText);
   const closingCash = parseOrNull(closingCashText);
 
   // เงินสดที่ควรมีปลายกะ — a check-figure only, never fed back into `reconciliationRows`' own
   // `cashSales` (that number always comes from actual paid orders, untouched by this). A blank
   // "โยกออก" reads as 0 moved out (the common case), not as "unknown" — unlike `startingCash`,
-  // whose absence blocks the whole calculation instead of being assumed away.
+  // whose absence blocks the whole calculation instead of being assumed away. `cashSales` itself
+  // already has `cashTransferAdjustment` baked in (see `reconciliationRows`), so a misclassified
+  // bill corrects this figure automatically without a second calculation here.
   const expectedCashAtClose = startingCash != null ? startingCash + cashSales - (cashMovedOut ?? 0) : null;
-  // K SHOP's wallet balance is cumulative (see this component's file comment) — subtracting the
-  // shift's own starting reading is what turns "the number on screen right now" into "what this
-  // shift actually sold", independent of this POS's own QR figure (a useful second check, not a
-  // replacement for it).
-  const kshopCountedThisShift = startingKshop != null && checkedKshop != null ? checkedKshop - startingKshop : null;
   // นับได้จริง - ที่ควรมี — positive means เงินเกิน, negative means เงินขาด. Only shown once both
   // sides of the comparison exist; a missing starting-cash entry makes "ควรมี" undefined, and
   // there's nothing meaningful to diff against yet.
@@ -1539,7 +1528,7 @@ function DailyFloatSection({
   return (
     <div className="rounded-md border border-border p-3">
       <h3 className="mb-2 text-sm font-semibold">ยอดเริ่มต้นประจำวัน</h3>
-      <div className="grid gap-3 sm:grid-cols-3">
+      <div className="grid gap-3 sm:grid-cols-4">
         <div>
           <Label className="mb-1 block text-xs text-muted-foreground">เงินสดเริ่มต้น (ทอน)</Label>
           <Input
@@ -1586,39 +1575,24 @@ function DailyFloatSection({
           />
         </div>
         <div>
-          <Label className="mb-1 block text-xs text-muted-foreground">ยอด K SHOP ตอนเริ่มกะ</Label>
+          <Label className="mb-1 block text-xs text-muted-foreground">ยอดปรับ (สลับเงินสด/โอน)</Label>
           <Input
             type="number"
             inputMode="decimal"
-            min={0}
-            value={startingKshopText}
-            onChange={(e) => setStartingKshopText(e.target.value)}
-            onBlur={() => save({ startingKshopBalance: parseOrNull(startingKshopText) })}
+            value={adjustmentText}
+            onChange={(e) => setAdjustmentText(e.target.value)}
+            onBlur={() => save({ cashTransferAdjustment: parseOrNull(adjustmentText) })}
             onKeyDown={(e) => e.key === "Enter" && (e.currentTarget as HTMLInputElement).blur()}
             placeholder="0.00"
             className="h-9 text-right"
           />
-        </div>
-        <div>
-          <Label className="mb-1 block text-xs text-muted-foreground">ยอด K SHOP ที่เช็คล่าสุด</Label>
-          <Input
-            type="number"
-            inputMode="decimal"
-            min={0}
-            value={checkedKshopText}
-            onChange={(e) => setCheckedKshopText(e.target.value)}
-            onBlur={() => {
-              const checked = parseOrNull(checkedKshopText);
-              save({ kshopCheckedBalance: checked, kshopCheckedAt: checked != null ? Date.now() : null });
-            }}
-            onKeyDown={(e) => e.key === "Enter" && (e.currentTarget as HTMLInputElement).blur()}
-            placeholder="0.00"
-            className="h-9 text-right"
-          />
+          <p className="mt-1 text-[11px] leading-tight text-muted-foreground">
+            + = บันทึกเป็นเงินสดผิด ที่จริงเป็นโอน · - = บันทึกเป็นโอนผิด ที่จริงเป็นเงินสด
+          </p>
         </div>
       </div>
       <div className="mt-3 grid gap-1 text-sm text-muted-foreground sm:grid-cols-2">
-        <p>
+        <p className="sm:col-span-2">
           เงินสดที่ควรมีปลายกะ:{" "}
           <span className="font-medium text-foreground">
             {expectedCashAtClose != null ? formatCurrency(expectedCashAtClose, currency) : "-"}
@@ -1628,12 +1602,6 @@ function DailyFloatSection({
                 cashMovedOut ? ` - โยกออก ${formatCurrency(cashMovedOut, currency)}` : ""
               })`
             : ""}
-        </p>
-        <p>
-          QR ที่ขายได้กะนี้ (ตาม K SHOP):{" "}
-          <span className="font-medium text-foreground">
-            {kshopCountedThisShift != null ? formatCurrency(kshopCountedThisShift, currency) : "-"}
-          </span>
         </p>
         <p className="sm:col-span-2">
           ผลต่างเงินสด (นับจริง - ที่ควรมี):{" "}

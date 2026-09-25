@@ -192,3 +192,30 @@ test("reconciliationRows: a transfer larger than that day's QR sales never produ
   assert.equal(row.overTransferred, 400);
   assert.equal(row.settled, true);
 });
+
+test("reconciliationRows: a positive cashTransferAdjustment moves money from cashSales into qrSales, totalSales unchanged", () => {
+  const orders = [
+    makeOrder({ id: "o1", total: 300, paidAt: Date.UTC(2026, 8, 18, 13, 0), paymentMethodId: "cash1" }),
+    makeOrder({ id: "o2", total: 700, paidAt: Date.UTC(2026, 8, 18, 14, 0), paymentMethodId: "qr1" }),
+  ];
+  // A 200-baht bill was rung in as cash but the customer actually paid by transfer — the shop
+  // owner corrects it with a +200 adjustment instead of editing the locked order.
+  const rows = reconciliationRows(orders, METHODS, [], [], "2026-09-17", "2026-09-18", 16, { "2026-09-18": 200 });
+  const row = rows.find((r) => r.dateKey === "2026-09-18")!;
+  assert.equal(row.cashSales, 100);
+  assert.equal(row.qrSales, 900);
+  assert.equal(row.totalSales, 1000);
+});
+
+test("reconciliationRows: a negative cashTransferAdjustment moves money from qrSales into cashSales, and feeds overTransferred correctly", () => {
+  const orders = [makeOrder({ id: "o1", total: 500, paidAt: Date.UTC(2026, 8, 18, 13, 0), paymentMethodId: "qr1" })];
+  // The full 500 transferred, but a 150-baht bill inside it was actually paid cash, not QR — the
+  // shop owner logs a -150 adjustment so it stops looking like an unexplained 150-baht overage.
+  const transfers = [makeTransfer({ id: "t1", transferredAt: Date.UTC(2026, 8, 18, 16, 0), amount: 500, businessDayKey: "2026-09-18" })];
+  const rows = reconciliationRows(orders, METHODS, transfers, [], "2026-09-17", "2026-09-18", 16, { "2026-09-18": -150 });
+  const row = rows.find((r) => r.dateKey === "2026-09-18")!;
+  assert.equal(row.cashSales, 150);
+  assert.equal(row.qrSales, 350);
+  assert.equal(row.overTransferred, 150);
+  assert.equal(row.pendingTransfer, 0);
+});

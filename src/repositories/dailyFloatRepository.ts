@@ -21,10 +21,10 @@ class DailyFloatRepository extends FirestoreRepository<DailyFloat> {
     return this.subscribe(onChange, where("shopId", "==", shopId), orderBy("businessDayKey", "desc"));
   }
 
-  /** Always a merge-write, never create-then-update — either `startingCash`,
-   * `startingKshopBalance`, or `kshopCheckedBalance` can be the first field ever entered for a
-   * given business day, in any order, so there's no single "this doc now exists" moment to hang
-   * a create/update split on. */
+  /** Always a merge-write, never create-then-update — any single field (`startingCash`,
+   * `cashMovedOut`, `cashTransferAdjustment`, `closingCashCounted`, ...) can be the first one ever
+   * entered for a given business day, in any order, so there's no single "this doc now exists"
+   * moment to hang a create/update split on. */
   async upsert(
     shopId: string,
     businessDayKey: string,

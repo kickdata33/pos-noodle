@@ -29,25 +29,20 @@ export interface DailyFloat extends WithId {
    */
   cashMovedOut: number | null;
   /**
-   * ยอดคงเหลือในแอป K SHOP ตอนเริ่มกะ (~16:00) — K SHOP's own wallet-balance display is
-   * cumulative (it keeps whatever hasn't been swept to the bank yet), so a same-day reading
-   * later in the shift is meaningless on its own (item: "ในระบบขึ้น 690 มันเป็นของเมื่อคืนล้นมา" —
-   * that 690 was left over from the *previous* shift, not today's sales). Subtracted from
-   * `kshopCheckedBalance` to get the QR total actually made *this* shift.
+   * ยอดปรับ (สลับเงินสด/โอน) — item: "กดผิด ยอดเงินโอนเกินบ้าง ยอดเงินสดเกินบ้าง ขาดโอน เกินสด
+   * ขาดสด เกินโอน". A single signed correction per business day for a bill rung in under the
+   * wrong payment method — positive moves that amount from `cashSales` into `qrSales` (rung in as
+   * cash, actually a transfer), negative the other way. Consumed by `reconciliationRows`
+   * (`lib/pos/reconciliation.ts`, see its own comment), never by anything in this type directly —
+   * it's stored here only because it's a once-a-day, hand-entered number with nowhere else to
+   * live, same as every other field on this doc.
    */
-  startingKshopBalance: number | null;
-  /** The K SHOP app's wallet-balance reading at the moment it was last checked mid/end-of-shift
-   * (e.g. at 23:00) — `kshopCheckedBalance - startingKshopBalance` is that shift's real QR total
-   * as of the check, independent of `reconciliationRows`' own QR figure (which comes from this
-   * POS's own order records, not the K SHOP app) — a useful second, independent check. */
-  kshopCheckedBalance: number | null;
-  kshopCheckedAt: EpochMillis | null;
+  cashTransferAdjustment: number | null;
   /**
    * เงินสดที่นับได้จริงตอนปิดกะ — the physical count from the drawer, entered once at close.
-   * Compared against `startingCash + cashSales` ("เงินสดที่ควรมีปลายกะ", computed in
-   * `DailyFloatSection`, never stored) the same way `kshopCheckedBalance` is compared against the
-   * POS's own QR figure: a second, independent number to catch a shortage/overage, not something
-   * this app derives or corrects on its own.
+   * Compared against "เงินสดที่ควรมีปลายกะ" (startingCash + cashSales - cashMovedOut, computed in
+   * `DailyFloatSection`, never stored) — a second, independent number to catch a shortage/overage,
+   * not something this app derives or corrects on its own.
    */
   closingCashCounted: number | null;
   closingCashCountedAt: EpochMillis | null;
