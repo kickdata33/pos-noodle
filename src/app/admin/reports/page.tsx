@@ -188,21 +188,41 @@ export default function ReportsPage() {
   const channels = useMemo(() => salesByChannel(scopedOrders), [scopedOrders]);
   const paymentMethods = useMemo(() => salesByPaymentMethod(scopedOrders), [scopedOrders]);
 
-  // ค่าใช้จ่ายรวม ในช่วงที่เลือก — plain calendar `dateKey` เหมือนที่ใช้อยู่ในหน้าบัญชีรายรับ-รายจ่าย
-  // (ไม่ผูกกับ business day/shift เหมือนยอดขายด้านบน เพราะ Expense เก็บเป็นวันปฏิทินธรรมดาอยู่แล้ว).
-  const totalExpenses = useMemo(
-    () => expenses.filter((e) => e.dateKey >= range.startKey && e.dateKey <= range.endKey).reduce((sum, e) => sum + e.amount, 0),
-    [expenses, range.startKey, range.endKey]
-  );
+  // ค่าใช้จ่ายรวม ในช่วงที่เลือก — ปกติใช้ plain calendar `dateKey` เหมือนหน้าบัญชีรายรับ-รายจ่าย
+  // (Expense เก็บเป็นวันปฏิทินธรรมดา ไม่ใช่ business-day key) แต่เมื่อเปิด "ดูตามช่วงเวลาทำการ" ไว้
+  // (`useBusinessDay`) การ์ดยอดขายด้านบนเปลี่ยนไปนับตามกะ (16:00–06:00 เป็นต้น) แล้ว ถ้าการ์ดนี้ยังคง
+  // เทียบด้วย `dateKey` ตรงๆ อยู่ รายการที่บันทึกไว้ตอนตี 1–2 (จริงๆ เป็นของกะเมื่อคืนที่ยังไม่ข้ามเที่ยงคืน
+  // ตามเวลาทำการ) จะไปโผล่ใน "วันนี้" แทนที่จะเป็น "เมื่อวาน" — ให้สลับไปกลุ่มด้วย
+  // `bangkokDateKeyWithCutoff(e.createdAt, fromHour)` แทน ให้ตรงกับตอนที่นับยอดขาย (`scopedOrders`)
+  // ด้านบน.
+  const totalExpenses = useMemo(() => {
+    if (!useBusinessDay) {
+      return expenses.filter((e) => e.dateKey >= range.startKey && e.dateKey <= range.endKey).reduce((sum, e) => sum + e.amount, 0);
+    }
+    return expenses
+      .filter((e) => {
+        const key = bangkokDateKeyWithCutoff(e.createdAt, fromHour);
+        return key >= range.startKey && key <= range.endKey;
+      })
+      .reduce((sum, e) => sum + e.amount, 0);
+  }, [expenses, range.startKey, range.endKey, useBusinessDay, fromHour]);
 
   // รายได้ Delivery ในช่วงที่เลือก — ยึดตามเงินที่แอป Grab/Line man/Shopee โอนเข้าบัญชีจริง (บันทึกไว้
   // ในหน้า "ยอดขาย Delivery") ไม่ใช่ยอดขายที่ระบบ POS คำนวณจากบิล (ซึ่งมักจะขึ้น 0 ถ้าพนักงานไม่ได้
   // เลือกวิธีชำระเป็น "Delivery" ตอนปิดบิล) — ถือเป็นรายได้ที่เข้าจริงตรงๆ ไม่ต้องเทียบ/หักลบกับยอดขาย
-  // เหมือนคอลัมน์ "คงเหลือ" ในหน้ายอดขาย Delivery ที่อาจติดลบได้.
-  const deliveryRevenue = useMemo(
-    () => deliveryPayouts.filter((p) => p.dateKey >= range.startKey && p.dateKey <= range.endKey).reduce((sum, p) => sum + p.amount, 0),
-    [deliveryPayouts, range.startKey, range.endKey]
-  );
+  // เหมือนคอลัมน์ "คงเหลือ" ในหน้ายอดขาย Delivery ที่อาจติดลบได้. เช่นเดียวกับ `totalExpenses` ข้างบน —
+  // เมื่อเปิด "ดูตามช่วงเวลาทำการ" ให้กรองด้วยกะ (จาก `createdAt`) แทน `dateKey` ตรงๆ.
+  const deliveryRevenue = useMemo(() => {
+    if (!useBusinessDay) {
+      return deliveryPayouts.filter((p) => p.dateKey >= range.startKey && p.dateKey <= range.endKey).reduce((sum, p) => sum + p.amount, 0);
+    }
+    return deliveryPayouts
+      .filter((p) => {
+        const key = bangkokDateKeyWithCutoff(p.createdAt, fromHour);
+        return key >= range.startKey && key <= range.endKey;
+      })
+      .reduce((sum, p) => sum + p.amount, 0);
+  }, [deliveryPayouts, range.startKey, range.endKey, useBusinessDay, fromHour]);
   // รายรับรวม (ยอดขายทั้งร้าน + รายได้ Delivery) — item request: เดิมเอาแค่ "รายได้ Delivery" (เงินโอน
   // เข้าจากแอป) ไปหักกับ "ค่าใช้จ่ายทั้งร้าน" ทำให้ผลต่างติดลบเกินจริงมาก เพราะเทียบรายจ่ายทั้งร้านกับ
   // รายได้แค่ช่องทางเดียว ตอนนี้รวมยอดขายทั้งร้าน (`summary.revenue`) เข้ากับรายได้ Delivery ก่อน
