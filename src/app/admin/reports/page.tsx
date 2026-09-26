@@ -39,6 +39,7 @@ import type { DeliveryPayout, Expense, Order } from "@/types";
 
 const PRESETS: { value: ReportPreset; label: string }[] = [
   { value: "today", label: "วันนี้" },
+  { value: "yesterday", label: "เมื่อวาน" },
   { value: "last7", label: "7 วันล่าสุด" },
   { value: "thisWeek", label: "สัปดาห์นี้" },
   { value: "thisMonth", label: "เดือนนี้" },
@@ -202,7 +203,12 @@ export default function ReportsPage() {
     () => deliveryPayouts.filter((p) => p.dateKey >= range.startKey && p.dateKey <= range.endKey).reduce((sum, p) => sum + p.amount, 0),
     [deliveryPayouts, range.startKey, range.endKey]
   );
-  const netAfterDelivery = deliveryRevenue - totalExpenses;
+  // รายรับรวม (ยอดขายทั้งร้าน + รายได้ Delivery) — item request: เดิมเอาแค่ "รายได้ Delivery" (เงินโอน
+  // เข้าจากแอป) ไปหักกับ "ค่าใช้จ่ายทั้งร้าน" ทำให้ผลต่างติดลบเกินจริงมาก เพราะเทียบรายจ่ายทั้งร้านกับ
+  // รายได้แค่ช่องทางเดียว ตอนนี้รวมยอดขายทั้งร้าน (`summary.revenue`) เข้ากับรายได้ Delivery ก่อน
+  // แล้วค่อยหักค่าใช้จ่าย ให้เห็นภาพรวมกำไร-ขาดทุนที่ใกล้เคียงความจริงมากขึ้น.
+  const totalRevenue = summary.revenue + deliveryRevenue;
+  const netAfterDelivery = totalRevenue - totalExpenses;
 
   return (
     <AdminSection title="รายงานสรุปยอด" description="ยอดขาย สินค้าขายดี และช่วงเวลาที่ลูกค้าเยอะ เลือกช่วงวันที่ย้อนหลังได้">
@@ -253,28 +259,29 @@ export default function ReportsPage() {
 
       <Card className="mt-4">
         <CardHeader>
-          <CardTitle>เปรียบเทียบค่าใช้จ่ายกับรายได้ Delivery</CardTitle>
+          <CardTitle>เปรียบเทียบรายรับรวมกับค่าใช้จ่าย</CardTitle>
         </CardHeader>
         <CardContent>
           <div className="grid gap-4 sm:grid-cols-3">
+            <div>
+              <p className="text-sm text-muted-foreground">รายรับรวม (ยอดขาย + Delivery)</p>
+              <p className="mt-1 text-2xl font-semibold tabular-nums text-emerald-600">{formatCurrency(totalRevenue, currency)}</p>
+            </div>
             <div>
               <p className="text-sm text-muted-foreground">ค่าใช้จ่ายรวม</p>
               <p className="mt-1 text-2xl font-semibold tabular-nums text-destructive">{formatCurrency(totalExpenses, currency)}</p>
             </div>
             <div>
-              <p className="text-sm text-muted-foreground">รายได้ Delivery (เงินเข้าบัญชีจริง)</p>
-              <p className="mt-1 text-2xl font-semibold tabular-nums text-emerald-600">{formatCurrency(deliveryRevenue, currency)}</p>
-            </div>
-            <div>
-              <p className="text-sm text-muted-foreground">ผลต่าง (รายได้ Delivery - ค่าใช้จ่าย)</p>
+              <p className="text-sm text-muted-foreground">ผลต่าง (รายรับรวม - ค่าใช้จ่าย)</p>
               <p className={`mt-1 text-2xl font-semibold tabular-nums ${netAfterDelivery < 0 ? "text-destructive" : "text-emerald-600"}`}>
                 {formatCurrency(netAfterDelivery, currency)}
               </p>
             </div>
           </div>
           <p className="mt-3 text-xs text-muted-foreground">
-            รายได้ Delivery นับจากเงินที่แอป Grab/Line man/Shopee โอนเข้าบัญชีจริง (บันทึกในหน้า
-            &quot;ยอดขาย Delivery&quot;) — ถือเป็นรายได้ตรงๆ ไม่ได้หักลบเทียบกับยอดขายในระบบ POS
+            รายรับรวม = ยอดขายทั้งร้าน ({formatCurrency(summary.revenue, currency)}) + รายได้ Delivery ที่แอป
+            Grab/Line man/Shopee โอนเข้าบัญชีจริง ({formatCurrency(deliveryRevenue, currency)}, บันทึกในหน้า
+            &quot;ยอดขาย Delivery&quot;)
           </p>
         </CardContent>
       </Card>

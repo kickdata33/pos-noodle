@@ -72,7 +72,7 @@ export function dateKeysBetween(startKey: string, endKey: string): string[] {
   return keys;
 }
 
-export type ReportPreset = "today" | "last7" | "thisWeek" | "thisMonth";
+export type ReportPreset = "today" | "yesterday" | "last7" | "thisWeek" | "thisMonth";
 
 export interface DateRange {
   startKey: string;
@@ -92,6 +92,10 @@ export function resolvePreset(preset: ReportPreset, nowMs: number = Date.now()):
   switch (preset) {
     case "today":
       return rangeFromKeys(todayKey, todayKey);
+    case "yesterday": {
+      const yesterdayKey = addDaysToKey(todayKey, -1);
+      return rangeFromKeys(yesterdayKey, yesterdayKey);
+    }
     case "last7":
       return rangeFromKeys(addDaysToKey(todayKey, -6), todayKey);
     case "thisWeek": {

@@ -49,6 +49,7 @@ import {
 
 const PRESETS: { value: ReportPreset; label: string }[] = [
   { value: "today", label: "วันนี้" },
+  { value: "yesterday", label: "เมื่อวาน" },
   { value: "last7", label: "7 วันล่าสุด" },
   { value: "thisWeek", label: "สัปดาห์นี้" },
   { value: "thisMonth", label: "เดือนนี้" },
