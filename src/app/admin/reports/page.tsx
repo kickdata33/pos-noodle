@@ -31,9 +31,11 @@ import {
   summarizeOrders,
   topProducts,
 } from "@/lib/pos/reports";
+import { deliveryPayoutRepository } from "@/repositories/deliveryPayoutRepository";
+import { expenseRepository } from "@/repositories/expenseRepository";
 import { orderRepository } from "@/repositories/orderRepository";
 import { shopRepository } from "@/repositories/shopRepository";
-import type { Order } from "@/types";
+import type { DeliveryPayout, Expense, Order } from "@/types";
 
 const PRESETS: { value: ReportPreset; label: string }[] = [
   { value: "today", label: "วันนี้" },
@@ -74,11 +76,27 @@ export default function ReportsPage() {
   // the next day regardless of this value — see that page's `toHour` comment for the full story.
   const [toHour, setToHour] = useState(6);
 
+  const [expenses, setExpenses] = useState<Expense[]>([]);
+  const [deliveryPayouts, setDeliveryPayouts] = useState<DeliveryPayout[]>([]);
+
   useEffect(() => {
     if (!shopId) return;
     shopRepository.getSettings(shopId).then((settings) => {
       if (settings) setCurrency(settings.currency);
     });
+  }, [shopId]);
+
+  // สำหรับการ์ด "เปรียบเทียบค่าใช้จ่ายกับรายได้ Delivery" ด้านล่าง — เบา (ร้านนี้มีไม่กี่รายการ/วัน)
+  // เลยใช้ live subscription ตรงๆ แบบเดียวกับหน้าบัญชี/หน้ายอดขาย Delivery แล้วกรองตามช่วงวันที่
+  // ที่เลือกไว้ในหน้านี้เอง (client-side) แทนที่จะ fetch ใหม่ทุกครั้งที่เปลี่ยนช่วง.
+  useEffect(() => {
+    if (!shopId) return;
+    return expenseRepository.subscribeForShop(shopId, setExpenses);
+  }, [shopId]);
+
+  useEffect(() => {
+    if (!shopId) return;
+    return deliveryPayoutRepository.subscribeForShop(shopId, setDeliveryPayouts);
   }, [shopId]);
 
   const range: DateRange = useMemo(() => {
@@ -169,6 +187,23 @@ export default function ReportsPage() {
   const channels = useMemo(() => salesByChannel(scopedOrders), [scopedOrders]);
   const paymentMethods = useMemo(() => salesByPaymentMethod(scopedOrders), [scopedOrders]);
 
+  // ค่าใช้จ่ายรวม ในช่วงที่เลือก — plain calendar `dateKey` เหมือนที่ใช้อยู่ในหน้าบัญชีรายรับ-รายจ่าย
+  // (ไม่ผูกกับ business day/shift เหมือนยอดขายด้านบน เพราะ Expense เก็บเป็นวันปฏิทินธรรมดาอยู่แล้ว).
+  const totalExpenses = useMemo(
+    () => expenses.filter((e) => e.dateKey >= range.startKey && e.dateKey <= range.endKey).reduce((sum, e) => sum + e.amount, 0),
+    [expenses, range.startKey, range.endKey]
+  );
+
+  // รายได้ Delivery ในช่วงที่เลือก — ยึดตามเงินที่แอป Grab/Line man/Shopee โอนเข้าบัญชีจริง (บันทึกไว้
+  // ในหน้า "ยอดขาย Delivery") ไม่ใช่ยอดขายที่ระบบ POS คำนวณจากบิล (ซึ่งมักจะขึ้น 0 ถ้าพนักงานไม่ได้
+  // เลือกวิธีชำระเป็น "Delivery" ตอนปิดบิล) — ถือเป็นรายได้ที่เข้าจริงตรงๆ ไม่ต้องเทียบ/หักลบกับยอดขาย
+  // เหมือนคอลัมน์ "คงเหลือ" ในหน้ายอดขาย Delivery ที่อาจติดลบได้.
+  const deliveryRevenue = useMemo(
+    () => deliveryPayouts.filter((p) => p.dateKey >= range.startKey && p.dateKey <= range.endKey).reduce((sum, p) => sum + p.amount, 0),
+    [deliveryPayouts, range.startKey, range.endKey]
+  );
+  const netAfterDelivery = deliveryRevenue - totalExpenses;
+
   return (
     <AdminSection title="รายงานสรุปยอด" description="ยอดขาย สินค้าขายดี และช่วงเวลาที่ลูกค้าเยอะ เลือกช่วงวันที่ย้อนหลังได้">
       <div className="mb-6 flex flex-wrap items-end gap-2">
@@ -215,6 +250,34 @@ export default function ReportsPage() {
         <StatCard label="ยอดเฉลี่ยต่อบิล" value={formatCurrency(summary.avgOrderValue, currency)} />
         <StatCard label="จำนวนสินค้าที่ขาย" value={`${summary.itemCount.toLocaleString("th-TH")} ชิ้น`} />
       </div>
+
+      <Card className="mt-4">
+        <CardHeader>
+          <CardTitle>เปรียบเทียบค่าใช้จ่ายกับรายได้ Delivery</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="grid gap-4 sm:grid-cols-3">
+            <div>
+              <p className="text-sm text-muted-foreground">ค่าใช้จ่ายรวม</p>
+              <p className="mt-1 text-2xl font-semibold tabular-nums text-destructive">{formatCurrency(totalExpenses, currency)}</p>
+            </div>
+            <div>
+              <p className="text-sm text-muted-foreground">รายได้ Delivery (เงินเข้าบัญชีจริง)</p>
+              <p className="mt-1 text-2xl font-semibold tabular-nums text-emerald-600">{formatCurrency(deliveryRevenue, currency)}</p>
+            </div>
+            <div>
+              <p className="text-sm text-muted-foreground">ผลต่าง (รายได้ Delivery - ค่าใช้จ่าย)</p>
+              <p className={`mt-1 text-2xl font-semibold tabular-nums ${netAfterDelivery < 0 ? "text-destructive" : "text-emerald-600"}`}>
+                {formatCurrency(netAfterDelivery, currency)}
+              </p>
+            </div>
+          </div>
+          <p className="mt-3 text-xs text-muted-foreground">
+            รายได้ Delivery นับจากเงินที่แอป Grab/Line man/Shopee โอนเข้าบัญชีจริง (บันทึกในหน้า
+            &quot;ยอดขาย Delivery&quot;) — ถือเป็นรายได้ตรงๆ ไม่ได้หักลบเทียบกับยอดขายในระบบ POS
+          </p>
+        </CardContent>
+      </Card>
 
       <div className="mt-4 grid gap-4 lg:grid-cols-2">
         <Card>
