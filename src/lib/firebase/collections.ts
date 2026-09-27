@@ -95,4 +95,8 @@ export const COLLECTIONS = {
   /** Completed weekly "ตัดจ่าย" (pay period settlements), one doc per settlement — see
    * `types/payrollSettlement.ts`. Same access model as `expenses`. */
   payrollSettlements: "payrollSettlements",
+  /** Per-date overrides to the shop's recurring "closed on these days of the month" rule
+   * (`ShopSettings.closedDaysOfMonth`) — see `types/shopClosedDate.ts`. Id is deterministic
+   * (`${shopId}_${dateKey}`). Same access model as `expenses`. */
+  shopClosedDates: "shopClosedDates",
 } as const;

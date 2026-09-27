@@ -8,7 +8,11 @@ import { addDaysToKey, dateKeysBetween } from "./dateRange";
  * Confirmed design (from discussion with the shop owner):
  * - Wage accrues per day worked ("คิดตามจำนวนวัน"), at that employee's own `dailyWage`.
  * - Every day counts as worked *unless* explicitly marked absent ("ถือว่ามาทุกวัน เว้นแต่มาร์กลา") —
- *   same default-on/explicit-exception shape as `recurringExpenses.ts`'s skip pattern.
+ *   same default-on/explicit-exception shape as `recurringExpenses.ts`'s skip pattern — or the
+ *   shop itself was closed that day (item: "กำหนดวันหยุดร้านได้"): a closed day never counts as
+ *   worked for anyone, resolved once per period via `lib/pos/shopCalendar.ts`'s
+ *   `closedDateKeysInRange` and passed in as `closedDateKeys` below, same shape as
+ *   `absentDateKeys` but shop-wide instead of per-employee.
  * - An advance (เบิก) can never exceed what's already been earned and not yet advanced
  *   ("เบิกได้ไม่เกินยอดที่ค้างจ่าย") — `computeAvailableAdvance` is what the UI checks before
  *   allowing one to be saved.
@@ -36,18 +40,24 @@ export interface AccrualResult {
 
 /**
  * How much wage has accrued from `periodStart` through `periodEnd`, inclusive, at `dailyWage`
- * per day — every day in the range counts unless it's in `absentDateKeys`. Returns zero for an
- * empty/inverted range (e.g. a brand new employee whose period hasn't started yet) rather than
- * throwing, since the accounting page needs to render *something* for a period-of-zero-days.
+ * per day — every day in the range counts unless it's in `absentDateKeys` (this one employee
+ * didn't come in) or `closedDateKeys` (the shop itself was closed, so nobody worked). Returns
+ * zero for an empty/inverted range (e.g. a brand new employee whose period hasn't started yet)
+ * rather than throwing, since the accounting page needs to render *something* for a
+ * period-of-zero-days. `closedDateKeys` defaults to empty so every existing call site (and every
+ * shop that hasn't set up closed days) behaves exactly as before this existed.
  */
 export function computeAccrual(
   periodStart: string,
   periodEnd: string,
   dailyWage: number,
-  absentDateKeys: ReadonlySet<string>
+  absentDateKeys: ReadonlySet<string>,
+  closedDateKeys: ReadonlySet<string> = new Set()
 ): AccrualResult {
   if (periodStart > periodEnd) return { daysWorked: 0, accruedWage: 0 };
-  const daysWorked = dateKeysBetween(periodStart, periodEnd).filter((k) => !absentDateKeys.has(k)).length;
+  const daysWorked = dateKeysBetween(periodStart, periodEnd).filter(
+    (k) => !absentDateKeys.has(k) && !closedDateKeys.has(k)
+  ).length;
   return { daysWorked, accruedWage: daysWorked * dailyWage };
 }
 
@@ -78,9 +88,10 @@ export function computeSettlementPreview(
   periodEnd: string,
   dailyWage: number,
   absentDateKeys: ReadonlySet<string>,
-  totalAdvances: number
+  totalAdvances: number,
+  closedDateKeys: ReadonlySet<string> = new Set()
 ): SettlementPreview {
-  const { daysWorked, accruedWage } = computeAccrual(periodStart, periodEnd, dailyWage, absentDateKeys);
+  const { daysWorked, accruedWage } = computeAccrual(periodStart, periodEnd, dailyWage, absentDateKeys, closedDateKeys);
   return { daysWorked, accruedWage, totalAdvances, netPaid: accruedWage - totalAdvances };
 }
 

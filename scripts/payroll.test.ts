@@ -44,6 +44,30 @@ test("computeAccrual: an inverted/empty range (period hasn't started yet) accrue
   assert.equal(result.accruedWage, 0);
 });
 
+test("computeAccrual: a shop-closed day doesn't accrue wage, even with no absences marked", () => {
+  const result = computeAccrual("2026-09-15", "2026-09-21", 300, new Set(), new Set(["2026-09-16"]));
+  assert.equal(result.daysWorked, 6);
+  assert.equal(result.accruedWage, 1800);
+});
+
+test("computeAccrual: an absent day and a closed day in the same range each only count once", () => {
+  const result = computeAccrual(
+    "2026-09-15",
+    "2026-09-21",
+    300,
+    new Set(["2026-09-17"]),
+    new Set(["2026-09-16", "2026-09-17"])
+  );
+  assert.equal(result.daysWorked, 5);
+  assert.equal(result.accruedWage, 1500);
+});
+
+test("computeAccrual: closedDateKeys defaults to empty — omitting it behaves exactly as before", () => {
+  const result = computeAccrual("2026-09-15", "2026-09-21", 300, new Set(["2026-09-17"]));
+  assert.equal(result.daysWorked, 6);
+  assert.equal(result.accruedWage, 1800);
+});
+
 test("computeAvailableAdvance: full accrued amount is available when nothing's been taken yet", () => {
   assert.equal(computeAvailableAdvance(1500, 0), 1500);
 });
@@ -69,6 +93,12 @@ test("computeSettlementPreview: netPaid can go negative if advances somehow exce
   const preview = computeSettlementPreview("2026-09-15", "2026-09-21", 300, new Set(), 3000);
   assert.equal(preview.accruedWage, 2100);
   assert.equal(preview.netPaid, -900);
+});
+
+test("computeSettlementPreview: a shop-closed day inside the settled period is excluded from accrual", () => {
+  const preview = computeSettlementPreview("2026-09-15", "2026-09-21", 300, new Set(), 0, new Set(["2026-09-16"]));
+  assert.equal(preview.daysWorked, 6);
+  assert.equal(preview.accruedWage, 1800);
 });
 
 test("suggestedSettlementEnd: on the 16th, suggests the 15th of the same month", () => {

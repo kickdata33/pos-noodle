@@ -176,6 +176,13 @@ service cloud.firestore {
       allow delete: if isAdmin() && ownsExisting();
     }
 
+    match /shopClosedDates/{overrideId} {
+      allow read: if isAdmin() && ownsExisting();
+      allow create: if isAdmin() && ownsIncoming();
+      allow update: if isAdmin() && ownsExisting() && ownsIncoming();
+      allow delete: if isAdmin() && ownsExisting();
+    }
+
     match /payrollAdvances/{advanceId} {
       allow read: if isAdmin() && ownsExisting();
       allow create: if isAdmin() && ownsIncoming();

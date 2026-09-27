@@ -27,13 +27,16 @@ import {
   computeSettlementPreview,
   suggestedSettlementEnd,
 } from "@/lib/pos/payroll";
+import { closedDateKeysInRange, toOverrideMap } from "@/lib/pos/shopCalendar";
 import { payrollAbsenceRepository } from "@/repositories/payrollAbsenceRepository";
 import { payrollAdvanceRepository } from "@/repositories/payrollAdvanceRepository";
 import { payrollEmployeeRepository } from "@/repositories/payrollEmployeeRepository";
 import { payrollSettlementRepository } from "@/repositories/payrollSettlementRepository";
+import { shopClosedDateRepository } from "@/repositories/shopClosedDateRepository";
 import { shopRepository } from "@/repositories/shopRepository";
 import { userRepository } from "@/repositories/userRepository";
-import type { AppUser, PayrollAbsence, PayrollAdvance, PayrollEmployee, PayrollSettlement } from "@/types";
+import { DEFAULT_CLOSED_DAYS_OF_MONTH } from "@/types";
+import type { AppUser, PayrollAbsence, PayrollAdvance, PayrollEmployee, PayrollSettlement, ShopClosedDate } from "@/types";
 
 function todayKey(): string {
   return bangkokDateKey(Date.now());
@@ -67,15 +70,31 @@ export default function PayrollPage() {
   const [advances, setAdvances] = useState<PayrollAdvance[]>([]);
   const [absences, setAbsences] = useState<PayrollAbsence[]>([]);
   const [settlements, setSettlements] = useState<PayrollSettlement[]>([]);
+  // "วันหยุดร้าน" (item: "กำหนดวันหยุดร้านได้") — see `ShopClosedDaysCard` below for the editing UI
+  // and `lib/pos/shopCalendar.ts` for how these two combine into a resolved closed/not-closed
+  // answer per date. Defaults to the confirmed usual rest days until an Admin customizes it, same
+  // fallback every reader of `ShopSettings.closedDaysOfMonth` uses.
+  const [closedDaysOfMonth, setClosedDaysOfMonth] = useState<number[]>(DEFAULT_CLOSED_DAYS_OF_MONTH);
+  const [closedDateOverrides, setClosedDateOverrides] = useState<ShopClosedDate[]>([]);
 
   const [enrollOpen, setEnrollOpen] = useState(false);
 
   useEffect(() => {
     if (!shopId) return;
     shopRepository.getSettings(shopId).then((settings) => {
-      if (settings) setCurrency(settings.currency);
+      if (settings) {
+        setCurrency(settings.currency);
+        setClosedDaysOfMonth(settings.closedDaysOfMonth ?? DEFAULT_CLOSED_DAYS_OF_MONTH);
+      }
     });
   }, [shopId]);
+
+  useEffect(() => {
+    if (!shopId) return;
+    return shopClosedDateRepository.subscribeForShop(shopId, setClosedDateOverrides);
+  }, [shopId]);
+
+  const closedDateOverrideMap = useMemo(() => toOverrideMap(closedDateOverrides), [closedDateOverrides]);
 
   useEffect(() => {
     if (!shopId) return;
@@ -122,6 +141,15 @@ export default function PayrollPage() {
       actionLabel={enrollableStaff.length > 0 ? "+ เพิ่มพนักงาน" : undefined}
       onAction={() => setEnrollOpen(true)}
     >
+      <ShopClosedDaysCard
+        shopId={shopId ?? ""}
+        closedDaysOfMonth={closedDaysOfMonth}
+        overrides={closedDateOverrides}
+        onClosedDaysOfMonthChange={setClosedDaysOfMonth}
+        createdBy={appUser?.id ?? ""}
+        createdByName={appUser?.name ?? ""}
+      />
+
       {sortedEmployees.length === 0 ? (
         <p className="rounded-lg border border-dashed border-border p-6 text-center text-sm text-muted-foreground">
           ยังไม่มีพนักงานในระบบเงินเดือน — กด &quot;+ เพิ่มพนักงาน&quot; เพื่อตั้งค่าอัตราค่าจ้างรายวัน
@@ -138,6 +166,8 @@ export default function PayrollPage() {
               currency={currency}
               createdBy={appUser?.id ?? ""}
               createdByName={appUser?.name ?? ""}
+              closedDaysOfMonth={closedDaysOfMonth}
+              closedDateOverrideMap={closedDateOverrideMap}
             />
           ))}
         </div>
@@ -320,6 +350,8 @@ function EmployeeCard({
   currency,
   createdBy,
   createdByName,
+  closedDaysOfMonth,
+  closedDateOverrideMap,
 }: {
   employee: PayrollEmployee;
   advances: PayrollAdvance[];
@@ -328,6 +360,8 @@ function EmployeeCard({
   currency: string;
   createdBy: string;
   createdByName: string;
+  closedDaysOfMonth: number[];
+  closedDateOverrideMap: ReadonlyMap<string, boolean>;
 }) {
   const [advanceOpen, setAdvanceOpen] = useState(false);
   const [absentOpen, setAbsentOpen] = useState(false);
@@ -363,9 +397,13 @@ function EmployeeCard({
     [absences, periodStart, today]
   );
 
+  const closedDateKeys = useMemo(
+    () => closedDateKeysInRange(periodStart, today, closedDaysOfMonth, closedDateOverrideMap),
+    [periodStart, today, closedDaysOfMonth, closedDateOverrideMap]
+  );
   const accrual = useMemo(
-    () => computeAccrual(periodStart, today, employee.dailyWage, absentDateKeys),
-    [periodStart, today, employee.dailyWage, absentDateKeys]
+    () => computeAccrual(periodStart, today, employee.dailyWage, absentDateKeys, closedDateKeys),
+    [periodStart, today, employee.dailyWage, absentDateKeys, closedDateKeys]
   );
   const totalAdvances = useMemo(() => periodAdvances.reduce((sum, a) => sum + a.amount, 0), [periodAdvances]);
   const available = computeAvailableAdvance(accrual.accruedWage, totalAdvances);
@@ -575,8 +613,211 @@ function EmployeeCard({
         currency={currency}
         paidBy={createdBy}
         paidByName={createdByName}
+        closedDaysOfMonth={closedDaysOfMonth}
+        closedDateOverrideMap={closedDateOverrideMap}
       />
     </Card>
+  );
+}
+
+/**
+ * "วันหยุดร้าน" (item: "กำหนดวันหยุดร้านได้") — the recurring day-of-month rule
+ * (`closedDaysOfMonth`, e.g. [1, 16]) plus per-date exceptions on top (`shopClosedDates`). Both
+ * feed `computeAccrual`/`computeSettlementPreview` above via `closedDateKeysInRange`: a closed
+ * day never counts as worked for any enrolled employee, without anyone having to mark each
+ * person "ลา" individually. Placed on this page (not a generic settings page) since payroll wage
+ * accrual is the one place this actually changes a number — see `lib/pos/shopCalendar.ts`.
+ */
+function ShopClosedDaysCard({
+  shopId,
+  closedDaysOfMonth,
+  overrides,
+  onClosedDaysOfMonthChange,
+  createdBy,
+  createdByName,
+}: {
+  shopId: string;
+  closedDaysOfMonth: number[];
+  overrides: ShopClosedDate[];
+  onClosedDaysOfMonthChange: (days: number[]) => void;
+  createdBy: string;
+  createdByName: string;
+}) {
+  const [savingDay, setSavingDay] = useState<number | null>(null);
+  const [addOpen, setAddOpen] = useState(false);
+
+  const sortedOverrides = useMemo(() => [...overrides].sort((a, b) => b.dateKey.localeCompare(a.dateKey)), [overrides]);
+
+  async function toggleDay(day: number) {
+    if (!shopId || savingDay !== null) return;
+    const next = closedDaysOfMonth.includes(day)
+      ? closedDaysOfMonth.filter((d) => d !== day)
+      : [...closedDaysOfMonth, day].sort((a, b) => a - b);
+    setSavingDay(day);
+    try {
+      await shopRepository.updateSettings(shopId, { closedDaysOfMonth: next, updatedAt: Date.now() });
+      onClosedDaysOfMonthChange(next);
+    } finally {
+      setSavingDay(null);
+    }
+  }
+
+  async function removeOverride(dateKey: string) {
+    if (!shopId) return;
+    await shopClosedDateRepository.clear(shopId, dateKey);
+  }
+
+  return (
+    <Card className="mb-4">
+      <CardHeader>
+        <CardTitle>วันหยุดร้าน</CardTitle>
+      </CardHeader>
+      <CardContent className="grid gap-4">
+        <div>
+          <p className="mb-2 text-sm text-muted-foreground">
+            หยุดประจำทุกเดือน วันที่ (ไม่นับเป็นวันทำงาน พนักงานจะไม่ได้ค่าจ้างวันนั้น)
+          </p>
+          <div className="flex flex-wrap gap-1.5">
+            {Array.from({ length: 31 }, (_, i) => i + 1).map((day) => (
+              <Button
+                key={day}
+                size="sm"
+                variant={closedDaysOfMonth.includes(day) ? "default" : "outline"}
+                className="h-8 w-8 p-0"
+                disabled={savingDay !== null}
+                onClick={() => toggleDay(day)}
+              >
+                {day}
+              </Button>
+            ))}
+          </div>
+        </div>
+
+        <div>
+          <div className="mb-2 flex items-center justify-between">
+            <p className="text-sm text-muted-foreground">
+              วันพิเศษ — เพิ่มวันหยุดพิเศษ หรือเปิดร้านตามปกติในวันที่ปกติหยุด
+            </p>
+            <Button size="sm" variant="outline" onClick={() => setAddOpen(true)}>
+              + เพิ่มวันพิเศษ
+            </Button>
+          </div>
+          {sortedOverrides.length > 0 ? (
+            <ul className="grid gap-1 text-sm">
+              {sortedOverrides.map((o) => (
+                <li key={o.id} className="flex items-center justify-between gap-2 rounded-md border border-border p-2">
+                  <span className="flex flex-wrap items-center gap-2">
+                    <span className="font-medium">{formatKey(o.dateKey)}</span>
+                    <Badge variant={o.closed ? "destructive" : "success"}>{o.closed ? "ปิดพิเศษ" : "เปิดตามปกติ"}</Badge>
+                    {o.note ? <span className="text-muted-foreground">{o.note}</span> : null}
+                  </span>
+                  <Button size="sm" variant="ghost" className="h-6 px-2 text-xs text-destructive" onClick={() => removeOverride(o.dateKey)}>
+                    ลบ
+                  </Button>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="text-sm text-muted-foreground">ยังไม่มีวันพิเศษ</p>
+          )}
+        </div>
+      </CardContent>
+
+      <AddClosedDateOverrideDialog
+        open={addOpen}
+        onOpenChange={setAddOpen}
+        shopId={shopId}
+        createdBy={createdBy}
+        createdByName={createdByName}
+      />
+    </Card>
+  );
+}
+
+function AddClosedDateOverrideDialog({
+  open,
+  onOpenChange,
+  shopId,
+  createdBy,
+  createdByName,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  shopId: string;
+  createdBy: string;
+  createdByName: string;
+}) {
+  const [dateKey, setDateKey] = useState(() => todayKey());
+  const [closed, setClosed] = useState<"true" | "false">("true");
+  const [note, setNote] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    if (open) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setDateKey(todayKey());
+      setClosed("true");
+      setNote("");
+    }
+  }, [open]);
+
+  async function handleSave() {
+    if (!shopId || !dateKey || saving) return;
+    setSaving(true);
+    try {
+      await shopClosedDateRepository.set({
+        shopId,
+        dateKey,
+        closed: closed === "true",
+        note: note.trim(),
+        createdBy,
+        createdByName,
+        createdAt: Date.now(),
+      });
+      onOpenChange(false);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>เพิ่มวันพิเศษ</DialogTitle>
+        </DialogHeader>
+        <div className="grid gap-4">
+          <div className="grid gap-2">
+            <Label htmlFor="override-date">วันที่</Label>
+            <Input id="override-date" type="date" value={dateKey} onChange={(e) => setDateKey(e.target.value)} />
+          </div>
+          <div className="grid gap-2">
+            <Label>ประเภท</Label>
+            <Select value={closed} onValueChange={(v) => setClosed(v as "true" | "false")}>
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="true">ปิดพิเศษ (วันนี้ไม่นับเป็นวันทำงาน)</SelectItem>
+                <SelectItem value="false">เปิดตามปกติ (แม้จะตรงกับวันหยุดประจำ)</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="grid gap-2">
+            <Label htmlFor="override-note">หมายเหตุ (ถ้ามี)</Label>
+            <Input id="override-note" value={note} onChange={(e) => setNote(e.target.value)} placeholder="เช่น วันสงกรานต์" />
+          </div>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={() => onOpenChange(false)}>
+            ยกเลิก
+          </Button>
+          <Button onClick={handleSave} disabled={saving || !dateKey}>
+            บันทึก
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -770,6 +1011,8 @@ function SettleDialog({
   currency,
   paidBy,
   paidByName,
+  closedDaysOfMonth,
+  closedDateOverrideMap,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -781,6 +1024,8 @@ function SettleDialog({
   currency: string;
   paidBy: string;
   paidByName: string;
+  closedDaysOfMonth: number[];
+  closedDateOverrideMap: ReadonlyMap<string, boolean>;
 }) {
   // Defaults to the nearest 1st/16th cutoff (see `suggestedSettlementEnd`'s comment) when today
   // is payday, clamped so it never lands before the period even started (an employee enrolled
@@ -800,9 +1045,13 @@ function SettleDialog({
   // Advances taken strictly within [periodStart, periodEnd] — if periodEnd is pulled back
   // earlier than today (settling a bit late, not counting today's not-yet-worked day), any
   // advance dated after it correctly falls into the *next* period instead of this settlement.
+  const closedDateKeys = useMemo(
+    () => closedDateKeysInRange(periodStart, periodEnd, closedDaysOfMonth, closedDateOverrideMap),
+    [periodStart, periodEnd, closedDaysOfMonth, closedDateOverrideMap]
+  );
   const preview = useMemo(
-    () => computeSettlementPreview(periodStart, periodEnd, employee.dailyWage, absentDateKeys, totalAdvances),
-    [periodStart, periodEnd, employee.dailyWage, absentDateKeys, totalAdvances]
+    () => computeSettlementPreview(periodStart, periodEnd, employee.dailyWage, absentDateKeys, totalAdvances, closedDateKeys),
+    [periodStart, periodEnd, employee.dailyWage, absentDateKeys, totalAdvances, closedDateKeys]
   );
 
   async function handleConfirm() {

@@ -23,3 +23,4 @@ export * from "./payrollEmployee";
 export * from "./payrollAdvance";
 export * from "./payrollAbsence";
 export * from "./payrollSettlement";
+export * from "./shopClosedDate";

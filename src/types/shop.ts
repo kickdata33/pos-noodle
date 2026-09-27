@@ -73,5 +73,21 @@ export interface ShopSettings extends WithId {
    * never fail or block just because no printer is configured yet.
    */
   receiptPrinterIp?: string | null;
+  /**
+   * Days of the month (1–31) the shop is normally closed every month (item: "กำหนดวันหยุดร้านได้") —
+   * defaults to `[1, 16]`, the shop's confirmed usual rest days (coincides with, but is a
+   * separate concept from, the payroll "ตัดจ่าย" cutoff dates in `lib/pos/payroll.ts`). Read
+   * together with per-date exceptions in the `shopClosedDates` collection
+   * (`types/shopClosedDate.ts`) via `isShopClosedDay`/`closedDateKeysInRange`
+   * (`lib/pos/shopCalendar.ts`) — a closed day excludes from payroll wage accrual for every
+   * enrolled employee at once. `undefined` (every shop before this field existed) is treated as
+   * the same `[1, 16]` default by every reader, so nothing needs a one-time migration.
+   */
+  closedDaysOfMonth?: number[];
   updatedAt: EpochMillis;
 }
+
+/** `ShopSettings.closedDaysOfMonth`'s default when a shop hasn't customized it yet — the shop's
+ * confirmed usual rest days. Exported so every reader (payroll page, settings UI, tests) falls
+ * back to the exact same default rather than each hardcoding `[1, 16]` separately. */
+export const DEFAULT_CLOSED_DAYS_OF_MONTH: number[] = [1, 16];
