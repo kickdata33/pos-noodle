@@ -99,4 +99,7 @@ export const COLLECTIONS = {
    * (`ShopSettings.closedDaysOfMonth`) — see `types/shopClosedDate.ts`. Id is deterministic
    * (`${shopId}_${dateKey}`). Same access model as `expenses`. */
   shopClosedDates: "shopClosedDates",
+  /** Manual "we counted the cash-moved-out safe/bank stash" checkpoints — see
+   * `types/cashSafeCount.ts`. Same access model as `expenses`. */
+  cashSafeCounts: "cashSafeCounts",
 } as const;

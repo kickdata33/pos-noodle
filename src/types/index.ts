@@ -24,3 +24,4 @@ export * from "./payrollAdvance";
 export * from "./payrollAbsence";
 export * from "./payrollSettlement";
 export * from "./shopClosedDate";
+export * from "./cashSafeCount";
