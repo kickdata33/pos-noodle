@@ -6,7 +6,7 @@ import { AdminSection } from "@/components/admin/AdminSection";
 import { DateField } from "@/components/admin/DateField";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -448,12 +448,16 @@ export default function AccountingPage() {
       <Card>
         <CardHeader>
           <CardTitle>ยอดขายเทียบกับเงินโอนเข้าบัญชี</CardTitle>
+          <CardDescription>
+            นับเป็น &quot;วันทำการ&quot; ตามกะ (เช่น {fromHour}:00 ถึง {toHour}:00 ของวันถัดไป นับเป็นวันเดียวกัน) ไม่ใช่เที่ยงคืนถึงเที่ยงคืน —
+            ต่างจากตาราง &quot;กำไร/ขาดทุนสุทธิรายวัน&quot; ด้านล่างที่นับตามวันปฏิทินจริง จึงอาจเห็นยอดขายของวันที่ตัวเลขเดียวกันไม่ตรงกัน
+          </CardDescription>
         </CardHeader>
         <CardContent>
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>วันทำการ</TableHead>
+                <TableHead>วันทำการ (ตามกะ)</TableHead>
                 <TableHead className="text-right">ยอดทั้งหมด</TableHead>
                 <TableHead className="text-right">เงินสด</TableHead>
                 <TableHead className="text-right">QR</TableHead>
@@ -525,6 +529,10 @@ export default function AccountingPage() {
       <Card className="mt-4">
         <CardHeader>
           <CardTitle>กำไร/ขาดทุนสุทธิรายวัน (รวม Delivery)</CardTitle>
+          <CardDescription>
+            นับตามวันปฏิทินจริง (เที่ยงคืนถึงเที่ยงคืน) เพราะค่าใช้จ่ายและรายได้ Delivery บันทึกเป็นวันปฏิทินอยู่แล้ว — ไม่ใช่วันทำการตามกะแบบ
+            ตารางด้านบน ยอดขาย POS ของวันที่เดียวกันจึงอาจเห็นไม่ตรงกับตารางด้านบน (ไม่ใช่ข้อมูลผิด แค่นับวันคนละแบบ)
+          </CardDescription>
         </CardHeader>
         <CardContent>
           {/* วันปฏิทินธรรมดา (ไม่ใช่ business day แบบตารางด้านบน) — เพราะ Expense/DeliveryPayout
@@ -534,7 +542,7 @@ export default function AccountingPage() {
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>วันที่</TableHead>
+                <TableHead>วันที่ (ตามปฏิทิน)</TableHead>
                 <TableHead className="text-right">ยอดขาย POS</TableHead>
                 <TableHead className="text-right">รายได้ Delivery</TableHead>
                 <TableHead className="text-right">ค่าใช้จ่าย</TableHead>
