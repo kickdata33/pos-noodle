@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 
 import { AdminSection } from "@/components/admin/AdminSection";
 import { SortButtons } from "@/components/admin/SortButtons";
+import { BulkCreateTablesDialog } from "@/components/admin/tables/BulkCreateTablesDialog";
 import { TableQrDialog } from "@/components/admin/tables/TableQrDialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -38,6 +39,7 @@ export default function TablesPage() {
   const [name, setName] = useState("");
   const [saving, setSaving] = useState(false);
   const [qrTable, setQrTable] = useState<PosTable | null>(null);
+  const [bulkOpen, setBulkOpen] = useState(false);
 
   useEffect(() => {
     if (!shopId) return;
@@ -99,6 +101,11 @@ export default function TablesPage() {
       description="จำนวนและชื่อโต๊ะแก้ได้ตลอด ไม่ผูกกับโค้ด — ปัจจุบันมีเท่าไรก็ได้"
       actionLabel="+ เพิ่มโต๊ะ"
       onAction={openCreate}
+      extraActions={
+        <Button size="sm" variant="outline" onClick={() => setBulkOpen(true)}>
+          สร้างหลายโต๊ะ
+        </Button>
+      }
     >
       <Table>
         <TableHeader>
@@ -179,6 +186,15 @@ export default function TablesPage() {
       </Dialog>
 
       <TableQrDialog table={qrTable} onOpenChange={(open) => !open && setQrTable(null)} />
+
+      {shopId ? (
+        <BulkCreateTablesDialog
+          open={bulkOpen}
+          onOpenChange={setBulkOpen}
+          shopId={shopId}
+          existingCount={items.length}
+        />
+      ) : null}
     </AdminSection>
   );
 }

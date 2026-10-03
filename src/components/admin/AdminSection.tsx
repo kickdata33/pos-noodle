@@ -8,12 +8,17 @@ export function AdminSection({
   description,
   actionLabel,
   onAction,
+  extraActions,
   children,
 }: {
   title: string;
   description?: string;
   actionLabel?: string;
   onAction?: () => void;
+  /** Optional extra buttons rendered before the main action (e.g. Tables' "สร้างหลายโต๊ะ" bulk-
+   * create, alongside its regular "+ เพิ่มโต๊ะ") — every other page just omits this and gets the
+   * exact same header as before. */
+  extraActions?: ReactNode;
   children: ReactNode;
 }) {
   return (
@@ -23,11 +28,14 @@ export function AdminSection({
           <h1 className="text-xl font-semibold">{title}</h1>
           {description ? <p className="mt-1 text-sm text-muted-foreground">{description}</p> : null}
         </div>
-        {actionLabel && onAction ? (
-          <Button size="sm" onClick={onAction}>
-            {actionLabel}
-          </Button>
-        ) : null}
+        <div className="flex shrink-0 items-center gap-2">
+          {extraActions}
+          {actionLabel && onAction ? (
+            <Button size="sm" onClick={onAction}>
+              {actionLabel}
+            </Button>
+          ) : null}
+        </div>
       </div>
       {children}
     </div>
