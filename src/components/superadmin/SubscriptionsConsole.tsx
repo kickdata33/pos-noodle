@@ -22,6 +22,12 @@ import type { AppUser, PaymentSlip, Shop, Subscription } from "@/types";
 
 const MODULE_KEYS = Object.keys(MODULE_LABELS) as ShopModuleKey[];
 
+// Same pattern as `SignupRequestsConsole`'s own preview — build-time-inlined, so this is safe to
+// read directly in a client component (see `set-slug`'s route comment for why this section
+// exists at all: shops like the `scripts/seed.ts` legacy shop have no subscription doc, so they
+// never appear in `rows` below).
+const APP_DOMAIN = process.env.NEXT_PUBLIC_APP_DOMAIN || "<โดเมนของคุณ>";
+
 function randomPin(): string {
   return String(Math.floor(Math.random() * 1_000_000)).padStart(6, "0");
 }
@@ -58,9 +64,51 @@ export interface SubscriptionRow {
 /** Superadmin's per-shop billing status list + manual overrides (SaaS roadmap Phase 3),
  * including reviewing bank-transfer slips (Phase 3 bank-transfer alternative — a human looks at
  * every slip, no auto-verify, confirmed with the user). */
-export function SubscriptionsConsole({ rows }: { rows: SubscriptionRow[] }) {
+export function SubscriptionsConsole({
+  rows,
+  legacyShops = [],
+}: {
+  rows: SubscriptionRow[];
+  /** Shops with no `subscriptions` doc (see `page.tsx`) — shown in their own section below so
+   * their subdomain slug can still be set/fixed even though they have no billing row to attach
+   * the control to. */
+  legacyShops?: Shop[];
+}) {
   const router = useRouter();
   const [busyId, setBusyId] = useState<string | null>(null);
+
+  const [slugDrafts, setSlugDrafts] = useState<Record<string, string>>({});
+  const [slugSavingId, setSlugSavingId] = useState<string | null>(null);
+  const [slugErrors, setSlugErrors] = useState<Record<string, string>>({});
+  const [slugSaved, setSlugSaved] = useState<Record<string, string>>({});
+
+  function slugDraftFor(shop: Shop): string {
+    return slugDrafts[shop.id] ?? shop.slug ?? "";
+  }
+
+  async function saveSlug(shop: Shop) {
+    const slug = slugDraftFor(shop).trim().toLowerCase();
+    setSlugSavingId(shop.id);
+    setSlugErrors((prev) => ({ ...prev, [shop.id]: "" }));
+    try {
+      const res = await fetch(`/api/superadmin/subscriptions/${shop.id}/set-slug`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ slug }),
+      });
+      const data = (await res.json()) as { ok?: boolean; error?: string; slug?: string };
+      if (!res.ok || !data.ok) {
+        setSlugErrors((prev) => ({ ...prev, [shop.id]: data.error ?? "บันทึกไม่สำเร็จ" }));
+        return;
+      }
+      setSlugSaved((prev) => ({ ...prev, [shop.id]: data.slug ?? slug }));
+      router.refresh();
+    } catch {
+      setSlugErrors((prev) => ({ ...prev, [shop.id]: "บันทึกไม่สำเร็จ กรุณาลองใหม่" }));
+    } finally {
+      setSlugSavingId(null);
+    }
+  }
 
   const [resetting, setResetting] = useState<{ shopId: string; uid: string; name: string } | null>(null);
   const [resetPin, setResetPin] = useState("");
@@ -175,6 +223,59 @@ export function SubscriptionsConsole({ rows }: { rows: SubscriptionRow[] }) {
 
   return (
     <div className="grid gap-4">
+      {legacyShops.length > 0 ? (
+        <Card>
+          <CardHeader>
+            <CardTitle>ร้านที่ยังไม่มีข้อมูลบิล</CardTitle>
+          </CardHeader>
+          <CardContent className="grid gap-4 text-sm">
+            <p className="text-muted-foreground">
+              ร้านเหล่านี้ไม่ได้ผ่านขั้นตอนสมัคร/อนุมัติตามปกติ (เช่นร้านที่สร้างด้วยสคริปต์ seed ตอนตั้งระบบครั้งแรก)
+              จึงไม่มีการ์ดบิลด้านล่าง — แต่ยังต้องตั้ง &quot;ชื่อ URL&quot; (slug) ให้ร้านเข้าทางซับโดเมนของตัวเองได้
+              ถ้ายังไม่ตั้ง ร้านจะเข้าได้แค่ทางโดเมนหลัก ({APP_DOMAIN}) เท่านั้น
+            </p>
+            {legacyShops.map((shop) => (
+              <div key={shop.id} className="rounded-md border border-border p-3">
+                <p className="mb-2 font-medium">{shop.name}</p>
+                <div className="flex flex-wrap items-center gap-2">
+                  <Input
+                    value={slugDraftFor(shop)}
+                    onChange={(e) =>
+                      setSlugDrafts((prev) => ({ ...prev, [shop.id]: e.target.value }))
+                    }
+                    placeholder="เช่น champnoodles-bonkai"
+                    className="max-w-xs"
+                  />
+                  <Button
+                    size="sm"
+                    disabled={slugSavingId === shop.id || !slugDraftFor(shop).trim()}
+                    onClick={() => saveSlug(shop)}
+                  >
+                    {slugSavingId === shop.id ? "กำลังบันทึก..." : "บันทึก"}
+                  </Button>
+                </div>
+                {shop.slug ? (
+                  <p className="mt-2 text-muted-foreground">
+                    ตอนนี้เข้าได้ทาง: {shop.slug}.{APP_DOMAIN}
+                  </p>
+                ) : null}
+                {slugErrors[shop.id] ? (
+                  <p className="mt-2 text-destructive">{slugErrors[shop.id]}</p>
+                ) : null}
+                {slugSaved[shop.id] ? (
+                  <p className="mt-2 text-green-600">
+                    บันทึกแล้ว — เข้าร้านนี้ได้ทาง{" "}
+                    <strong>
+                      {slugSaved[shop.id]}.{APP_DOMAIN}
+                    </strong>
+                  </p>
+                ) : null}
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+      ) : null}
+
       {rows.map(({ subscription, shop, pendingSlips, enabledModules, admins }) => (
         <Card key={subscription.id}>
           <CardHeader>

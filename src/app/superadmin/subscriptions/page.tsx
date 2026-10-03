@@ -33,6 +33,14 @@ export default async function SubscriptionsPage() {
   ]);
   const shopById = new Map(shopsSnap.docs.map((d) => [d.id, { id: d.id, ...(d.data() as Omit<Shop, "id">) }]));
   const subscriptions = subsSnap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<Subscription, "id">) }));
+  // Shops with no subscription doc at all — never went through the `/signup` → approve flow
+  // that creates one, e.g. the legacy shop `scripts/seed.ts` seeds directly. These don't show up
+  // in `rows` below (nothing to join against), but still need a way to manage their subdomain
+  // slug, so they get their own small section in the console instead of being invisible here.
+  const subscribedShopIds = new Set(subscriptions.map((s) => s.shopId));
+  const legacyShops = shopsSnap.docs
+    .map((d) => ({ id: d.id, ...(d.data() as Omit<Shop, "id">) }))
+    .filter((shop) => !subscribedShopIds.has(shop.id));
   const slips = slipsSnap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<PaymentSlip, "id">) }));
   const settingsByShopId = new Map(
     shopSettingsSnap.docs.map((d) => [d.id, { id: d.id, ...(d.data() as Omit<ShopSettings, "id">) }])
@@ -59,7 +67,7 @@ export default async function SubscriptionsPage() {
   return (
     <main className="mx-auto max-w-2xl p-4 sm:p-6">
       <h1 className="mb-4 text-lg font-semibold">สถานะการชำระเงินของร้าน</h1>
-      <SubscriptionsConsole rows={rows} />
+      <SubscriptionsConsole rows={rows} legacyShops={legacyShops} />
     </main>
   );
 }
