@@ -6,12 +6,25 @@ import { useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { formatCurrency } from "@/lib/format";
 import { MODULE_LABELS, type EnabledModules, type ShopModuleKey } from "@/lib/shop/modules";
-import type { PaymentSlip, Shop, Subscription } from "@/types";
+import type { AppUser, PaymentSlip, Shop, Subscription } from "@/types";
 
 const MODULE_KEYS = Object.keys(MODULE_LABELS) as ShopModuleKey[];
+
+function randomPin(): string {
+  return String(Math.floor(Math.random() * 1_000_000)).padStart(6, "0");
+}
 
 const STATUS_LABEL: Record<Subscription["status"], string> = {
   trialing: "ทดลองใช้งาน",
@@ -39,6 +52,7 @@ export interface SubscriptionRow {
   shop: Shop | null;
   pendingSlips: PaymentSlip[];
   enabledModules: EnabledModules;
+  admins: AppUser[];
 }
 
 /** Superadmin's per-shop billing status list + manual overrides (SaaS roadmap Phase 3),
@@ -47,6 +61,42 @@ export interface SubscriptionRow {
 export function SubscriptionsConsole({ rows }: { rows: SubscriptionRow[] }) {
   const router = useRouter();
   const [busyId, setBusyId] = useState<string | null>(null);
+
+  const [resetting, setResetting] = useState<{ shopId: string; uid: string; name: string } | null>(null);
+  const [resetPin, setResetPin] = useState("");
+  const [resetSubmitting, setResetSubmitting] = useState(false);
+  const [resetError, setResetError] = useState<string | null>(null);
+  const [resetDone, setResetDone] = useState(false);
+
+  function openReset(shopId: string, uid: string, name: string) {
+    setResetting({ shopId, uid, name });
+    setResetPin(randomPin());
+    setResetError(null);
+    setResetDone(false);
+  }
+
+  async function submitReset() {
+    if (!resetting) return;
+    setResetSubmitting(true);
+    setResetError(null);
+    try {
+      const res = await fetch(`/api/superadmin/subscriptions/${resetting.shopId}/reset-admin-pin`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ uid: resetting.uid, pin: resetPin }),
+      });
+      const data = (await res.json()) as { ok?: boolean; error?: string };
+      if (!res.ok || !data.ok) {
+        setResetError(data.error ?? "รีเซ็ต PIN ไม่สำเร็จ");
+        return;
+      }
+      setResetDone(true);
+    } catch {
+      setResetError("รีเซ็ต PIN ไม่สำเร็จ กรุณาลองใหม่");
+    } finally {
+      setResetSubmitting(false);
+    }
+  }
 
   async function callAction(shopId: string, action: string, body?: object) {
     setBusyId(shopId);
@@ -125,7 +175,7 @@ export function SubscriptionsConsole({ rows }: { rows: SubscriptionRow[] }) {
 
   return (
     <div className="grid gap-4">
-      {rows.map(({ subscription, shop, pendingSlips, enabledModules }) => (
+      {rows.map(({ subscription, shop, pendingSlips, enabledModules, admins }) => (
         <Card key={subscription.id}>
           <CardHeader>
             <div className="flex items-center justify-between gap-2">
@@ -288,6 +338,28 @@ export function SubscriptionsConsole({ rows }: { rows: SubscriptionRow[] }) {
               </div>
             </div>
 
+            <div className="mt-3 rounded-md border border-border p-3 text-sm">
+              <p className="mb-2 font-medium">บัญชีแอดมิน</p>
+              {admins.length === 0 ? (
+                <p className="text-muted-foreground">ไม่พบบัญชีแอดมินของร้านนี้ในระบบ</p>
+              ) : (
+                <div className="grid gap-2">
+                  {admins.map((admin) => (
+                    <div key={admin.id} className="flex items-center justify-between gap-2">
+                      <span>{admin.name}</span>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => openReset(subscription.shopId, admin.id, admin.name)}
+                      >
+                        รีเซ็ต PIN
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
             <div className="mt-3">
               <Button
                 size="sm"
@@ -303,6 +375,46 @@ export function SubscriptionsConsole({ rows }: { rows: SubscriptionRow[] }) {
       ))}
 
       {rows.length === 0 ? <p className="text-center text-muted-foreground">ยังไม่มีร้านที่สมัคร</p> : null}
+
+      <Dialog open={resetting !== null} onOpenChange={(open) => !open && setResetting(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>รีเซ็ต PIN: {resetting?.name}</DialogTitle>
+          </DialogHeader>
+
+          {resetDone ? (
+            <div className="grid gap-2 text-sm">
+              <p>ตั้ง PIN ใหม่สำเร็จ — ส่ง PIN นี้ให้เจ้าของร้าน:</p>
+              <p>
+                PIN เข้าใช้งาน: <strong>{resetPin}</strong>
+              </p>
+            </div>
+          ) : (
+            <div className="grid gap-4">
+              <div className="grid gap-1.5">
+                <Label htmlFor="resetPin">PIN 6 หลักใหม่</Label>
+                <div className="flex gap-2">
+                  <Input id="resetPin" value={resetPin} onChange={(e) => setResetPin(e.target.value)} />
+                  <Button type="button" variant="outline" onClick={() => setResetPin(randomPin())}>
+                    สุ่ม
+                  </Button>
+                </div>
+              </div>
+              {resetError ? <p className="text-sm text-destructive">{resetError}</p> : null}
+            </div>
+          )}
+
+          <DialogFooter>
+            {resetDone ? (
+              <Button onClick={() => setResetting(null)}>ปิด</Button>
+            ) : (
+              <Button onClick={submitReset} disabled={resetSubmitting}>
+                {resetSubmitting ? "กำลังตั้งค่า..." : "ยืนยันรีเซ็ต"}
+              </Button>
+            )}
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
