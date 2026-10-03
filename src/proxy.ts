@@ -25,9 +25,21 @@ import { SHOP_SLUG_HEADER } from "@/lib/shop/shopLookupAdmin";
  *    request's Host when it looks like `{slug}.<app domain>`. Never redirects or blocks on this —
  *    worst case a route sees no header and falls back to the single-shop default, exactly like
  *    before Phase 2, so a bug here can't lock anyone out.
+ *
+ * These two used to be an if/else — the `/admin`/`/pos` branch returned before job 2 ever ran,
+ * so an already-logged-in request to those paths never got `x-shop-slug` set at all. No current
+ * `/admin`/`/pos` code reads that header (they key everything off the signed-in user's own
+ * `shopId` instead — see `getServerSession()`), so this had no live symptom, but it's exactly the
+ * kind of silent gap that caused the real cross-tenant leak (see `hostname.ts`'s own comment):
+ * the header is now computed once, up front, and attached to every response this proxy returns.
  */
 export function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
+
+  const slug = extractShopSlug(request.headers.get("host"), process.env.NEXT_PUBLIC_APP_DOMAIN);
+  const requestHeaders = slug ? new Headers(request.headers) : null;
+  requestHeaders?.set(SHOP_SLUG_HEADER, slug!);
+  const next = () => (requestHeaders ? NextResponse.next({ request: { headers: requestHeaders } }) : NextResponse.next());
 
   if (pathname.startsWith("/admin") || pathname.startsWith("/pos")) {
     const hasSession = request.cookies.has(SESSION_COOKIE_NAME);
@@ -36,15 +48,10 @@ export function proxy(request: NextRequest) {
       loginUrl.searchParams.set("next", pathname);
       return NextResponse.redirect(loginUrl);
     }
-    return NextResponse.next();
+    return next();
   }
 
-  const slug = extractShopSlug(request.headers.get("host"), process.env.NEXT_PUBLIC_APP_DOMAIN);
-  if (!slug) return NextResponse.next();
-
-  const requestHeaders = new Headers(request.headers);
-  requestHeaders.set(SHOP_SLUG_HEADER, slug);
-  return NextResponse.next({ request: { headers: requestHeaders } });
+  return next();
 }
 
 export const config = {
