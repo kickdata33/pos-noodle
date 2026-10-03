@@ -92,10 +92,20 @@ export default function AccountingPage() {
   // always lands on this one day) but the *list* shows the whole month at once (item: "เรียง
   // รายการของเดือนนี้ไว้ดูรวดเร็ว ไม่ต้องเลื่อนหน้า" — the old one-day-at-a-time view meant
   // clicking through dates one by one to see a week's worth of spending). `expenseMonthKey`
-  // starts on whatever month `expenseDay` falls in and moves independently via the ‹/› buttons —
-  // see `monthExpenseGroups`/`ExpenseQuickAddRow` below for how the two are used.
+  // starts on whatever month `expenseDay` falls in, and also jumps to follow it whenever
+  // `expenseDay` itself changes (`handleExpenseDayChange` below) — an earlier version left the two
+  // fully independent after mount, so picking a backdated day in "เพิ่มรายจ่ายวันที่" silently kept
+  // the list on whatever month it already happened to be showing, making a just-added backdated
+  // entry look like it never saved (reported in production: "เลือกรายจ่ายย้อนหลังแล้วไม่ยอมเปลี่ยน
+  // ตาม"). `expenseMonthKey` still moves independently via the ‹/› buttons afterward, so reviewing
+  // a different month doesn't get interrupted unless the add-date is actually changed — see
+  // `monthExpenseGroups`/`ExpenseQuickAddRow` below for how the two are used.
   const [expenseDay, setExpenseDay] = useState(() => todayKey());
   const [expenseMonthKey, setExpenseMonthKey] = useState(() => todayKey().slice(0, 7));
+  const handleExpenseDayChange = (next: string) => {
+    setExpenseDay(next);
+    setExpenseMonthKey(next.slice(0, 7));
+  };
 
   // "กำไร/ขาดทุนสุทธิรายวัน" ด้านล่างเลือกได้ว่าจะนับเป็นวันปฏิทินจริง (ค่าเริ่มต้น) หรือสลับไปนับ
   // เป็นกะแบบเดียวกับตาราง "ยอดขายเทียบกับเงินโอนเข้าบัญชี" ด้านบน (item: "มีฟังก์ชันเปิดปิด ยอดขาย
@@ -313,8 +323,9 @@ export default function AccountingPage() {
 
   // รายจ่ายทั้งเดือน (item: "เรียงรายการของเดือนนี้ไว้ดูรวดเร็ว ไม่ต้องเลื่อนหน้า") — grouped by day,
   // newest day first, so a week's worth of spending is visible in one scroll instead of clicking
-  // through the date picker one day at a time. `expenseMonthKey` is independent of `expenseDay`
-  // (which still only picks where a *new* quick-add entry lands) but starts out on the same month.
+  // through the date picker one day at a time. `expenseMonthKey` jumps to follow `expenseDay`
+  // whenever the add-expense date changes (see `handleExpenseDayChange` above), so a newly added
+  // backdated entry is immediately visible in this list instead of looking like it didn't save.
   const monthExpenseGroups = useMemo(() => {
     const groups = new Map<string, Expense[]>();
     for (const e of expenses) {
@@ -619,11 +630,12 @@ export default function AccountingPage() {
           <CardTitle>รายจ่าย</CardTitle>
         </CardHeader>
         <CardContent>
-          {/* เพิ่มรายจ่ายใหม่ — เลือกวันที่ตรงนี้ครั้งเดียว ก่อนกรอกแถวด้านล่าง (ไม่ผูกกับเดือนที่ดู
-              รายการอยู่ด้านล่าง — เพิ่มของวันไหนก็ได้ ไม่ว่าจะกำลังเลื่อนดูเดือนไหนอยู่). */}
+          {/* เพิ่มรายจ่ายใหม่ — เลือกวันที่ตรงนี้ครั้งเดียว ก่อนกรอกแถวด้านล่าง เปลี่ยนวันที่ตรงนี้จะ
+              พารายการเดือนนี้ด้านล่างเลื่อนตามไปด้วย (ดูคอมเมนต์ `handleExpenseDayChange`) — เพิ่ม
+              รายจ่ายย้อนหลังแล้วเห็นผลทันทีว่าไปอยู่ตรงไหน. */}
           <div className="mb-3 flex items-center gap-2">
             <Label className="text-sm text-muted-foreground">เพิ่มรายจ่ายวันที่</Label>
-            <DateField value={expenseDay} onChange={setExpenseDay} className="h-9 w-36" />
+            <DateField value={expenseDay} onChange={handleExpenseDayChange} className="h-9 w-36" />
             <span className="text-sm font-medium">{formatKey(expenseDay)}</span>
           </div>
           <Table className="table-fixed min-w-[560px]">
@@ -648,7 +660,8 @@ export default function AccountingPage() {
 
           {/* รายการเดือนนี้ (item: "เรียงรายการของเดือนนี้ไว้ดูรวดเร็ว ไม่ต้องเลื่อนหน้า") — ทุกวันใน
               เดือนที่เลือกแสดงพร้อมกันในตารางเดียว กลุ่มตามวัน (ใหม่สุดอยู่บนสุด) แทนที่จะต้องกดเลือก
-              วันที่ทีละวันเหมือนเดิม. แยกเป็นเดือนของตัวเอง ไม่ผูกกับ `expenseDay` ด้านบน. */}
+              วันที่ทีละวันเหมือนเดิม. เลื่อนเดือนเองด้วย ‹/› ได้อิสระ แต่จะกระโดดตาม `expenseDay`
+              ทันทีที่เปลี่ยนวันที่เพิ่มรายจ่ายด้านบน. */}
           <div className="mb-3 mt-6 flex flex-wrap items-center justify-between gap-2">
             <Label className="text-sm text-muted-foreground">รายการเดือนนี้</Label>
             <div className="flex items-center gap-2">
