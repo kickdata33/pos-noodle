@@ -109,6 +109,17 @@ export function resolvePreset(preset: ReportPreset, nowMs: number = Date.now()):
   }
 }
 
+/** `monthKey` ("YYYY-MM") shifted by `delta` whole months (negative goes back) — plain string/
+ * number math, no `Date` object involved, so it can never drift by timezone. Used by every
+ * month-at-a-time view's ‹/› navigator (`/admin/cash-safe`, the accounting page's รายจ่าย list). */
+export function shiftMonthKey(monthKey: string, delta: number): string {
+  const [year, month] = monthKey.split("-").map(Number);
+  const zeroBased = (month - 1 + delta) % 12;
+  const wrapped = zeroBased < 0 ? zeroBased + 12 : zeroBased;
+  const yearDelta = Math.floor((month - 1 + delta) / 12);
+  return `${String(year + yearDelta).padStart(4, "0")}-${String(wrapped + 1).padStart(2, "0")}`;
+}
+
 /** A caller-picked "YYYY-MM-DD" .. "YYYY-MM-DD" range, e.g. from two `<input type="date">`s. */
 export function customRange(startKey: string, endKey: string): DateRange {
   // Swap silently rather than returning an empty/inverted range if the user picks "to" before

@@ -12,6 +12,7 @@ import {
   customRange,
   dateKeysBetween,
   resolvePreset,
+  shiftMonthKey,
 } from "../src/lib/pos/dateRange";
 import {
   dailySales,
@@ -198,4 +199,14 @@ test("salesByChannel / salesByPaymentMethod: grouped and sorted by revenue desc"
   const byPayment = salesByPaymentMethod(orders);
   assert.equal(byPayment[0].label, "เงินสด");
   assert.equal(byPayment[0].revenue, 450);
+});
+
+test("shiftMonthKey: moves forward and backward within a year", () => {
+  assert.equal(shiftMonthKey("2026-09", 1), "2026-10");
+  assert.equal(shiftMonthKey("2026-09", -1), "2026-08");
+});
+
+test("shiftMonthKey: rolls over a year boundary in both directions", () => {
+  assert.equal(shiftMonthKey("2026-12", 1), "2027-01");
+  assert.equal(shiftMonthKey("2026-01", -1), "2025-12");
 });

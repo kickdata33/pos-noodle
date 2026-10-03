@@ -9,7 +9,6 @@ import {
   cashMoveOutRows,
   latestCashSafeCount,
   rowsForMonth,
-  shiftMonthKey,
   totalMovedOut,
 } from "../src/lib/pos/cashMoveOut";
 import type { CashSafeCount, DailyFloat } from "../src/types";
@@ -81,16 +80,6 @@ test("rowsForMonth: filters to one calendar month without touching the all-time 
 test("availableMonths: distinct YYYY-MM prefixes, most recent first", () => {
   const rows = cashMoveOutRows([float("2026-07-01", 100), float("2026-09-01", 500), float("2026-09-15", 200), float("2026-08-01", 50)]);
   assert.deepEqual(availableMonths(rows), ["2026-09", "2026-08", "2026-07"]);
-});
-
-test("shiftMonthKey: moves forward and backward within a year", () => {
-  assert.equal(shiftMonthKey("2026-09", 1), "2026-10");
-  assert.equal(shiftMonthKey("2026-09", -1), "2026-08");
-});
-
-test("shiftMonthKey: rolls over a year boundary in both directions", () => {
-  assert.equal(shiftMonthKey("2026-12", 1), "2027-01");
-  assert.equal(shiftMonthKey("2026-01", -1), "2025-12");
 });
 
 test("latestCashSafeCount: null when nobody has ever recorded a count", () => {

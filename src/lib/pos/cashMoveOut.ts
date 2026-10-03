@@ -64,17 +64,6 @@ export function availableMonths(rows: readonly CashMoveOutRow[]): string[] {
   return [...months].sort().reverse();
 }
 
-/** `monthKey` ("YYYY-MM") shifted by `delta` whole months (negative goes back) — plain string/
- * number math, no `Date` object involved, so it can never drift by timezone. Used by the month
- * navigator's ‹/› buttons. */
-export function shiftMonthKey(monthKey: string, delta: number): string {
-  const [year, month] = monthKey.split("-").map(Number);
-  const zeroBased = (month - 1 + delta) % 12;
-  const wrapped = zeroBased < 0 ? zeroBased + 12 : zeroBased;
-  const yearDelta = Math.floor((month - 1 + delta) / 12);
-  return `${String(year + yearDelta).padStart(4, "0")}-${String(wrapped + 1).padStart(2, "0")}`;
-}
-
 /** The single most recent `CashSafeCount` (by `dateKey`, ties broken by `createdAt`) — this is
  * "ตอนนี้มีเท่าไหร่" on the summary card. `null` if nobody has ever recorded a count. */
 export function latestCashSafeCount(counts: readonly CashSafeCount[]): CashSafeCount | null {

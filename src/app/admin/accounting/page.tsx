@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 
 import { AdminSection } from "@/components/admin/AdminSection";
 import { DateField } from "@/components/admin/DateField";
@@ -22,13 +22,16 @@ import {
   bangkokDayBounds,
   customRange,
   resolvePreset,
+  shiftMonthKey,
   type DateRange,
   type ReportPreset,
 } from "@/lib/pos/dateRange";
+import { dailyProfitLossRows, totalProfitLoss } from "@/lib/pos/dailyProfitLoss";
 import { reconciliationRows } from "@/lib/pos/reconciliation";
 import { computeMissingRecurringExpenses, recurringExpenseDayKey } from "@/lib/pos/recurringExpenses";
 import { bankTransferRepository } from "@/repositories/bankTransferRepository";
 import { dailyFloatRepository } from "@/repositories/dailyFloatRepository";
+import { deliveryPayoutRepository } from "@/repositories/deliveryPayoutRepository";
 import { expenseRepository } from "@/repositories/expenseRepository";
 import { orderRepository } from "@/repositories/orderRepository";
 import { paymentMethodRepository } from "@/repositories/paymentMethodRepository";
@@ -39,6 +42,7 @@ import {
   EXPENSE_CATEGORIES,
   type BankTransfer,
   type DailyFloat,
+  type DeliveryPayout,
   type Expense,
   type ExpenseCategory,
   type Order,
@@ -83,10 +87,14 @@ export default function AccountingPage() {
   // controls what the shift-hours label reads on screen.
   const [toHour, setToHour] = useState(6);
 
-  // The รายจ่าย table has its own single-day filter, independent of the range picker above —
-  // that picker can span a week/month for the reconciliation table, but for รายจ่าย the user
-  // wants exactly one day's entries on screen at a time, nothing else mixed in.
+  // The รายจ่าย table has its own single-day filter (for the quick-add row below — a new entry
+  // always lands on this one day) but the *list* shows the whole month at once (item: "เรียง
+  // รายการของเดือนนี้ไว้ดูรวดเร็ว ไม่ต้องเลื่อนหน้า" — the old one-day-at-a-time view meant
+  // clicking through dates one by one to see a week's worth of spending). `expenseMonthKey`
+  // starts on whatever month `expenseDay` falls in and moves independently via the ‹/› buttons —
+  // see `monthExpenseGroups`/`ExpenseQuickAddRow` below for how the two are used.
   const [expenseDay, setExpenseDay] = useState(() => todayKey());
+  const [expenseMonthKey, setExpenseMonthKey] = useState(() => todayKey().slice(0, 7));
 
   // Clicking a row in the reconciliation table opens a detail dialog for that business day —
   // the transfer amounts already logged for it (item: "ไม่ต้องเลื่อนลงไปดู" — no scrolling down to
@@ -100,6 +108,7 @@ export default function AccountingPage() {
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [transfers, setTransfers] = useState<BankTransfer[]>([]);
   const [floats, setFloats] = useState<DailyFloat[]>([]);
+  const [deliveryPayouts, setDeliveryPayouts] = useState<DeliveryPayout[]>([]);
   const [recurringExpenses, setRecurringExpenses] = useState<RecurringExpense[]>([]);
   const [recurringSkips, setRecurringSkips] = useState<RecurringExpenseSkip[]>([]);
   const [currency, setCurrency] = useState("THB");
@@ -133,6 +142,13 @@ export default function AccountingPage() {
   useEffect(() => {
     if (!shopId) return;
     return dailyFloatRepository.subscribeForShop(shopId, setFloats);
+  }, [shopId]);
+
+  // Feeds the "กำไร/ขาดทุนสุทธิรายวัน" card below (item: "เอายอดขาย delivery มาขึ้นโชว์ในหน้าสรุป
+  // และรวมเข้าไป") — same live subscription pattern already used for `expenses`.
+  useEffect(() => {
+    if (!shopId) return;
+    return deliveryPayoutRepository.subscribeForShop(shopId, setDeliveryPayouts);
   }, [shopId]);
 
   useEffect(() => {
@@ -266,17 +282,39 @@ export default function AccountingPage() {
     [orders, paymentMethods, transfers, expenses, range.startKey, range.endKey, fromHour, cashTransferAdjustments]
   );
 
-  // เลือกวันไหน โชว์แค่วันนั้น — filtered by `expenseDay` alone, not the range picker above, so
-  // switching the day never mixes in another day's rows.
-  const visibleExpenses = useMemo(
-    () =>
-      expenses
-        .filter((e) => e.dateKey === expenseDay)
-        // Newest first, so a just-added entry appears at the top instead of the bottom.
-        .sort((a, b) => b.createdAt - a.createdAt),
-    [expenses, expenseDay]
+  // "กำไร/ขาดทุนสุทธิรายวัน" — plain calendar day (never business-day/shift), combining POS sales,
+  // รายได้ Delivery and ค่าใช้จ่ายรวม so a day's actual money picture doesn't require mentally
+  // adding up three separate pages — see `lib/pos/dailyProfitLoss.ts`'s file comment for why this
+  // is deliberately a second, separate view from the shift-based `rows` above rather than a
+  // replacement for it.
+  const profitLossRows = useMemo(
+    () => dailyProfitLossRows(orders, deliveryPayouts, expenses, range.startKey, range.endKey),
+    [orders, deliveryPayouts, expenses, range.startKey, range.endKey]
   );
-  const expenseDayTotal = useMemo(() => visibleExpenses.reduce((sum, e) => sum + e.amount, 0), [visibleExpenses]);
+  const profitLossTotal = useMemo(() => totalProfitLoss(profitLossRows), [profitLossRows]);
+
+  // รายจ่ายทั้งเดือน (item: "เรียงรายการของเดือนนี้ไว้ดูรวดเร็ว ไม่ต้องเลื่อนหน้า") — grouped by day,
+  // newest day first, so a week's worth of spending is visible in one scroll instead of clicking
+  // through the date picker one day at a time. `expenseMonthKey` is independent of `expenseDay`
+  // (which still only picks where a *new* quick-add entry lands) but starts out on the same month.
+  const monthExpenseGroups = useMemo(() => {
+    const groups = new Map<string, Expense[]>();
+    for (const e of expenses) {
+      if (!e.dateKey.startsWith(expenseMonthKey)) continue;
+      const list = groups.get(e.dateKey) ?? [];
+      list.push(e);
+      groups.set(e.dateKey, list);
+    }
+    return [...groups.entries()]
+      .sort((a, b) => b[0].localeCompare(a[0]))
+      .map(([dateKey, items]) => ({
+        dateKey,
+        // Newest first within the day, same as before this redesign.
+        items: [...items].sort((a, b) => b.createdAt - a.createdAt),
+        total: items.reduce((sum, e) => sum + e.amount, 0),
+      }));
+  }, [expenses, expenseMonthKey]);
+  const monthExpenseTotal = useMemo(() => monthExpenseGroups.reduce((sum, g) => sum + g.total, 0), [monthExpenseGroups]);
   const visibleTransfers = useMemo(
     () =>
       transfers
@@ -486,15 +524,61 @@ export default function AccountingPage() {
 
       <Card className="mt-4">
         <CardHeader>
+          <CardTitle>กำไร/ขาดทุนสุทธิรายวัน (รวม Delivery)</CardTitle>
+        </CardHeader>
+        <CardContent>
+          {/* วันปฏิทินธรรมดา (ไม่ใช่ business day แบบตารางด้านบน) — เพราะ Expense/DeliveryPayout
+              เก็บเป็นวันปฏิทินธรรมดาอยู่แล้ว (ยืนยันกับเจ้าของร้านแล้ว) เห็นยอดขาย POS + รายได้
+              Delivery รวมกัน หักค่าใช้จ่าย ว่าแต่ละวันได้หรือขาดทุนเท่าไหร่ โดยไม่ต้องไปเปิดหลายหน้า
+              มาบวกลบเอง. ใช้ช่วงวันที่เดียวกับตารางด้านบน (ปุ่มพรีเซ็ตบนสุดของหน้า). */}
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>วันที่</TableHead>
+                <TableHead className="text-right">ยอดขาย POS</TableHead>
+                <TableHead className="text-right">รายได้ Delivery</TableHead>
+                <TableHead className="text-right">ค่าใช้จ่าย</TableHead>
+                <TableHead className="text-right">กำไร/ขาดทุนสุทธิ</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {profitLossRows.map((r) => (
+                <TableRow key={r.dateKey}>
+                  <TableCell className="font-medium">{formatKey(r.dateKey)}</TableCell>
+                  <TableCell className="text-right">{formatCurrency(r.posSales, currency)}</TableCell>
+                  <TableCell className="text-right">{formatCurrency(r.deliveryRevenue, currency)}</TableCell>
+                  <TableCell className="text-right">{formatCurrency(r.expenses, currency)}</TableCell>
+                  <TableCell className={cn("whitespace-nowrap text-right font-medium", netClassName(r.net))}>
+                    {formatCurrency(r.net, currency)}
+                  </TableCell>
+                </TableRow>
+              ))}
+              {profitLossRows.length === 0 ? (
+                <TableRow>
+                  <TableCell colSpan={5} className="text-center text-muted-foreground">
+                    ไม่มีข้อมูลในช่วงนี้
+                  </TableCell>
+                </TableRow>
+              ) : null}
+            </TableBody>
+          </Table>
+          <p className="mt-3 text-xs text-muted-foreground">
+            รวมช่วงนี้ — ยอดขาย POS {formatCurrency(profitLossTotal.posSales, currency)}, รายได้ Delivery{" "}
+            {formatCurrency(profitLossTotal.deliveryRevenue, currency)}, ค่าใช้จ่าย {formatCurrency(profitLossTotal.expenses, currency)}, สุทธิ{" "}
+            <span className={cn("font-medium", netClassName(profitLossTotal.net))}>{formatCurrency(profitLossTotal.net, currency)}</span>
+          </p>
+        </CardContent>
+      </Card>
+
+      <Card className="mt-4">
+        <CardHeader>
           <CardTitle>รายจ่าย</CardTitle>
         </CardHeader>
         <CardContent>
-          {/* Its own single-day filter, separate from the range picker above — เลือกวันไหน โชว์
-              แค่วันนั้น, never mixed with any other day. Every row in the table below (including
-              new ones from the quick-add row) belongs to this same day — there's no per-row date
-              field/column, since that would just repeat this picker. */}
+          {/* เพิ่มรายจ่ายใหม่ — เลือกวันที่ตรงนี้ครั้งเดียว ก่อนกรอกแถวด้านล่าง (ไม่ผูกกับเดือนที่ดู
+              รายการอยู่ด้านล่าง — เพิ่มของวันไหนก็ได้ ไม่ว่าจะกำลังเลื่อนดูเดือนไหนอยู่). */}
           <div className="mb-3 flex items-center gap-2">
-            <Label className="text-sm text-muted-foreground">วันที่</Label>
+            <Label className="text-sm text-muted-foreground">เพิ่มรายจ่ายวันที่</Label>
             <DateField value={expenseDay} onChange={setExpenseDay} className="h-9 w-36" />
             <span className="text-sm font-medium">{formatKey(expenseDay)}</span>
           </div>
@@ -503,14 +587,42 @@ export default function AccountingPage() {
                 below can fill its column with `w-full` instead of a fixed px width. `min-w-[560px]`
                 is what actually matters on a phone: without it, `table-fixed` + `w-full` shrinks
                 the table down to the screen's own width, squeezing every Select/Input/Badge below
-                the space they need and making them visually overlap. With a minimum width, the
-                table instead stays usable-sized and the surrounding `Table` component's own
-                `overflow-x-auto` wrapper (see `components/ui/table.tsx`) scrolls it horizontally —
-                the same "ซ้อนกันทั้งช่องกรอกข้อมูล" bug report this fixes. No วันที่ column here —
-                the "วันที่" field above the table already picks the one day every row in it
-                belongs to, so repeating it per-row (and in the quick-add row) was a pure
-                duplicate of that same picker ("วันที่มีเลือกด้านบนแล้วไม่จำเป็นต้องมีซ้ำ") and, being the
-                narrowest column, the first thing to visibly overlap on a phone. */}
+                the space they need and making them visually overlap. */}
+            <colgroup>
+              <col className="w-[18%]" />
+              <col className="w-[32%]" />
+              <col className="w-[16%]" />
+              <col className="w-[18%]" />
+              <col className="w-[16%]" />
+            </colgroup>
+            <TableBody>
+              {shopId && appUser ? (
+                <ExpenseQuickAddRow shopId={shopId} createdBy={appUser.id} createdByName={appUser.name} dateKey={expenseDay} />
+              ) : null}
+            </TableBody>
+          </Table>
+
+          {/* รายการเดือนนี้ (item: "เรียงรายการของเดือนนี้ไว้ดูรวดเร็ว ไม่ต้องเลื่อนหน้า") — ทุกวันใน
+              เดือนที่เลือกแสดงพร้อมกันในตารางเดียว กลุ่มตามวัน (ใหม่สุดอยู่บนสุด) แทนที่จะต้องกดเลือก
+              วันที่ทีละวันเหมือนเดิม. แยกเป็นเดือนของตัวเอง ไม่ผูกกับ `expenseDay` ด้านบน. */}
+          <div className="mb-3 mt-6 flex flex-wrap items-center justify-between gap-2">
+            <Label className="text-sm text-muted-foreground">รายการเดือนนี้</Label>
+            <div className="flex items-center gap-2">
+              <Button size="sm" variant="outline" onClick={() => setExpenseMonthKey((k) => shiftMonthKey(k, -1))}>
+                ‹ เดือนก่อน
+              </Button>
+              <span className="min-w-[9rem] text-center text-sm font-medium">{formatMonthKey(expenseMonthKey)}</span>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => setExpenseMonthKey((k) => shiftMonthKey(k, 1))}
+                disabled={expenseMonthKey >= todayKey().slice(0, 7)}
+              >
+                เดือนถัดไป ›
+              </Button>
+            </div>
+          </div>
+          <Table className="table-fixed min-w-[560px]">
             <colgroup>
               <col className="w-[18%]" />
               <col className="w-[32%]" />
@@ -528,26 +640,31 @@ export default function AccountingPage() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {shopId && appUser ? (
-                <ExpenseQuickAddRow shopId={shopId} createdBy={appUser.id} createdByName={appUser.name} dateKey={expenseDay} />
-              ) : null}
-              {visibleExpenses.map((e) => (
-                <ExpenseRow key={e.id} expense={e} currency={currency} />
+              {monthExpenseGroups.map((group) => (
+                <Fragment key={group.dateKey}>
+                  <TableRow className="bg-muted/40 hover:bg-muted/40">
+                    <TableCell colSpan={4} className="py-1.5 text-sm font-medium">
+                      {formatKey(group.dateKey)}
+                    </TableCell>
+                    <TableCell className="py-1.5 text-right text-sm font-medium">{formatCurrency(group.total, currency)}</TableCell>
+                  </TableRow>
+                  {group.items.map((e) => (
+                    <ExpenseRow key={e.id} expense={e} currency={currency} />
+                  ))}
+                </Fragment>
               ))}
-              {visibleExpenses.length === 0 ? (
+              {monthExpenseGroups.length === 0 ? (
                 <TableRow>
                   <TableCell colSpan={5} className="text-center text-muted-foreground">
-                    ยังไม่มีรายจ่ายวันนี้
+                    ยังไม่มีรายจ่ายเดือนนี้
                   </TableCell>
                 </TableRow>
               ) : null}
             </TableBody>
           </Table>
           <p className="mt-3 text-right text-sm font-medium">
-            ยอดรวมวันที่ {formatKey(expenseDay)}{" "}
-            <span className={expenseDayTotal < 0 ? "text-destructive" : undefined}>
-              {formatCurrency(expenseDayTotal, currency)}
-            </span>
+            ยอดรวมเดือน {formatMonthKey(expenseMonthKey)}{" "}
+            <span className={monthExpenseTotal < 0 ? "text-destructive" : undefined}>{formatCurrency(monthExpenseTotal, currency)}</span>
           </p>
         </CardContent>
       </Card>
@@ -811,6 +928,11 @@ function formatKey(dateKey: string): string {
 
 function todayKey(): string {
   return bangkokDateKey(Date.now());
+}
+
+function formatMonthKey(monthKey: string): string {
+  const [y, m] = monthKey.split("-").map(Number);
+  return new Date(Date.UTC(y, m - 1, 1)).toLocaleDateString("th-TH", { month: "long", year: "numeric", timeZone: "UTC" });
 }
 
 /**

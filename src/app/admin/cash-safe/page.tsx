@@ -24,9 +24,9 @@ import {
   cashMoveOutRows,
   latestCashSafeCount,
   rowsForMonth,
-  shiftMonthKey,
   totalMovedOut,
 } from "@/lib/pos/cashMoveOut";
+import { shiftMonthKey } from "@/lib/pos/dateRange";
 import { cashSafeCountRepository } from "@/repositories/cashSafeCountRepository";
 import { dailyFloatRepository } from "@/repositories/dailyFloatRepository";
 import { shopRepository } from "@/repositories/shopRepository";
