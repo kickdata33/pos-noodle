@@ -4,6 +4,7 @@ import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 
 import { AdminSection } from "@/components/admin/AdminSection";
 import { DateField } from "@/components/admin/DateField";
+import { ModuleGate } from "@/components/admin/ModuleGate";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -435,6 +436,7 @@ export default function AccountingPage() {
   }
 
   return (
+    <ModuleGate module="accounting">
     <AdminSection
       title="บัญชีรายรับ-รายจ่าย"
       description="กระทบยอดขาย QR กับเงินที่โอนเข้าบัญชีจริง แยกตามวันทำการ พร้อมบันทึกรายจ่าย"
@@ -953,6 +955,7 @@ export default function AccountingPage() {
         </DialogContent>
       </Dialog>
     </AdminSection>
+    </ModuleGate>
   );
 }
 

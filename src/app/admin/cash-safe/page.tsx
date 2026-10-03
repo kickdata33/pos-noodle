@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 
 import { AdminSection } from "@/components/admin/AdminSection";
 import { DateField } from "@/components/admin/DateField";
+import { ModuleGate } from "@/components/admin/ModuleGate";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
@@ -112,6 +113,7 @@ export default function CashSafePage() {
   );
 
   return (
+    <ModuleGate module="cashSafe">
     <AdminSection
       title="ตัดเงินสดออก"
       description="เงินสดที่โยกออกเก็บระหว่างกะ สะสมทั้งหมด เทียบกับยอดที่นับได้จริง"
@@ -238,6 +240,7 @@ export default function CashSafePage() {
         createdByName={appUser?.name ?? ""}
       />
     </AdminSection>
+    </ModuleGate>
   );
 }
 

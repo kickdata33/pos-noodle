@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 
 import { AdminSection } from "@/components/admin/AdminSection";
 import { DateField } from "@/components/admin/DateField";
+import { ModuleGate } from "@/components/admin/ModuleGate";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -151,6 +152,7 @@ export default function DeliveryPage() {
   const topUpRunningTotal = useMemo(() => topUps.reduce((sum, t) => sum + t.amount, 0), [topUps]);
 
   return (
+    <ModuleGate module="delivery">
     <AdminSection title="ยอดขาย Delivery" description="กระทบยอดขายแต่ละแพลตฟอร์มกับเงินที่โอนเข้าบัญชีจริง พร้อมบันทึกเงินทุนทอน COD">
       <div className="mb-4 flex flex-wrap items-end gap-2">
         {PRESETS.map((p) => (
@@ -317,6 +319,7 @@ export default function DeliveryPage() {
         </CardContent>
       </Card>
     </AdminSection>
+    </ModuleGate>
   );
 }
 

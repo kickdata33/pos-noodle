@@ -84,6 +84,24 @@ export interface ShopSettings extends WithId {
    * the same `[1, 16]` default by every reader, so nothing needs a one-time migration.
    */
   closedDaysOfMonth?: number[];
+  /**
+   * Which optional Admin modules this shop has turned on, beyond the universal POS core that
+   * every shop always gets (reports, orders, categories, products, modifiers, tables, channels,
+   * payment methods, staff, settings). `accounting`/`cashSafe`/`delivery`/`payroll` were all
+   * built for this app's original shop's own exact workflow (its K SHOP wallet, its Grab/LINE
+   * MAN/ShopeeFood reconciliation, its payday dates) — a general shop signing up through
+   * `/signup` doesn't bank with K SHOP or do delivery, so those menus would just be noise.
+   * `undefined` means "this shop existed before this field did" and is treated as every module
+   * enabled (`lib/shop/modules.ts`'s `resolveEnabledModules`) so nothing had to be migrated when
+   * this shipped. Every shop provisioned from now on gets this explicitly set to all-`false`;
+   * a superadmin can turn any module back on per shop from `/superadmin/subscriptions`.
+   */
+  enabledModules?: {
+    accounting: boolean;
+    cashSafe: boolean;
+    delivery: boolean;
+    payroll: boolean;
+  };
   updatedAt: EpochMillis;
 }
 

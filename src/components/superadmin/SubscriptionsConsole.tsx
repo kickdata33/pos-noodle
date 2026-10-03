@@ -6,8 +6,12 @@ import { useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Switch } from "@/components/ui/switch";
 import { formatCurrency } from "@/lib/format";
+import { MODULE_LABELS, type EnabledModules, type ShopModuleKey } from "@/lib/shop/modules";
 import type { PaymentSlip, Shop, Subscription } from "@/types";
+
+const MODULE_KEYS = Object.keys(MODULE_LABELS) as ShopModuleKey[];
 
 const STATUS_LABEL: Record<Subscription["status"], string> = {
   trialing: "ทดลองใช้งาน",
@@ -34,6 +38,7 @@ export interface SubscriptionRow {
   subscription: Subscription;
   shop: Shop | null;
   pendingSlips: PaymentSlip[];
+  enabledModules: EnabledModules;
 }
 
 /** Superadmin's per-shop billing status list + manual overrides (SaaS roadmap Phase 3),
@@ -98,6 +103,10 @@ export function SubscriptionsConsole({ rows }: { rows: SubscriptionRow[] }) {
     }
   }
 
+  async function toggleModule(shopId: string, moduleKey: ShopModuleKey, value: boolean) {
+    await callAction(shopId, "modules", { [moduleKey]: value });
+  }
+
   async function reviewSlip(shopId: string, slipId: string, decision: "approve" | "reject") {
     const reason =
       decision === "reject" ? window.prompt("เหตุผลที่ปฏิเสธ (ถ้ามี)") ?? undefined : undefined;
@@ -116,7 +125,7 @@ export function SubscriptionsConsole({ rows }: { rows: SubscriptionRow[] }) {
 
   return (
     <div className="grid gap-4">
-      {rows.map(({ subscription, shop, pendingSlips }) => (
+      {rows.map(({ subscription, shop, pendingSlips, enabledModules }) => (
         <Card key={subscription.id}>
           <CardHeader>
             <div className="flex items-center justify-between gap-2">
@@ -259,6 +268,24 @@ export function SubscriptionsConsole({ rows }: { rows: SubscriptionRow[] }) {
               >
                 บันทึกเวลาที่ตั้ง
               </Button>
+            </div>
+
+            <div className="mt-3 rounded-md border border-border p-3 text-sm">
+              <p className="mb-2 font-medium">
+                โมดูลเฉพาะทาง (ปิดเป็นค่าเริ่มต้นสำหรับร้านทั่วไป — เปิดเฉพาะร้านที่ต้องการ)
+              </p>
+              <div className="grid gap-2 sm:grid-cols-2">
+                {MODULE_KEYS.map((key) => (
+                  <label key={key} className="flex items-center justify-between gap-2">
+                    <span>{MODULE_LABELS[key]}</span>
+                    <Switch
+                      checked={enabledModules[key]}
+                      disabled={busyId === subscription.shopId}
+                      onCheckedChange={(checked) => toggleModule(subscription.shopId, key, checked)}
+                    />
+                  </label>
+                ))}
+              </div>
             </div>
 
             <div className="mt-3">

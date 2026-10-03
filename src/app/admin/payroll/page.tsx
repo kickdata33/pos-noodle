@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 
 import { AdminSection } from "@/components/admin/AdminSection";
+import { ModuleGate } from "@/components/admin/ModuleGate";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -135,6 +136,7 @@ export default function PayrollPage() {
   const history = useMemo(() => [...settlements].sort((a, b) => b.paidAt - a.paidAt), [settlements]);
 
   return (
+    <ModuleGate module="payroll">
     <AdminSection
       title="เงินเดือนพนักงาน"
       description="ค่าจ้างรายวัน เบิกล่วงหน้า และตัดจ่ายทุกวันที่ 1 และ 16 — แยกจากรายจ่ายทั่วไป"
@@ -225,6 +227,7 @@ export default function PayrollPage() {
         candidates={enrollableStaff}
       />
     </AdminSection>
+    </ModuleGate>
   );
 }
 

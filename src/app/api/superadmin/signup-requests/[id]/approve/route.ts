@@ -5,6 +5,7 @@ import { getBillingConfig } from "@/lib/billing/billingConfig";
 import { computeTrialEnd } from "@/lib/billing/subscriptionState";
 import { getAdminAuth, getAdminDb } from "@/lib/firebase/admin";
 import { COLLECTIONS } from "@/lib/firebase/collections";
+import { NO_MODULES_ENABLED } from "@/lib/shop/modules";
 import { getShopBySlug } from "@/lib/shop/shopLookupAdmin";
 import { isValidSlug } from "@/lib/shop/slug";
 import { SUPERADMIN_COOKIE_NAME, verifySessionToken } from "@/lib/superadmin/session";
@@ -83,6 +84,12 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     promptPayId: null,
     paymentQrImageUrl: null,
     pickupIdentificationMode: "queue",
+    // SaaS roadmap: "ทำให้เป็นกลางสำหรับร้านทั่วไป" — accounting/cash-safe/delivery/payroll were
+    // all built for this app's original shop's own workflow (K SHOP wallet, Grab/LINE MAN/
+    // ShopeeFood reconciliation, its payday dates). A shop signing up here generally isn't that
+    // shop, so it starts with none of those — a superadmin can turn any on later from
+    // `/superadmin/subscriptions` (see `lib/shop/modules.ts`).
+    enabledModules: NO_MODULES_ENABLED,
     updatedAt: now,
   });
 
