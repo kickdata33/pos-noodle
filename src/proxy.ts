@@ -48,5 +48,9 @@ export function proxy(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/((?!_next/static|_next/image|favicon.ico|apple-icon.png|manifest.json|sw.js).*)"],
+  // `manifest.webmanifest` (née the static `manifest.json`) is deliberately NOT excluded here —
+  // it's now a dynamic route (`app/manifest.ts`) that reads the `x-shop-slug` header this proxy
+  // sets, to show each shop's own name on its installed PWA icon (SaaS roadmap: "ทำให้เป็นกลาง
+  // สำหรับร้านทั่วไป"). Everything else below is a genuinely static asset that never needs it.
+  matcher: ["/((?!_next/static|_next/image|favicon.ico|apple-icon.png|sw.js).*)"],
 };

@@ -4,38 +4,46 @@ import "./globals.css";
 
 import { AuthProvider } from "@/lib/auth/AuthProvider";
 import { RegisterServiceWorker } from "@/components/RegisterServiceWorker";
+import { resolveShopNameForMetadata } from "@/lib/shop/shopMetadata";
 
 // Thai-first font that also covers Latin — used app-wide (item 26: "Font ไทยอ่านง่าย").
-// The shop name below is only a build-time fallback string, never the source of truth —
-// the real value always comes from the `shopSettings` document (item 16, item 34). Same
-// reasoning applies to `app/manifest.json`'s "name"/"short_name" — a PWA manifest has to be a
-// static file Next.js can link at build time, so it can't read `shopSettings` either; it's a
-// fallback in the same sense, not a second source of truth.
 const notoSansThai = Noto_Sans_Thai({
   variable: "--font-thai",
   subsets: ["thai", "latin"],
   weight: ["400", "500", "600", "700"],
 });
 
-export const metadata: Metadata = {
-  title: "POS ร้านก๋วยเตี๋ยว",
-  description: "ระบบ POS สำหรับร้านก๋วยเตี๋ยว/ลูกชิ้น",
-  // Installed-app icon on iOS — Next.js auto-detects `app/apple-icon.png` and adds the
-  // `<link rel="apple-touch-icon">` tag itself; `appleWebApp` below adds the rest of what iOS
-  // needs to launch standalone (no URL bar) instead of as a bookmarked Safari tab.
-  appleWebApp: {
-    capable: true,
-    title: "POS ก๋วยเตี๋ยว",
-    statusBarStyle: "black-translucent",
-  },
-};
+/**
+ * Dynamic, not the static `metadata` export — SaaS roadmap: "ทำให้เป็นกลางสำหรับร้านทั่วไป".
+ * The browser-tab title/description used to be hardcoded to the original shop's business
+ * ("POS ร้านก๋วยเตี๋ยว") and shown that way on every tenant's subdomain. `resolveShopNameForMetadata`
+ * resolves the requesting shop (or `null` for the platform's own landing page/apex domain — see
+ * its own comment) from the same `x-shop-slug` header `proxy.ts` already sets for routing.
+ * `app/manifest.ts` does the equivalent for the installed-PWA name/short_name.
+ */
+export async function generateMetadata(): Promise<Metadata> {
+  const shopName = await resolveShopNameForMetadata();
+  const title = shopName ? `POS ${shopName}` : "RanPOS";
+  return {
+    title,
+    description: shopName ? `ระบบ POS ร้าน${shopName}` : "ระบบ POS เช่าใช้ สำหรับร้านค้าทั่วไป",
+    // Installed-app icon on iOS — Next.js auto-detects `app/apple-icon.png` and adds the
+    // `<link rel="apple-touch-icon">` tag itself; `appleWebApp` below adds the rest of what iOS
+    // needs to launch standalone (no URL bar) instead of as a bookmarked Safari tab.
+    appleWebApp: {
+      capable: true,
+      title,
+      statusBarStyle: "black-translucent",
+    },
+  };
+}
 
 export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
   maximumScale: 1,
   userScalable: false,
-  // Matches `app/manifest.json`'s theme_color — the color Android tints the status bar/app
+  // Matches `app/manifest.ts`'s theme_color — the color Android tints the status bar/app
   // switcher card with once installed.
   themeColor: "#DC2626",
 };
