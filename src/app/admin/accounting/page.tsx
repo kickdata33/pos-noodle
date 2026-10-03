@@ -170,12 +170,24 @@ export default function AccountingPage() {
     generatingRecurringRef.current = true;
     Promise.all(
       missing.map((m) =>
-        expenseRepository.create({
-          ...m,
-          createdBy: "system-recurring",
-          createdByName: "รายจ่ายประจำ (อัตโนมัติ)",
-          createdAt: Date.now(),
-        })
+        // Deterministic id (`${recurringExpenseId}_${dateKey}`), not an auto-generated one — the
+        // `generatingRecurringRef` guard above only stops *this one browser tab* from generating
+        // the same row twice; it can't stop a second tab/device open on this page at the same
+        // moment (e.g. the owner's phone and a staff tablet both loading `/admin/accounting`
+        // around the same time) from independently deciding the same (template, day) pair is
+        // still missing — each sees the same not-yet-arrived `expenses` snapshot and both create
+        // one, producing the exact-duplicate "ประจำ" rows reported in production. A `setDoc` with
+        // this same deterministic id makes the second write land on the *same* document instead
+        // of a new one — same construction as `DailyFloat`'s `${shopId}_${businessDayKey}`.
+        expenseRepository.create(
+          {
+            ...m,
+            createdBy: "system-recurring",
+            createdByName: "รายจ่ายประจำ (อัตโนมัติ)",
+            createdAt: Date.now(),
+          },
+          `${m.recurringExpenseId}_${m.dateKey}`
+        )
       )
     ).finally(() => {
       generatingRecurringRef.current = false;
