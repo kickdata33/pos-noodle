@@ -21,6 +21,7 @@ import { Switch } from "@/components/ui/switch";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { useAuth } from "@/hooks/useAuth";
 import { computeSwap } from "@/lib/admin/sortOrder";
+import { compressImageFile } from "@/lib/billing/compressImage";
 import { categoryRepository } from "@/repositories/categoryRepository";
 import { channelRepository } from "@/repositories/channelRepository";
 import { modifierGroupRepository, modifierOptionRepository } from "@/repositories/modifierRepository";
@@ -78,6 +79,7 @@ export default function ProductsPage() {
   const [editing, setEditing] = useState<Product | null>(null);
   const [form, setForm] = useState<FormState>(EMPTY_FORM);
   const [saving, setSaving] = useState(false);
+  const [imageError, setImageError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!shopId) return;
@@ -105,6 +107,7 @@ export default function ProductsPage() {
   function openCreate() {
     setEditing(null);
     setForm({ ...EMPTY_FORM, categoryId: categories[0]?.id ?? "" });
+    setImageError(null);
     setDialogOpen(true);
   }
 
@@ -121,7 +124,24 @@ export default function ProductsPage() {
       ),
       presets: product.posQuickPresets ?? [],
     });
+    setImageError(null);
     setDialogOpen(true);
+  }
+
+  /** Same `compressImageFile` (canvas resize + JPEG quality step-down until it fits a Firestore
+   * field, used for the superadmin's QR upload and a shop's own payment QR in Settings) — picking
+   * a menu photo from a phone/computer is the same "one small image, uploaded rarely" case, and
+   * means an admin no longer has to find somewhere else to host the file first just to paste a
+   * URL here. The URL field right below still works too, for anyone who already has one hosted. */
+  async function handleImageFileChange(file: File | null) {
+    if (!file) return;
+    setImageError(null);
+    try {
+      const dataUrl = await compressImageFile(file);
+      setForm((f) => ({ ...f, imageUrl: dataUrl }));
+    } catch (err) {
+      setImageError(err instanceof Error ? err.message : "อ่านรูปภาพไม่สำเร็จ");
+    }
   }
 
   function toggleGroup(groupId: string) {
@@ -335,21 +355,29 @@ export default function ProductsPage() {
             </div>
 
             <div className="grid gap-2">
-              <Label htmlFor="product-image">รูปเมนู (ไม่บังคับ)</Label>
+              <Label htmlFor="product-image-file">รูปเมนู (ไม่บังคับ)</Label>
+              <Input
+                id="product-image-file"
+                type="file"
+                accept="image/*"
+                onChange={(e) => handleImageFileChange(e.target.files?.[0] ?? null)}
+              />
+              <p className="text-xs text-muted-foreground">
+                เลือกรูปจากเครื่อง/มือถือได้โดยตรง (แสดงเฉพาะหน้าสั่งของลูกค้า ไม่ขึ้นในหน้า POS ของพนักงาน) —
+                หรือจะวางลิงก์รูปที่มีอยู่แล้วในช่องด้านล่างแทนก็ได้
+              </p>
+              {imageError ? <p className="text-xs text-destructive">{imageError}</p> : null}
               <Input
                 id="product-image"
                 value={form.imageUrl}
                 onChange={(e) => setForm((f) => ({ ...f, imageUrl: e.target.value }))}
                 placeholder="https://..."
               />
-              <p className="text-xs text-muted-foreground">
-                อัปโหลดไฟล์โดยตรงยังไม่รองรับในเวอร์ชันนี้ — ใส่ลิงก์รูปที่มีอยู่แล้วแทน (แสดงเฉพาะหน้าสั่งของลูกค้า
-                ไม่ขึ้นในหน้า POS ของพนักงาน)
-              </p>
               {form.imageUrl.trim() ? (
-                // Arbitrary admin-pasted URL from any host, same as ShopSettings.logoUrl;
-                // next/image would need every possible host allow-listed in next.config.ts ahead
-                // of time, which defeats the point of a free-text "paste any link" field.
+                // Either a data: URL from handleImageFileChange above, or an arbitrary admin-
+                // pasted URL from any host (same as ShopSettings.logoUrl) — next/image would need
+                // every possible host allow-listed in next.config.ts ahead of time, which defeats
+                // the point of a free-text "paste any link" field.
                 // eslint-disable-next-line @next/next/no-img-element
                 <img
                   src={form.imageUrl.trim()}
