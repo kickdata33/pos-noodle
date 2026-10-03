@@ -67,7 +67,7 @@ export function QuickPresetEditor({
               <Input
                 value={preset.label}
                 onChange={(e) => updatePreset(preset.id, { label: e.target.value })}
-                placeholder='เช่น "ก๋วยเตี๋ยวพิเศษ"'
+                placeholder='เช่น "ไซส์ใหญ่พิเศษ"'
                 className="flex-1"
               />
               <Button type="button" variant="destructive" size="sm" onClick={() => removePreset(preset.id)}>

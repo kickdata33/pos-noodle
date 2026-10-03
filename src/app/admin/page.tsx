@@ -1,9 +1,9 @@
 import Link from "next/link";
 
 const SHORTCUTS = [
-  { href: "/admin/categories", label: "หมวดหมู่", desc: "ก๋วยเตี๋ยว, เกาเหลา, ลูกชิ้น, ..." },
+  { href: "/admin/categories", label: "หมวดหมู่", desc: "จัดกลุ่มสินค้า/เมนูของร้าน" },
   { href: "/admin/products", label: "เมนู", desc: "เพิ่ม/แก้ราคา/เปิดปิดเมนู" },
-  { href: "/admin/modifiers", label: "Modifier", desc: "เส้น, พิเศษ, ไม่งอก, ..." },
+  { href: "/admin/modifiers", label: "Modifier", desc: "ตัวเลือกเสริมของสินค้า เช่น ขนาด, ความหวาน" },
   { href: "/admin/tables", label: "โต๊ะ", desc: "เพิ่ม/ลบ/เปลี่ยนชื่อโต๊ะ" },
   { href: "/admin/channels", label: "ช่องทางขาย", desc: "หน้าร้าน, Grab, LINE MAN, ..." },
   { href: "/admin/payment-methods", label: "วิธีชำระเงิน", desc: "เงินสด, QR, Delivery" },

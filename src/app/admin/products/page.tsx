@@ -297,7 +297,7 @@ export default function ProductsPage() {
                 id="product-name"
                 value={form.name}
                 onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
-                placeholder="เช่น ก๋วยเตี๋ยวลูกชิ้นน้ำตก"
+                placeholder="เช่น กาแฟเย็น"
                 autoFocus
               />
             </div>
@@ -385,7 +385,7 @@ export default function ProductsPage() {
                 <Label>ปุ่มลัดหน้า POS (ไม่บังคับ)</Label>
                 <p className="text-xs text-muted-foreground">
                   สร้างปุ่มที่กดครั้งเดียวแล้วเลือก Modifier ให้เลย ไม่ต้องเปิด popup — เช่น ปุ่ม
-                  &quot;ก๋วยเตี๋ยวพิเศษ&quot; ที่เลือก &quot;เนื้อสัตว์: พิเศษ&quot; ไว้ล่วงหน้า เฉพาะหน้า POS
+                  &quot;ไซส์ใหญ่พิเศษ&quot; ที่เลือก &quot;ขนาด: ใหญ่&quot; ไว้ล่วงหน้า เฉพาะหน้า POS
                   พนักงานเท่านั้น หน้าสั่งของลูกค้ายังขึ้นให้เลือกเองตามปกติ
                 </p>
                 <QuickPresetEditor

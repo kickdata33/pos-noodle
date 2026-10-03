@@ -109,7 +109,7 @@ export default function CategoriesPage() {
   return (
     <AdminSection
       title="หมวดหมู่"
-      description="เช่น ก๋วยเตี๋ยว, เกาเหลา, ลูกชิ้น, ของทานเล่น, เครื่องดื่ม"
+      description="เช่น เครื่องดื่ม, ของทานเล่น, อาหารจานหลัก, ของใช้"
       actionLabel="+ เพิ่มหมวดหมู่"
       onAction={openCreate}
     >
@@ -173,7 +173,7 @@ export default function CategoriesPage() {
               id="category-name"
               value={name}
               onChange={(e) => setName(e.target.value)}
-              placeholder="เช่น ก๋วยเตี๋ยว"
+              placeholder="เช่น เครื่องดื่ม"
               autoFocus
             />
           </div>

@@ -132,7 +132,7 @@ export default function SignupPage() {
               <Input
                 id="requestedSlug"
                 required
-                placeholder="เช่น champnoodles"
+                placeholder="เช่น myshop"
                 value={requestedSlug}
                 onChange={(e) => handleSlugChange(e.target.value)}
               />
