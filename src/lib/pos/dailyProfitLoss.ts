@@ -1,4 +1,4 @@
-import { bangkokDateKey, bangkokDateKeyWithCutoff, dateKeysBetween } from "./dateRange";
+import { bangkokDateKey, bangkokDateKeyWithCutoff, dateKeysBetween, ledgerBusinessDayKey } from "./dateRange";
 import type { DeliveryPayout, Expense, Order } from "@/types";
 
 /**
@@ -11,15 +11,15 @@ import type { DeliveryPayout, Expense, Order } from "@/types";
  * all sources combined"), not a replacement.
  *
  * `businessDayFromHour` (item: "มีฟังก์ชันเปิดปิด ยอดขาย 16:00-06:00 หรือตั้งเวลาเองได้") switches
- * every figure on this view to the same shift-based day the reconciliation table above it uses,
- * so the two can be compared apples-to-apples when wanted: `undefined` (the default) keeps plain
- * calendar days for everything, matching every record's own stored `dateKey`/timestamp exactly as
- * before this option existed. A number re-groups orders by `bangkokDateKeyWithCutoff` on their
- * `paidAt`, and re-groups `Expense`/`DeliveryPayout` the same way but using their `createdAt`
- * (the actual moment they were logged) instead of their stored `dateKey` — same fix, and same
- * reasoning, as the "ดูตามช่วงเวลาทำการ" toggle on `/admin/reports` (see that page's
- * `totalExpenses`/`deliveryRevenue` comment): a plain `dateKey` comparison can't answer "which
- * shift does this belong to" on its own, only a real timestamp can.
+ * orders to the same shift-based day the reconciliation table above it uses, so the two can be
+ * compared apples-to-apples when wanted: `undefined` (the default) keeps plain calendar days for
+ * everything, matching every record's own stored `dateKey`/timestamp exactly as before this option
+ * existed. A number re-groups orders by `bangkokDateKeyWithCutoff` on their `paidAt`.
+ * `Expense`/`DeliveryPayout` are grouped by `ledgerBusinessDayKey` either way (see its own comment)
+ * — their own stored `dateKey` is trusted directly unless the row was logged live at the moment it
+ * happened, never re-derived wholesale from `createdAt` the way an earlier version of this file
+ * did, because that broke on any backfilled or recurring-generated row (see `ledgerBusinessDayKey`'s
+ * comment for the production bug this caused).
  *
  * Pure — no Firestore, no `Date.now()` — unit-tested directly (`scripts/dailyProfitLoss.test.ts`).
  */
@@ -53,14 +53,14 @@ export function dailyProfitLossRows(
 
   const deliveryByDay: Record<string, number> = {};
   for (const p of deliveryPayouts) {
-    const key = businessDayFromHour != null ? keyForTime(p.createdAt) : p.dateKey;
+    const key = businessDayFromHour != null ? ledgerBusinessDayKey(p.dateKey, p.createdAt, businessDayFromHour) : p.dateKey;
     if (key < startKey || key > endKey) continue;
     deliveryByDay[key] = (deliveryByDay[key] ?? 0) + p.amount;
   }
 
   const expensesByDay: Record<string, number> = {};
   for (const e of expenses) {
-    const key = businessDayFromHour != null ? keyForTime(e.createdAt) : e.dateKey;
+    const key = businessDayFromHour != null ? ledgerBusinessDayKey(e.dateKey, e.createdAt, businessDayFromHour) : e.dateKey;
     if (key < startKey || key > endKey) continue;
     expensesByDay[key] = (expensesByDay[key] ?? 0) + e.amount;
   }

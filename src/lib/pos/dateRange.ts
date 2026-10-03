@@ -109,6 +109,28 @@ export function resolvePreset(preset: ReportPreset, nowMs: number = Date.now()):
   }
 }
 
+/**
+ * Business-day key for a manually-`dateKey`'d ledger row (`Expense`/`DeliveryPayout`), used by a
+ * "ดูตามช่วงเวลาทำการ"-style toggle. Unlike an `Order`, these rows carry their own explicit
+ * `dateKey` chosen by whoever logged them — not derived from a timestamp — so a backfilled or
+ * recurring-generated row's `dateKey` already IS the correct business day and must be trusted
+ * as-is (discovered bug: the recurring-expense auto-generator can batch-insert rows for up to 30
+ * past days at once, all stamped `createdAt: Date.now()` — re-deriving their business day from
+ * that timestamp dumped every one of them onto whatever day the catch-up happened to run, wildly
+ * inflating that one day's total). A row logged live, right at the moment it happened, still
+ * needs its cutoff disambiguated though — an entry made at 01:00 defaults its `dateKey` to that
+ * plain calendar day, but the shop's "today" hasn't rolled over yet at that hour, so it actually
+ * belongs to the business day that started 16:00 the day before.
+ *
+ * Rule: only re-derive from `createdAt` when `createdAt`'s own plain calendar date still matches
+ * the row's stored `dateKey` (a live, same-moment entry) — once the two diverge (any backfill,
+ * recurring-generated rows included), `createdAt` no longer reflects when the row actually
+ * happened, so the stored `dateKey` is trusted directly instead.
+ */
+export function ledgerBusinessDayKey(dateKey: string, createdAt: number, fromHour: number): string {
+  return bangkokDateKey(createdAt) === dateKey ? bangkokDateKeyWithCutoff(createdAt, fromHour) : dateKey;
+}
+
 /** `monthKey` ("YYYY-MM") shifted by `delta` whole months (negative goes back) — plain string/
  * number math, no `Date` object involved, so it can never drift by timezone. Used by every
  * month-at-a-time view's ‹/› navigator (`/admin/cash-safe`, the accounting page's รายจ่าย list). */

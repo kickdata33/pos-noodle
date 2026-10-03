@@ -134,14 +134,33 @@ test("dailyProfitLossRows: with businessDayFromHour, orders group by shift inste
   assert.equal(rows[0].posSales, 1000);
 });
 
-test("dailyProfitLossRows: with businessDayFromHour, delivery/expenses group by createdAt (shift), not their stored dateKey", () => {
-  // Logged with dateKey "2026-09-16" (the calendar day it was typed in) but actually entered at
-  // 00:30 on the 16th — still part of the shift that started 16:00 on the 15th.
+test("dailyProfitLossRows: with businessDayFromHour, a live same-moment entry still gets its cutoff disambiguated", () => {
+  // Logged with dateKey "2026-09-16" (defaulted to "today" at the moment of entry) but actually
+  // entered at 00:30 on the 16th — still part of the shift that started 16:00 on the 15th, and
+  // createdAt's own plain calendar date ("2026-09-16") matches the stored dateKey, so this counts
+  // as a live entry and gets re-derived via the cutoff.
   const justAfterMidnight = SEP_15_MIDNIGHT_BKK + 24 * 60 * 60 * 1000 + 30 * 60 * 1000;
   const rows = dailyProfitLossRows(
     [],
     [payout("2026-09-16", 300, justAfterMidnight)],
     [expense("2026-09-16", 200, justAfterMidnight)],
+    "2026-09-15",
+    "2026-09-15",
+    16
+  );
+  assert.equal(rows[0].deliveryRevenue, 300);
+  assert.equal(rows[0].expenses, 200);
+});
+
+test("dailyProfitLossRows: with businessDayFromHour, a backfilled/recurring-generated row keeps its stored dateKey, not createdAt's day", () => {
+  // Regression test for a real production bug: a recurring-expense row for "2026-09-15" that was
+  // actually auto-generated two days later (createdAt on the 17th, catching up a missed day) must
+  // still count under the 15th — not get dumped onto whatever day the catch-up happened to run.
+  const generatedTwoDaysLater = SEP_15_MIDNIGHT_BKK + 2 * 24 * 60 * 60 * 1000 + 9 * 60 * 60 * 1000;
+  const rows = dailyProfitLossRows(
+    [],
+    [payout("2026-09-15", 300, generatedTwoDaysLater)],
+    [expense("2026-09-15", 200, generatedTwoDaysLater)],
     "2026-09-15",
     "2026-09-15",
     16

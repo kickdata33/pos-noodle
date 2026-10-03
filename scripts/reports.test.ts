@@ -11,6 +11,7 @@ import {
   bangkokWeekday,
   customRange,
   dateKeysBetween,
+  ledgerBusinessDayKey,
   resolvePreset,
   shiftMonthKey,
 } from "../src/lib/pos/dateRange";
@@ -209,4 +210,23 @@ test("shiftMonthKey: moves forward and backward within a year", () => {
 test("shiftMonthKey: rolls over a year boundary in both directions", () => {
   assert.equal(shiftMonthKey("2026-12", 1), "2027-01");
   assert.equal(shiftMonthKey("2026-01", -1), "2025-12");
+});
+
+test("ledgerBusinessDayKey: a live entry just after midnight is re-derived to the previous business day", () => {
+  // 00:30 on the 16th, dateKey still "2026-09-16" (defaulted at the moment of entry) — createdAt's
+  // own plain date matches dateKey, so this counts as live and gets the cutoff applied.
+  const createdAt = Date.UTC(2026, 8, 15, 17, 30); // 2026-09-16 00:30 Bangkok
+  assert.equal(ledgerBusinessDayKey("2026-09-16", createdAt, 16), "2026-09-15");
+});
+
+test("ledgerBusinessDayKey: a backfilled row (createdAt's date differs from dateKey) keeps its stored dateKey", () => {
+  // dateKey says "2026-09-15" but createdAt is two days later (e.g. a recurring-expense catch-up
+  // generator backfilling a missed day) — trust the stored dateKey, not createdAt's own day.
+  const createdAt = Date.UTC(2026, 8, 17, 2, 0); // 2026-09-17 09:00 Bangkok
+  assert.equal(ledgerBusinessDayKey("2026-09-15", createdAt, 16), "2026-09-15");
+});
+
+test("ledgerBusinessDayKey: a live entry logged during the day (after fromHour) keeps the same calendar date", () => {
+  const createdAt = Date.UTC(2026, 8, 15, 11, 0); // 2026-09-15 18:00 Bangkok
+  assert.equal(ledgerBusinessDayKey("2026-09-15", createdAt, 16), "2026-09-15");
 });
