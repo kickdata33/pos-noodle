@@ -169,6 +169,25 @@ test("dailyProfitLossRows: with businessDayFromHour, a backfilled/recurring-gene
   assert.equal(rows[0].expenses, 200);
 });
 
+test("dailyProfitLossRows: with businessDayFromHour, a live daytime expense before the next shift starts keeps its own calendar date", () => {
+  // Regression test for a second real production bug: an expense entered at 10:00 — e.g. the
+  // morning market run for that evening's service — is well before `businessDayFromHour` (16) but
+  // must NOT be dumped onto the previous day the way a just-after-midnight entry is. The shop is
+  // simply closed between its close hour (`businessDayToHour`, defaults to 6) and the next shift's
+  // start, so there's no still-open previous shift this could be confused with.
+  const tenAm = SEP_15_MIDNIGHT_BKK + 10 * 60 * 60 * 1000;
+  const rows = dailyProfitLossRows(
+    [],
+    [payout("2026-09-15", 300, tenAm)],
+    [expense("2026-09-15", 200, tenAm)],
+    "2026-09-15",
+    "2026-09-15",
+    16
+  );
+  assert.equal(rows[0].deliveryRevenue, 300);
+  assert.equal(rows[0].expenses, 200);
+});
+
 test("dailyProfitLossRows: businessDayFromHour left undefined keeps plain-dateKey behavior exactly as before", () => {
   const rows = dailyProfitLossRows([], [payout("2026-09-15", 300, 0)], [expense("2026-09-15", 200, 0)], "2026-09-15", "2026-09-15");
   assert.equal(rows[0].deliveryRevenue, 300);

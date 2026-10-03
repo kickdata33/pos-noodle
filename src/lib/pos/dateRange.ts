@@ -114,21 +114,34 @@ export function resolvePreset(preset: ReportPreset, nowMs: number = Date.now()):
  * "ดูตามช่วงเวลาทำการ"-style toggle. Unlike an `Order`, these rows carry their own explicit
  * `dateKey` chosen by whoever logged them — not derived from a timestamp — so a backfilled or
  * recurring-generated row's `dateKey` already IS the correct business day and must be trusted
- * as-is (discovered bug: the recurring-expense auto-generator can batch-insert rows for up to 30
- * past days at once, all stamped `createdAt: Date.now()` — re-deriving their business day from
+ * as-is (discovered bug #1: the recurring-expense auto-generator can batch-insert rows for up to
+ * 30 past days at once, all stamped `createdAt: Date.now()` — re-deriving their business day from
  * that timestamp dumped every one of them onto whatever day the catch-up happened to run, wildly
- * inflating that one day's total). A row logged live, right at the moment it happened, still
- * needs its cutoff disambiguated though — an entry made at 01:00 defaults its `dateKey` to that
- * plain calendar day, but the shop's "today" hasn't rolled over yet at that hour, so it actually
- * belongs to the business day that started 16:00 the day before.
+ * inflating that one day's total).
+ *
+ * A row logged live, right at the moment it happened, can still need disambiguating — but only
+ * across the genuinely ambiguous early-morning tail (`00:00` up to `toHour`, the previous shift's
+ * close time), never the whole stretch before the *next* shift's `fromHour` starts. An entry made
+ * at 01:00 defaults its `dateKey` to that plain calendar day, but the shop's business day hasn't
+ * rolled over yet at that hour, so it actually belongs to the shift that started 16:00 the day
+ * before — that one needs the cutoff. An expense entered at, say, 10:00 (buying the day's pork
+ * and vegetables well before the 16:00 dinner shift even opens) is NOT ambiguous the same way:
+ * it's just an ordinary daytime entry for *today's* business day, and the shop is closed the
+ * whole time from `toHour` to `fromHour` so there is no second, still-open shift it could be
+ * confused with (discovered bug #2: reusing `bangkokDateKeyWithCutoff`'s `fromHour`-based cutoff
+ * here — correct for `Order`, which never has a timestamp in that closed dead zone — shoved every
+ * same-day daytime expense back onto the *previous* business day, since any hour before `fromHour`
+ * (16:00) counted as "still yesterday" even at 10am).
  *
  * Rule: only re-derive from `createdAt` when `createdAt`'s own plain calendar date still matches
  * the row's stored `dateKey` (a live, same-moment entry) — once the two diverge (any backfill,
- * recurring-generated rows included), `createdAt` no longer reflects when the row actually
- * happened, so the stored `dateKey` is trusted directly instead.
+ * recurring-generated rows included), the stored `dateKey` is trusted directly. For a live entry,
+ * only reassign to the previous business day when its hour falls before `toHour`; otherwise keep
+ * its own calendar date.
  */
-export function ledgerBusinessDayKey(dateKey: string, createdAt: number, fromHour: number): string {
-  return bangkokDateKey(createdAt) === dateKey ? bangkokDateKeyWithCutoff(createdAt, fromHour) : dateKey;
+export function ledgerBusinessDayKey(dateKey: string, createdAt: number, toHour: number): string {
+  if (bangkokDateKey(createdAt) !== dateKey) return dateKey;
+  return bangkokHour(createdAt) < toHour ? addDaysToKey(dateKey, -1) : dateKey;
 }
 
 /** `monthKey` ("YYYY-MM") shifted by `delta` whole months (negative goes back) — plain string/

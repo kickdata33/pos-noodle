@@ -289,14 +289,25 @@ export default function AccountingPage() {
     [orders, paymentMethods, transfers, expenses, range.startKey, range.endKey, fromHour, cashTransferAdjustments]
   );
 
-  // "กำไร/ขาดทุนสุทธิรายวัน" — plain calendar day (never business-day/shift), combining POS sales,
-  // รายได้ Delivery and ค่าใช้จ่ายรวม so a day's actual money picture doesn't require mentally
-  // adding up three separate pages — see `lib/pos/dailyProfitLoss.ts`'s file comment for why this
-  // is deliberately a second, separate view from the shift-based `rows` above rather than a
-  // replacement for it.
+  // "กำไร/ขาดทุนสุทธิรายวัน" — plain calendar day by default, combining POS sales, รายได้
+  // Delivery and ค่าใช้จ่ายรวม so a day's actual money picture doesn't require mentally adding up
+  // three separate pages — see `lib/pos/dailyProfitLoss.ts`'s file comment for why this is
+  // deliberately a second, separate view from the shift-based `rows` above rather than a
+  // replacement for it. `profitLossUseBusinessDay` can switch it to that same shift-based grouping
+  // (passing both `fromHour`/`toHour` — see `dailyProfitLossRows`' and `ledgerBusinessDayKey`'s
+  // comments for why ledger rows need `toHour`, not `fromHour`, to disambiguate).
   const profitLossRows = useMemo(
-    () => dailyProfitLossRows(orders, deliveryPayouts, expenses, range.startKey, range.endKey, profitLossUseBusinessDay ? fromHour : undefined),
-    [orders, deliveryPayouts, expenses, range.startKey, range.endKey, profitLossUseBusinessDay, fromHour]
+    () =>
+      dailyProfitLossRows(
+        orders,
+        deliveryPayouts,
+        expenses,
+        range.startKey,
+        range.endKey,
+        profitLossUseBusinessDay ? fromHour : undefined,
+        toHour
+      ),
+    [orders, deliveryPayouts, expenses, range.startKey, range.endKey, profitLossUseBusinessDay, fromHour, toHour]
   );
   const profitLossTotal = useMemo(() => totalProfitLoss(profitLossRows), [profitLossRows]);
 

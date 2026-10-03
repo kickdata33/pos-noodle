@@ -15,11 +15,13 @@ import type { DeliveryPayout, Expense, Order } from "@/types";
  * compared apples-to-apples when wanted: `undefined` (the default) keeps plain calendar days for
  * everything, matching every record's own stored `dateKey`/timestamp exactly as before this option
  * existed. A number re-groups orders by `bangkokDateKeyWithCutoff` on their `paidAt`.
- * `Expense`/`DeliveryPayout` are grouped by `ledgerBusinessDayKey` either way (see its own comment)
- * — their own stored `dateKey` is trusted directly unless the row was logged live at the moment it
- * happened, never re-derived wholesale from `createdAt` the way an earlier version of this file
- * did, because that broke on any backfilled or recurring-generated row (see `ledgerBusinessDayKey`'s
- * comment for the production bug this caused).
+ * `Expense`/`DeliveryPayout` are grouped by `ledgerBusinessDayKey` (using `businessDayToHour`, not
+ * `businessDayFromHour` — see that function's comment for why the two thresholds must differ for a
+ * ledger row) whenever the toggle is on — their own stored `dateKey` is trusted directly unless the
+ * row was logged live during the early-morning tail before `businessDayToHour`, never re-derived
+ * wholesale from `createdAt` the way an earlier version of this file did (that broke on any
+ * backfilled/recurring-generated row, *and* separately on any same-day daytime expense — see
+ * `ledgerBusinessDayKey`'s comment for both production bugs this caused).
  *
  * Pure — no Firestore, no `Date.now()` — unit-tested directly (`scripts/dailyProfitLoss.test.ts`).
  */
@@ -39,7 +41,11 @@ export function dailyProfitLossRows(
   expenses: readonly Expense[],
   startKey: string,
   endKey: string,
-  businessDayFromHour?: number
+  businessDayFromHour?: number,
+  // Only meaningful when `businessDayFromHour` is set; defaults to the shop's usual close hour
+  // (matches the `toHour` default on both this page and `/admin/reports`) so existing callers that
+  // only ever pass `businessDayFromHour` keep working.
+  businessDayToHour: number = 6
 ): DailyProfitLossRow[] {
   const keyForTime = (epochMs: number): string =>
     businessDayFromHour != null ? bangkokDateKeyWithCutoff(epochMs, businessDayFromHour) : bangkokDateKey(epochMs);
@@ -53,14 +59,14 @@ export function dailyProfitLossRows(
 
   const deliveryByDay: Record<string, number> = {};
   for (const p of deliveryPayouts) {
-    const key = businessDayFromHour != null ? ledgerBusinessDayKey(p.dateKey, p.createdAt, businessDayFromHour) : p.dateKey;
+    const key = businessDayFromHour != null ? ledgerBusinessDayKey(p.dateKey, p.createdAt, businessDayToHour) : p.dateKey;
     if (key < startKey || key > endKey) continue;
     deliveryByDay[key] = (deliveryByDay[key] ?? 0) + p.amount;
   }
 
   const expensesByDay: Record<string, number> = {};
   for (const e of expenses) {
-    const key = businessDayFromHour != null ? ledgerBusinessDayKey(e.dateKey, e.createdAt, businessDayFromHour) : e.dateKey;
+    const key = businessDayFromHour != null ? ledgerBusinessDayKey(e.dateKey, e.createdAt, businessDayToHour) : e.dateKey;
     if (key < startKey || key > endKey) continue;
     expensesByDay[key] = (expensesByDay[key] ?? 0) + e.amount;
   }
