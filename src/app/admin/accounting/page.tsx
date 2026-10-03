@@ -11,6 +11,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Switch } from "@/components/ui/switch";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { formatCurrency } from "@/lib/format";
 import { cn } from "@/lib/utils";
@@ -95,6 +96,12 @@ export default function AccountingPage() {
   // see `monthExpenseGroups`/`ExpenseQuickAddRow` below for how the two are used.
   const [expenseDay, setExpenseDay] = useState(() => todayKey());
   const [expenseMonthKey, setExpenseMonthKey] = useState(() => todayKey().slice(0, 7));
+
+  // "กำไร/ขาดทุนสุทธิรายวัน" ด้านล่างเลือกได้ว่าจะนับเป็นวันปฏิทินจริง (ค่าเริ่มต้น) หรือสลับไปนับ
+  // เป็นกะแบบเดียวกับตาราง "ยอดขายเทียบกับเงินโอนเข้าบัญชี" ด้านบน (item: "มีฟังก์ชันเปิดปิด ยอดขาย
+  // 16:00-06:00 หรือตั้งเวลาเองได้") — ใช้ `fromHour`/`toHour` ชุดเดียวกับตารางด้านบนเลย ไม่แยกเป็น
+  // ชั่วโมงของตัวเอง ปรับที่เดียวกระทบทั้งสองตารางพร้อมกัน.
+  const [profitLossUseBusinessDay, setProfitLossUseBusinessDay] = useState(false);
 
   // Clicking a row in the reconciliation table opens a detail dialog for that business day —
   // the transfer amounts already logged for it (item: "ไม่ต้องเลื่อนลงไปดู" — no scrolling down to
@@ -288,8 +295,8 @@ export default function AccountingPage() {
   // is deliberately a second, separate view from the shift-based `rows` above rather than a
   // replacement for it.
   const profitLossRows = useMemo(
-    () => dailyProfitLossRows(orders, deliveryPayouts, expenses, range.startKey, range.endKey),
-    [orders, deliveryPayouts, expenses, range.startKey, range.endKey]
+    () => dailyProfitLossRows(orders, deliveryPayouts, expenses, range.startKey, range.endKey, profitLossUseBusinessDay ? fromHour : undefined),
+    [orders, deliveryPayouts, expenses, range.startKey, range.endKey, profitLossUseBusinessDay, fromHour]
   );
   const profitLossTotal = useMemo(() => totalProfitLoss(profitLossRows), [profitLossRows]);
 
@@ -527,12 +534,30 @@ export default function AccountingPage() {
       </Card>
 
       <Card className="mt-4">
-        <CardHeader>
-          <CardTitle>กำไร/ขาดทุนสุทธิรายวัน (รวม Delivery)</CardTitle>
-          <CardDescription>
-            นับตามวันปฏิทินจริง (เที่ยงคืนถึงเที่ยงคืน) เพราะค่าใช้จ่ายและรายได้ Delivery บันทึกเป็นวันปฏิทินอยู่แล้ว — ไม่ใช่วันทำการตามกะแบบ
-            ตารางด้านบน ยอดขาย POS ของวันที่เดียวกันจึงอาจเห็นไม่ตรงกับตารางด้านบน (ไม่ใช่ข้อมูลผิด แค่นับวันคนละแบบ)
-          </CardDescription>
+        <CardHeader className="flex flex-row flex-wrap items-start justify-between gap-4 space-y-0">
+          <div>
+            <CardTitle>กำไร/ขาดทุนสุทธิรายวัน (รวม Delivery)</CardTitle>
+            <CardDescription>
+              {profitLossUseBusinessDay ? (
+                <>
+                  นับเป็นวันทำการตามกะ ({String(fromHour).padStart(2, "0")}:00 ถึง {String(toHour).padStart(2, "0")}:00 ของวันถัดไป) เหมือน
+                  ตารางด้านบน — ปรับเวลาที่ช่อง &quot;1 วันทำการ นับตั้งแต่&quot; ด้านบนสุดของหน้า
+                </>
+              ) : (
+                <>
+                  นับตามวันปฏิทินจริง (เที่ยงคืนถึงเที่ยงคืน) เพราะค่าใช้จ่ายและรายได้ Delivery บันทึกเป็นวันปฏิทินอยู่แล้ว — ไม่ใช่วันทำการตามกะแบบ
+                  ตารางด้านบน ยอดขาย POS ของวันที่เดียวกันจึงอาจเห็นไม่ตรงกับตารางด้านบน (ไม่ใช่ข้อมูลผิด แค่นับวันคนละแบบ) — เปิดสวิตช์ด้านขวา
+                  เพื่อนับแบบเดียวกับตารางด้านบนแทน
+                </>
+              )}
+            </CardDescription>
+          </div>
+          <div className="flex shrink-0 items-center gap-2">
+            <Label htmlFor="pl-business-day" className="text-xs text-muted-foreground">
+              นับเป็นวันทำการ (กะ)
+            </Label>
+            <Switch id="pl-business-day" checked={profitLossUseBusinessDay} onCheckedChange={setProfitLossUseBusinessDay} />
+          </div>
         </CardHeader>
         <CardContent>
           {/* วันปฏิทินธรรมดา (ไม่ใช่ business day แบบตารางด้านบน) — เพราะ Expense/DeliveryPayout
@@ -542,7 +567,7 @@ export default function AccountingPage() {
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>วันที่ (ตามปฏิทิน)</TableHead>
+                <TableHead>{profitLossUseBusinessDay ? "วันทำการ (ตามกะ)" : "วันที่ (ตามปฏิทิน)"}</TableHead>
                 <TableHead className="text-right">ยอดขาย POS</TableHead>
                 <TableHead className="text-right">รายได้ Delivery</TableHead>
                 <TableHead className="text-right">ค่าใช้จ่าย</TableHead>

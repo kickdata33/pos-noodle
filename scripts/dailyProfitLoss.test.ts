@@ -35,11 +35,11 @@ function order(id: string, total: number, paidAt: number): Order {
   } as unknown as Order;
 }
 
-function payout(dateKey: string, amount: number): DeliveryPayout {
-  return { id: `${dateKey}-p`, shopId: "shop1", dateKey, platform: "grab", amount, note: "", createdBy: "u1", createdByName: "Admin", createdAt: 0 };
+function payout(dateKey: string, amount: number, createdAt = 0): DeliveryPayout {
+  return { id: `${dateKey}-p`, shopId: "shop1", dateKey, platform: "grab", amount, note: "", createdBy: "u1", createdByName: "Admin", createdAt };
 }
 
-function expense(dateKey: string, amount: number): Expense {
+function expense(dateKey: string, amount: number, createdAt = 0): Expense {
   return {
     id: `${dateKey}-e`,
     shopId: "shop1",
@@ -51,7 +51,7 @@ function expense(dateKey: string, amount: number): Expense {
     recurringExpenseId: null,
     createdBy: "u1",
     createdByName: "Admin",
-    createdAt: 0,
+    createdAt,
   };
 }
 
@@ -125,4 +125,33 @@ test("totalProfitLoss: sums every row's fields across the range", () => {
 
 test("totalProfitLoss: zero for an empty row list", () => {
   assert.deepEqual(totalProfitLoss([]), { posSales: 0, deliveryRevenue: 0, expenses: 0, net: 0 });
+});
+
+test("dailyProfitLossRows: with businessDayFromHour, orders group by shift instead of plain calendar", () => {
+  // 00:30 on the 16th (Bangkok) belongs to the shift that started 16:00 on the 15th.
+  const justAfterMidnight = SEP_15_MIDNIGHT_BKK + 24 * 60 * 60 * 1000 + 30 * 60 * 1000;
+  const rows = dailyProfitLossRows([order("o1", 1000, justAfterMidnight)], [], [], "2026-09-15", "2026-09-15", 16);
+  assert.equal(rows[0].posSales, 1000);
+});
+
+test("dailyProfitLossRows: with businessDayFromHour, delivery/expenses group by createdAt (shift), not their stored dateKey", () => {
+  // Logged with dateKey "2026-09-16" (the calendar day it was typed in) but actually entered at
+  // 00:30 on the 16th — still part of the shift that started 16:00 on the 15th.
+  const justAfterMidnight = SEP_15_MIDNIGHT_BKK + 24 * 60 * 60 * 1000 + 30 * 60 * 1000;
+  const rows = dailyProfitLossRows(
+    [],
+    [payout("2026-09-16", 300, justAfterMidnight)],
+    [expense("2026-09-16", 200, justAfterMidnight)],
+    "2026-09-15",
+    "2026-09-15",
+    16
+  );
+  assert.equal(rows[0].deliveryRevenue, 300);
+  assert.equal(rows[0].expenses, 200);
+});
+
+test("dailyProfitLossRows: businessDayFromHour left undefined keeps plain-dateKey behavior exactly as before", () => {
+  const rows = dailyProfitLossRows([], [payout("2026-09-15", 300, 0)], [expense("2026-09-15", 200, 0)], "2026-09-15", "2026-09-15");
+  assert.equal(rows[0].deliveryRevenue, 300);
+  assert.equal(rows[0].expenses, 200);
 });
