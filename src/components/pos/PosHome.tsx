@@ -3,10 +3,11 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 
+import { TableQrDialog } from "@/components/shared/TableQrDialog";
 import { Badge } from "@/components/ui/badge";
 import { formatCurrency } from "@/lib/format";
 import { orderRepository } from "@/repositories/orderRepository";
-import type { Order } from "@/types";
+import type { Order, Table as PosTable } from "@/types";
 
 import { usePosCatalog } from "./PosCatalogContext";
 
@@ -19,6 +20,11 @@ import { usePosCatalog } from "./PosCatalogContext";
 export function PosHome() {
   const { shopId, tables, channels, settings } = usePosCatalog();
   const [openOrders, setOpenOrders] = useState<Order[]>([]);
+  // Item: "ลูกค้าแอบถ่ายรูป QR แล้วสั่งทีหลังได้ไหม" — lets staff (re)print a `qrMode: "session"`
+  // table's one-time QR right from the floor grid, not just `/admin/tables`, since seating a new
+  // party is a staff task that happens constantly, not an admin config chore. See
+  // `TableQrDialog`'s own comment for how it branches on `qrMode`.
+  const [qrTable, setQrTable] = useState<PosTable | null>(null);
   const currency = settings?.currency ?? "THB";
 
   // The new-order chime itself is handled by `PosOrderAlertListener`, mounted once in
@@ -60,6 +66,19 @@ export function PosHome() {
                   // — a full-card background layer, not just a corner dot, so it reads across
                   // the room. Sits behind the content below (`-z-10`) so text stays fully legible.
                   <span className="animate-order-alert absolute inset-0 -z-10 bg-success" aria-hidden />
+                ) : null}
+                {table.qrMode === "session" ? (
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      setQrTable(table);
+                    }}
+                    className="absolute right-1 top-1 z-10 rounded border border-border bg-card/90 px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground hover:bg-accent"
+                  >
+                    QR
+                  </button>
                 ) : null}
                 <span className="text-lg font-semibold">{table.name}</span>
                 {order ? (
@@ -145,6 +164,8 @@ export function PosHome() {
           เสียงแจ้งเตือน
         </Link>
       </div>
+
+      <TableQrDialog table={qrTable} onOpenChange={(open) => !open && setQrTable(null)} />
     </main>
   );
 }

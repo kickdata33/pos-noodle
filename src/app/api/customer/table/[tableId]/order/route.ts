@@ -42,7 +42,20 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     return NextResponse.json({ error: "โต๊ะนี้ปิดใช้งานอยู่" }, { status: 404 });
   }
 
-  const body = (await request.json().catch(() => null)) as { items?: CustomerSelection[] } | null;
+  const body = (await request.json().catch(() => null)) as
+    | { items?: CustomerSelection[]; token?: string }
+    | null;
+
+  // Same `qrMode: "session"` gate as `GET /api/customer/table/[tableId]` — see that route and
+  // `Table.sessionToken`'s own comment. Checked here too (not just on the menu-load GET) because
+  // that's the request that actually puts items on the bill — a stale photographed QR must never
+  // be able to submit an order even if it somehow still had the menu loaded in an old tab.
+  if (table.qrMode === "session") {
+    if (!table.sessionToken || body?.token !== table.sessionToken) {
+      return NextResponse.json({ error: "QR นี้หมดอายุหรือยังไม่เปิดใช้งาน กรุณาขอ QR ใหม่จากพนักงาน" }, { status: 404 });
+    }
+  }
+
   const selections = body?.items;
   if (!Array.isArray(selections) || selections.length === 0) {
     return NextResponse.json({ error: "ไม่มีรายการสั่ง" }, { status: 400 });

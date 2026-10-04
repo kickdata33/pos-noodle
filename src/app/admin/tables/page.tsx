@@ -5,7 +5,7 @@ import { useEffect, useState } from "react";
 import { AdminSection } from "@/components/admin/AdminSection";
 import { SortButtons } from "@/components/admin/SortButtons";
 import { BulkCreateTablesDialog } from "@/components/admin/tables/BulkCreateTablesDialog";
-import { TableQrDialog } from "@/components/admin/tables/TableQrDialog";
+import { TableQrDialog } from "@/components/shared/TableQrDialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -37,6 +37,10 @@ export default function TablesPage() {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState<PosTable | null>(null);
   const [name, setName] = useState("");
+  // Item: "ลูกค้าแอบถ่ายรูป QR แล้วสั่งทีหลังได้ไหม" — see `Table.qrMode`'s own comment for what
+  // "session" actually changes. Admin-only (this whole dialog already is), same as every other
+  // table field; staff just (re)generate the current token from `TableQrDialog`'s own button.
+  const [qrMode, setQrMode] = useState<"static" | "session">("static");
   const [saving, setSaving] = useState(false);
   const [qrTable, setQrTable] = useState<PosTable | null>(null);
   const [bulkOpen, setBulkOpen] = useState(false);
@@ -49,12 +53,14 @@ export default function TablesPage() {
   function openCreate() {
     setEditing(null);
     setName("");
+    setQrMode("static");
     setDialogOpen(true);
   }
 
   function openEdit(table: PosTable) {
     setEditing(table);
     setName(table.name);
+    setQrMode(table.qrMode === "session" ? "session" : "static");
     setDialogOpen(true);
   }
 
@@ -64,7 +70,15 @@ export default function TablesPage() {
     setSaving(true);
     try {
       if (editing) {
-        await tableRepository.update(editing.id, { name: trimmed });
+        // Turning session mode off clears any leftover token too — otherwise a table switched
+        // back to "static" would still have a stale `sessionToken` sitting unused in Firestore
+        // (harmless since `qrMode !== "session"` means nothing ever reads it, but confusing to
+        // leave around).
+        await tableRepository.update(editing.id, {
+          name: trimmed,
+          qrMode,
+          ...(qrMode === "static" ? { sessionToken: null } : {}),
+        });
       } else {
         await tableRepository.create({
           shopId,
@@ -72,6 +86,8 @@ export default function TablesPage() {
           sortOrder: items.length,
           active: true,
           createdAt: Date.now(),
+          qrMode,
+          sessionToken: null,
         });
       }
       setDialogOpen(false);
@@ -127,7 +143,14 @@ export default function TablesPage() {
                   onDown={() => move(index, "down")}
                 />
               </TableCell>
-              <TableCell className="font-medium">{table.name}</TableCell>
+              <TableCell className="font-medium">
+                {table.name}
+                {table.qrMode === "session" ? (
+                  <Badge variant="muted" className="ml-2">
+                    QR เปลี่ยนใหม่
+                  </Badge>
+                ) : null}
+              </TableCell>
               <TableCell>
                 <Badge variant={table.active ? "success" : "muted"}>
                   {table.active ? "เปิดใช้งาน" : "ปิดชั่วคราว"}
@@ -172,6 +195,19 @@ export default function TablesPage() {
               onChange={(e) => setName(e.target.value)}
               placeholder="เช่น โต๊ะ 9"
               autoFocus
+            />
+          </div>
+          <div className="flex items-center justify-between gap-2 rounded-md border border-border p-3">
+            <div>
+              <p className="text-sm font-medium">QR แบบเปลี่ยนใหม่ทุกรอบ</p>
+              <p className="text-xs text-muted-foreground">
+                ปลอดภัยขึ้น — กันลูกค้าถ่ายรูป QR แล้วสั่งซ้ำหลังเช็คบิลแล้ว แต่พนักงานต้องกด &quot;สร้าง
+                QR ใหม่&quot; ทุกครั้งที่มีลูกค้านั่งโต๊ะนี้ (ปกติเปิดไว้คือ QR ถาวร ไม่ต้องทำอะไรเพิ่ม)
+              </p>
+            </div>
+            <Switch
+              checked={qrMode === "session"}
+              onCheckedChange={(checked) => setQrMode(checked ? "session" : "static")}
             />
           </div>
           <DialogFooter>

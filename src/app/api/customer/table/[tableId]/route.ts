@@ -11,7 +11,7 @@ import type { Order, Table } from "@/types";
  * menu, since scanning a QR for a closed table is a real "you shouldn't be ordering here" state,
  * not just "nothing to show yet".
  */
-export async function GET(_request: NextRequest, { params }: { params: Promise<{ tableId: string }> }) {
+export async function GET(request: NextRequest, { params }: { params: Promise<{ tableId: string }> }) {
   const { tableId } = await params;
   const db = getAdminDb();
 
@@ -22,6 +22,16 @@ export async function GET(_request: NextRequest, { params }: { params: Promise<{
   const table = { ...tableSnap.data(), id: tableSnap.id } as Table;
   if (!table.active) {
     return NextResponse.json({ error: "โต๊ะนี้ปิดใช้งานอยู่" }, { status: 404 });
+  }
+  // `qrMode: "session"` tables (item: "ลูกค้าแอบถ่ายรูป QR แล้วสั่งทีหลังได้ไหม") only accept a
+  // request carrying the table's *current* one-time token — see `Table.sessionToken`'s own
+  // comment. A `"static"` table (or any table from before this field existed) skips this check
+  // entirely, same permanent-link behavior as always.
+  if (table.qrMode === "session") {
+    const token = request.nextUrl.searchParams.get("s");
+    if (!table.sessionToken || token !== table.sessionToken) {
+      return NextResponse.json({ error: "QR นี้หมดอายุหรือยังไม่เปิดใช้งาน กรุณาขอ QR ใหม่จากพนักงาน" }, { status: 404 });
+    }
   }
 
   const openOrderSnap = await db

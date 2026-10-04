@@ -56,6 +56,20 @@ function notifyOrderEvent(
   });
 }
 
+/**
+ * Invalidates the table's one-time QR token the moment its bill closes — see
+ * `/api/pos/tables/[id]/close-session`'s own comment for why this exists (closing the
+ * "photographed QR still works after the table turned over" gap) and why it's safe to call
+ * unconditionally for every dine-in checkout/cancel (a no-op for a `qrMode: "static"` table).
+ * Fire-and-forget, same reasoning as `notifyOrderEvent` right above — never worth blocking
+ * checkout/cancel over.
+ */
+function closeTableSession(tableId: string) {
+  void fetch(`/api/pos/tables/${tableId}/close-session`, { method: "POST" }).catch(() => {
+    // Best-effort — see the function comment above.
+  });
+}
+
 interface Props {
   orderId: string | null;
   initialTableId: string | null;
@@ -417,6 +431,7 @@ export function OrderScreen({ orderId, initialTableId, initialChannelId }: Props
       createdAt: updatedAt,
     });
     notifyOrderEvent("cancelled", current);
+    if (current.tableId) closeTableSession(current.tableId);
     router.push("/pos");
   }
 
@@ -431,9 +446,14 @@ export function OrderScreen({ orderId, initialTableId, initialChannelId }: Props
   async function confirmMoveTable(newTable: Table) {
     const current = orderRef.current;
     if (!current?.id || !current.tableId) return;
+    const fromTableId = current.tableId;
     const fromTableName = current.tableName;
     const updatedAt = Date.now();
     await orderRepository.update(current.id, { tableId: newTable.id, tableName: newTable.name, updatedAt });
+    // The bill just left this table entirely (same "now free" moment as a paid/cancelled
+    // checkout, just via a move instead) — close its QR session too, so a photo of *this* table's
+    // old QR can't later get mistaken for a brand-new order here once someone new sits down.
+    closeTableSession(fromTableId);
     await auditLogRepository.create({
       shopId,
       action: "ORDER_TABLE_MOVED",
@@ -536,6 +556,7 @@ export function OrderScreen({ orderId, initialTableId, initialChannelId }: Props
         createdAt: paidAt,
       });
       notifyOrderEvent("paid", { ...order, total: totals.total, paymentMethodName: payment.paymentMethodName });
+      if (order.tableId) closeTableSession(order.tableId);
       // Auto-print the receipt once checkout succeeds — fire-and-forget, deliberately not
       // awaited before navigating away: an unreachable/offline printer has no fetch timeout
       // worth blocking staff on, and the sale itself already went through regardless of whether

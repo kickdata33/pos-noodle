@@ -77,8 +77,21 @@ function wasClosedThisTab(tableId: string): boolean {
  * their file comments for why), has no checkout/removal/audit-log affordances, and submits a
  * whole cart at once instead of auto-saving per tap.
  */
-export function CustomerOrderScreen({ tableId }: { tableId: string }) {
+export function CustomerOrderScreen({
+  tableId,
+  sessionToken,
+}: {
+  tableId: string;
+  /** The table's current one-time QR token (`?s=` on this page's URL) — `null` for an ordinary
+   * `qrMode: "static"` table's permanent link. Sent on every request to `/api/customer/table/*`
+   * so a `qrMode: "session"` table can validate it server-side; harmless to always send, since a
+   * `"static"` table's API routes ignore it entirely. See `Table.sessionToken`'s own comment. */
+  sessionToken: string | null;
+}) {
   const [status, setStatus] = useState<Status>("loading");
+  // Query-string suffix appended to every GET below — computed once since `sessionToken` never
+  // changes for the lifetime of this tab (a new token means a new scan, i.e. a fresh page load).
+  const tokenQuery = sessionToken ? `?s=${encodeURIComponent(sessionToken)}` : "";
   const [menu, setMenu] = useState<MenuResponse | null>(null);
   const [tableInfo, setTableInfo] = useState<TableResponse | null>(null);
   const [activeCategoryId, setActiveCategoryId] = useState<string | null>(null);
@@ -121,7 +134,7 @@ export function CustomerOrderScreen({ tableId }: { tableId: string }) {
       try {
         const [menuRes, tableRes] = await Promise.all([
           fetch("/api/customer/menu"),
-          fetch(`/api/customer/table/${tableId}`),
+          fetch(`/api/customer/table/${tableId}${tokenQuery}`),
         ]);
         if (cancelled) return;
         if (!tableRes.ok) {
@@ -143,7 +156,7 @@ export function CustomerOrderScreen({ tableId }: { tableId: string }) {
     return () => {
       cancelled = true;
     };
-  }, [tableId]);
+  }, [tableId, tokenQuery]);
 
   // Cuts the customer off the moment staff checks out this table's bill (item: "หลังคิดเงินทุก
   // ครั้ง ต้องสแกนใหม่") — the QR is meant to be reusable table-to-table, not a standing link
@@ -160,7 +173,7 @@ export function CustomerOrderScreen({ tableId }: { tableId: string }) {
     if (status !== "ready" || !hasActiveOrder) return;
     const interval = setInterval(async () => {
       try {
-        const res = await fetch(`/api/customer/table/${tableId}`);
+        const res = await fetch(`/api/customer/table/${tableId}${tokenQuery}`);
         if (!res.ok) return;
         const table = (await res.json()) as TableResponse;
         if (table.orderNumber === null) {
@@ -175,7 +188,7 @@ export function CustomerOrderScreen({ tableId }: { tableId: string }) {
       }
     }, 3000);
     return () => clearInterval(interval);
-  }, [status, hasActiveOrder, tableId]);
+  }, [status, hasActiveOrder, tableId, tokenQuery]);
 
   const activeCategories = useMemo(() => menu?.categories ?? [], [menu]);
   const currentCategoryId = activeCategoryId ?? activeCategories[0]?.id ?? null;
@@ -263,6 +276,7 @@ export function CustomerOrderScreen({ tableId }: { tableId: string }) {
             optionIds: line.modifiers.map((m) => m.optionId),
             note: line.note,
           })),
+          token: sessionToken,
         }),
       });
       const data = (await response.json()) as { error?: string };
