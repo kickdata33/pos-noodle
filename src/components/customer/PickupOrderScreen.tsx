@@ -405,7 +405,7 @@ export function PickupOrderScreen() {
               <img
                 src={product.imageUrl}
                 alt={product.name}
-                className={"h-20 w-full rounded-md object-cover" + (product.active ? "" : " opacity-60 grayscale")}
+                className={"aspect-square w-full rounded-md object-cover" + (product.active ? "" : " opacity-60 grayscale")}
               />
             ) : null}
             <span className={"font-medium" + (product.active ? "" : " line-through")}>{product.name}</span>
