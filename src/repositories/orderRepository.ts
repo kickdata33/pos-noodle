@@ -57,6 +57,23 @@ class OrderRepository extends FirestoreRepository<Order> {
       orderBy("paidAt", "asc")
     );
   }
+
+  /**
+   * Every PAID order the shop has ever taken, oldest first — the source data for the investment
+   * summary page (`lib/pos/investmentAnalysis.ts`), which needs the shop's whole sales history to
+   * compute "ยอดขายเฉลี่ยต่อวัน/เดือน" and payback progress against the money put in, not just one
+   * visible date range. Reuses the same `shopId+status+paidAt` composite index as
+   * `listPaidForShopInRange` — equality filters on `shopId`/`status` plus an `orderBy` on the
+   * index's trailing field (`paidAt`) are covered by that index even with no range filter on
+   * `paidAt`, so this needs no index of its own.
+   */
+  listAllPaidForShop(shopId: string): Promise<Order[]> {
+    return this.list(
+      where("shopId", "==", shopId),
+      where("status", "==", "PAID"),
+      orderBy("paidAt", "asc")
+    );
+  }
 }
 
 export const orderRepository = new OrderRepository();

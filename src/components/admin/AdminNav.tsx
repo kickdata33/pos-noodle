@@ -26,6 +26,7 @@ const NAV_ITEMS: NavItem[] = [
   { href: "/admin/cash-safe", label: "ตัดเงินสดออก", moduleKey: "cashSafe" },
   { href: "/admin/delivery", label: "ยอดขาย Delivery", moduleKey: "delivery" },
   { href: "/admin/payroll", label: "เงินเดือนพนักงาน", moduleKey: "payroll" },
+  { href: "/admin/investment", label: "สรุปการลงทุน" },
   { href: "/admin/orders", label: "รายการบิล" },
   { href: "/admin/categories", label: "หมวดหมู่" },
   { href: "/admin/products", label: "เมนู" },

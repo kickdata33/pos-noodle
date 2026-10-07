@@ -145,6 +145,14 @@
         { "fieldPath": "shopId", "order": "ASCENDING" },
         { "fieldPath": "dateKey", "order": "DESCENDING" }
       ]
+    },
+    {
+      "collectionGroup": "investments",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "shopId", "order": "ASCENDING" },
+        { "fieldPath": "dateKey", "order": "DESCENDING" }
+      ]
     }
   ],
   "fieldOverrides": []

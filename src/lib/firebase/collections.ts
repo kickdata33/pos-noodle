@@ -102,4 +102,8 @@ export const COLLECTIONS = {
   /** Manual "we counted the cash-moved-out safe/bank stash" checkpoints — see
    * `types/cashSafeCount.ts`. Same access model as `expenses`. */
   cashSafeCounts: "cashSafeCounts",
+  /** Admin-entered one-off capital put into the shop (ค่าเซ้ง, ค่าตกแต่ง/อุปกรณ์, ของเริ่มต้น, ...) —
+   * see `types/investment.ts`. Deliberately separate from `expenses` so it never reduces a day's
+   * operating P&L. Same access model as `expenses`. */
+  investments: "investments",
 } as const;
