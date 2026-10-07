@@ -1,4 +1,4 @@
-import { bangkokDateKey, bangkokDateKeyWithCutoff, dateKeysBetween, ledgerBusinessDayKey } from "./dateRange";
+import { bangkokDateKey, bangkokDateKeyWithCutoff, dateKeysBetween } from "./dateRange";
 import type { DeliveryPayout, Expense, Order } from "@/types";
 
 /**
@@ -11,17 +11,26 @@ import type { DeliveryPayout, Expense, Order } from "@/types";
  * all sources combined"), not a replacement.
  *
  * `businessDayFromHour` (item: "มีฟังก์ชันเปิดปิด ยอดขาย 16:00-06:00 หรือตั้งเวลาเองได้") switches
- * orders to the same shift-based day the reconciliation table above it uses, so the two can be
- * compared apples-to-apples when wanted: `undefined` (the default) keeps plain calendar days for
- * everything, matching every record's own stored `dateKey`/timestamp exactly as before this option
+ * *orders only* to the same shift-based day the reconciliation table above it uses, so the two can
+ * be compared apples-to-apples when wanted: `undefined` (the default) keeps plain calendar days for
+ * orders too, matching every order's own `paidAt`/`createdAt` exactly as before this option
  * existed. A number re-groups orders by `bangkokDateKeyWithCutoff` on their `paidAt`.
- * `Expense`/`DeliveryPayout` are grouped by `ledgerBusinessDayKey` (using `businessDayToHour`, not
- * `businessDayFromHour` — see that function's comment for why the two thresholds must differ for a
- * ledger row) whenever the toggle is on — their own stored `dateKey` is trusted directly unless the
- * row was logged live during the early-morning tail before `businessDayToHour`, never re-derived
- * wholesale from `createdAt` the way an earlier version of this file did (that broke on any
- * backfilled/recurring-generated row, *and* separately on any same-day daytime expense — see
- * `ledgerBusinessDayKey`'s comment for both production bugs this caused).
+ *
+ * `Expense`/`DeliveryPayout` always group by their own stored `dateKey` directly, regardless of
+ * this toggle — same as `reconciliation.ts`'s `expensesForDay` and the รายจ่าย ledger list on
+ * `/admin/accounting`, and deliberately so: unlike an `Order`, these rows carry an explicit
+ * `dateKey` chosen by whoever logged them, so there's no timestamp ambiguity to resolve in the
+ * first place. An earlier version of this file tried to re-derive a "business day" for these rows
+ * from `createdAt` instead (via a since-removed `ledgerBusinessDayKey` helper) — meant to handle a
+ * live entry made right after midnight, still part of the previous night's shift — but it quietly
+ * mis-shifted the รายจ่ายประจำ auto-generator's rows too: that generator stamps `createdAt:
+ * Date.now()` at whatever moment someone happens to have `/admin/accounting` open, which is not a
+ * "live, in-the-moment" entry at all, yet looked exactly like one whenever that moment fell before
+ * the cutoff hour — silently moving that day's recurring expense onto the *previous* business day
+ * on this page and `/admin/reports`, while `/admin/accounting`'s own รายจ่าย list (and the
+ * reconciliation table) kept showing it under its real date. Three views of "ค่าใช้จ่ายวันที่ X"
+ * disagreeing with no visible reason was worse than the shift-disambiguation was worth, so every
+ * ledger row now simply trusts its own `dateKey`, everywhere, always.
  *
  * Pure — no Firestore, no `Date.now()` — unit-tested directly (`scripts/dailyProfitLoss.test.ts`).
  */
@@ -41,11 +50,7 @@ export function dailyProfitLossRows(
   expenses: readonly Expense[],
   startKey: string,
   endKey: string,
-  businessDayFromHour?: number,
-  // Only meaningful when `businessDayFromHour` is set; defaults to the shop's usual close hour
-  // (matches the `toHour` default on both this page and `/admin/reports`) so existing callers that
-  // only ever pass `businessDayFromHour` keep working.
-  businessDayToHour: number = 6
+  businessDayFromHour?: number
 ): DailyProfitLossRow[] {
   const keyForTime = (epochMs: number): string =>
     businessDayFromHour != null ? bangkokDateKeyWithCutoff(epochMs, businessDayFromHour) : bangkokDateKey(epochMs);
@@ -59,16 +64,14 @@ export function dailyProfitLossRows(
 
   const deliveryByDay: Record<string, number> = {};
   for (const p of deliveryPayouts) {
-    const key = businessDayFromHour != null ? ledgerBusinessDayKey(p.dateKey, p.createdAt, businessDayToHour) : p.dateKey;
-    if (key < startKey || key > endKey) continue;
-    deliveryByDay[key] = (deliveryByDay[key] ?? 0) + p.amount;
+    if (p.dateKey < startKey || p.dateKey > endKey) continue;
+    deliveryByDay[p.dateKey] = (deliveryByDay[p.dateKey] ?? 0) + p.amount;
   }
 
   const expensesByDay: Record<string, number> = {};
   for (const e of expenses) {
-    const key = businessDayFromHour != null ? ledgerBusinessDayKey(e.dateKey, e.createdAt, businessDayToHour) : e.dateKey;
-    if (key < startKey || key > endKey) continue;
-    expensesByDay[key] = (expensesByDay[key] ?? 0) + e.amount;
+    if (e.dateKey < startKey || e.dateKey > endKey) continue;
+    expensesByDay[e.dateKey] = (expensesByDay[e.dateKey] ?? 0) + e.amount;
   }
 
   return dateKeysBetween(startKey, endKey).map((dateKey) => {

@@ -19,7 +19,6 @@ import {
   bangkokDateKeyWithCutoff,
   bangkokDayBounds,
   customRange,
-  ledgerBusinessDayKey,
   resolvePreset,
   type DateRange,
   type ReportPreset,
@@ -189,43 +188,31 @@ export default function ReportsPage() {
   const channels = useMemo(() => salesByChannel(scopedOrders), [scopedOrders]);
   const paymentMethods = useMemo(() => salesByPaymentMethod(scopedOrders), [scopedOrders]);
 
-  // ค่าใช้จ่ายรวม ในช่วงที่เลือก — ปกติใช้ plain calendar `dateKey` เหมือนหน้าบัญชีรายรับ-รายจ่าย
-  // (Expense เก็บเป็นวันปฏิทินธรรมดา ไม่ใช่ business-day key) แต่เมื่อเปิด "ดูตามช่วงเวลาทำการ" ไว้
-  // (`useBusinessDay`) ให้สลับไปกลุ่มด้วย `ledgerBusinessDayKey` แทน (ดูคอมเมนต์ของฟังก์ชันนั้นใน
-  // `dateRange.ts` — เคยใช้ `bangkokDateKeyWithCutoff(e.createdAt, fromHour)` ตรงๆ มาก่อน แต่พบบั๊กจริง
-  // ใน production ถึงสองแบบ: (1) รายจ่ายประจำที่ auto-generate ย้อนหลัง (สูงสุด 30 วัน) ทุกแถวจะมี
-  // `createdAt` เป็นเวลาที่ระบบสร้างแถว ไม่ใช่วันที่รายจ่ายนั้นเกิดขึ้นจริง ทำให้ยอดทั้งหมดไปกองอยู่วันที่
-  // auto-gen รัน และ (2) รายจ่ายที่บันทึกสดตอนกลางวัน (เช่น ไปจ่ายตลาดตอนเช้าก่อนร้านเปิดกะ 16:00) ก็ถูก
-  // ดันไปเป็นของ "เมื่อวาน" อย่างผิดๆ เพราะเทียบกับ `fromHour` (16:00) ตรงๆ — `ledgerBusinessDayKey` ใช้
-  // `toHour` แทน `fromHour` ถึงจะถูก (ดูคอมเมนต์ของฟังก์ชันนั้นสำหรับเหตุผลเต็มๆ).
-  const totalExpenses = useMemo(() => {
-    if (!useBusinessDay) {
-      return expenses.filter((e) => e.dateKey >= range.startKey && e.dateKey <= range.endKey).reduce((sum, e) => sum + e.amount, 0);
-    }
-    return expenses
-      .filter((e) => {
-        const key = ledgerBusinessDayKey(e.dateKey, e.createdAt, toHour);
-        return key >= range.startKey && key <= range.endKey;
-      })
-      .reduce((sum, e) => sum + e.amount, 0);
-  }, [expenses, range.startKey, range.endKey, useBusinessDay, toHour]);
+  // ค่าใช้จ่ายรวม ในช่วงที่เลือก — ใช้ plain calendar `dateKey` เสมอ ไม่ว่า "ดูตามช่วงเวลาทำการ"
+  // (`useBusinessDay`) จะเปิดหรือปิด เหมือนหน้าบัญชีรายรับ-รายจ่ายทั้งตารางกระทบยอดและตาราง
+  // กำไร/ขาดทุนสุทธิ และตาราง "รายจ่าย" ดิบเอง (Expense เก็บเป็นวันปฏิทินธรรมดา ไม่ใช่ business-day
+  // key — ไม่มีความกำกวมเรื่องเวลาแบบ `Order` ให้ต้องแก้). เคยลองสลับไปกลุ่มตาม business-day แทนตอนเปิด
+  // สวิตช์นี้ (ผ่าน `ledgerBusinessDayKey`, ตอนนี้ลบออกแล้ว) แต่ไปชนบั๊กจริงใน production ซ้ำ: ตัว
+  // รายจ่ายประจำ auto-generate จะ stamp `createdAt: Date.now()` ตอนที่ใครก็ตามเปิดหน้า
+  // `/admin/accounting` ค้างไว้ ซึ่งไม่ใช่เวลาที่ "รายจ่ายนั้นเกิดขึ้นจริง" เลย — ถ้าเปิดหน้าทิ้งไว้ตอนตีหนึ่ง
+  // ตีสอง ระบบจะเข้าใจผิดว่าเป็นการบันทึกสดช่วงท้ายกะ แล้วดันค่าใช้จ่ายของวันนั้นไปกองอยู่วันก่อนหน้าแทน
+  // ทำให้หน้านี้กับตารางกระทบยอด/ตาราง "รายจ่าย" เห็นยอดไม่ตรงกันโดยไม่มีเหตุผลที่มองเห็นได้ — เลยยกเลิก
+  // การสลับกลุ่มของค่าใช้จ่าย/รายได้ Delivery ไปเลย ให้ยึดวันที่บันทึกไว้ตรงๆ ทุกที่เสมอ.
+  const totalExpenses = useMemo(
+    () => expenses.filter((e) => e.dateKey >= range.startKey && e.dateKey <= range.endKey).reduce((sum, e) => sum + e.amount, 0),
+    [expenses, range.startKey, range.endKey]
+  );
 
   // รายได้ Delivery ในช่วงที่เลือก — ยึดตามเงินที่แอป Grab/Line man/Shopee โอนเข้าบัญชีจริง (บันทึกไว้
   // ในหน้า "ยอดขาย Delivery") ไม่ใช่ยอดขายที่ระบบ POS คำนวณจากบิล (ซึ่งมักจะขึ้น 0 ถ้าพนักงานไม่ได้
   // เลือกวิธีชำระเป็น "Delivery" ตอนปิดบิล) — ถือเป็นรายได้ที่เข้าจริงตรงๆ ไม่ต้องเทียบ/หักลบกับยอดขาย
   // เหมือนคอลัมน์ "คงเหลือ" ในหน้ายอดขาย Delivery ที่อาจติดลบได้. เช่นเดียวกับ `totalExpenses` ข้างบน —
-  // เมื่อเปิด "ดูตามช่วงเวลาทำการ" ให้กลุ่มด้วย `ledgerBusinessDayKey` (ตาม `toHour`) เช่นกัน.
-  const deliveryRevenue = useMemo(() => {
-    if (!useBusinessDay) {
-      return deliveryPayouts.filter((p) => p.dateKey >= range.startKey && p.dateKey <= range.endKey).reduce((sum, p) => sum + p.amount, 0);
-    }
-    return deliveryPayouts
-      .filter((p) => {
-        const key = ledgerBusinessDayKey(p.dateKey, p.createdAt, toHour);
-        return key >= range.startKey && key <= range.endKey;
-      })
-      .reduce((sum, p) => sum + p.amount, 0);
-  }, [deliveryPayouts, range.startKey, range.endKey, useBusinessDay, toHour]);
+  // ยึด `dateKey` ตรงๆ เสมอ ไม่สลับกลุ่มตาม `useBusinessDay` (ดูคอมเมนต์ของ `totalExpenses` สำหรับ
+  // เหตุผลเต็มๆ).
+  const deliveryRevenue = useMemo(
+    () => deliveryPayouts.filter((p) => p.dateKey >= range.startKey && p.dateKey <= range.endKey).reduce((sum, p) => sum + p.amount, 0),
+    [deliveryPayouts, range.startKey, range.endKey]
+  );
   // รายรับรวม (ยอดขายทั้งร้าน + รายได้ Delivery) — item request: เดิมเอาแค่ "รายได้ Delivery" (เงินโอน
   // เข้าจากแอป) ไปหักกับ "ค่าใช้จ่ายทั้งร้าน" ทำให้ผลต่างติดลบเกินจริงมาก เพราะเทียบรายจ่ายทั้งร้านกับ
   // รายได้แค่ช่องทางเดียว ตอนนี้รวมยอดขายทั้งร้าน (`summary.revenue`) เข้ากับรายได้ Delivery ก่อน

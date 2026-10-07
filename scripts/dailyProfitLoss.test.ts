@@ -134,47 +134,29 @@ test("dailyProfitLossRows: with businessDayFromHour, orders group by shift inste
   assert.equal(rows[0].posSales, 1000);
 });
 
-test("dailyProfitLossRows: with businessDayFromHour, a live same-moment entry still gets its cutoff disambiguated", () => {
-  // Logged with dateKey "2026-09-16" (defaulted to "today" at the moment of entry) but actually
-  // entered at 00:30 on the 16th — still part of the shift that started 16:00 on the 15th, and
-  // createdAt's own plain calendar date ("2026-09-16") matches the stored dateKey, so this counts
-  // as a live entry and gets re-derived via the cutoff.
+test("dailyProfitLossRows: with businessDayFromHour, Expense/DeliveryPayout never shift — only Order does", () => {
+  // Regression test for a real production bug: an expense/delivery payout logged with dateKey
+  // "2026-09-16" but created at 00:30 on the 16th (e.g. the รายจ่ายประจำ auto-generator stamping
+  // `createdAt: Date.now()` at whatever moment someone happened to have /admin/accounting open)
+  // used to look exactly like a "live, just-after-midnight" entry and get silently re-derived onto
+  // the previous business day — while the รายจ่าย ledger list and the reconciliation table kept
+  // showing it under the 16th, so the two disagreed with no visible reason. Ledger rows must always
+  // stay on their own stored `dateKey`, regardless of `businessDayFromHour` or what time they were
+  // created.
   const justAfterMidnight = SEP_15_MIDNIGHT_BKK + 24 * 60 * 60 * 1000 + 30 * 60 * 1000;
   const rows = dailyProfitLossRows(
     [],
     [payout("2026-09-16", 300, justAfterMidnight)],
     [expense("2026-09-16", 200, justAfterMidnight)],
-    "2026-09-15",
-    "2026-09-15",
+    "2026-09-16",
+    "2026-09-16",
     16
   );
   assert.equal(rows[0].deliveryRevenue, 300);
   assert.equal(rows[0].expenses, 200);
 });
 
-test("dailyProfitLossRows: with businessDayFromHour, a backfilled/recurring-generated row keeps its stored dateKey, not createdAt's day", () => {
-  // Regression test for a real production bug: a recurring-expense row for "2026-09-15" that was
-  // actually auto-generated two days later (createdAt on the 17th, catching up a missed day) must
-  // still count under the 15th — not get dumped onto whatever day the catch-up happened to run.
-  const generatedTwoDaysLater = SEP_15_MIDNIGHT_BKK + 2 * 24 * 60 * 60 * 1000 + 9 * 60 * 60 * 1000;
-  const rows = dailyProfitLossRows(
-    [],
-    [payout("2026-09-15", 300, generatedTwoDaysLater)],
-    [expense("2026-09-15", 200, generatedTwoDaysLater)],
-    "2026-09-15",
-    "2026-09-15",
-    16
-  );
-  assert.equal(rows[0].deliveryRevenue, 300);
-  assert.equal(rows[0].expenses, 200);
-});
-
-test("dailyProfitLossRows: with businessDayFromHour, a live daytime expense before the next shift starts keeps its own calendar date", () => {
-  // Regression test for a second real production bug: an expense entered at 10:00 — e.g. the
-  // morning market run for that evening's service — is well before `businessDayFromHour` (16) but
-  // must NOT be dumped onto the previous day the way a just-after-midnight entry is. The shop is
-  // simply closed between its close hour (`businessDayToHour`, defaults to 6) and the next shift's
-  // start, so there's no still-open previous shift this could be confused with.
+test("dailyProfitLossRows: with businessDayFromHour, a daytime expense/payout also keeps its own calendar date (unchanged, was already correct)", () => {
   const tenAm = SEP_15_MIDNIGHT_BKK + 10 * 60 * 60 * 1000;
   const rows = dailyProfitLossRows(
     [],

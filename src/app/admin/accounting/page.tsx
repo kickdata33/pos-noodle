@@ -315,10 +315,9 @@ export default function AccountingPage() {
         expenses,
         range.startKey,
         range.endKey,
-        profitLossUseBusinessDay ? fromHour : undefined,
-        toHour
+        profitLossUseBusinessDay ? fromHour : undefined
       ),
-    [orders, deliveryPayouts, expenses, range.startKey, range.endKey, profitLossUseBusinessDay, fromHour, toHour]
+    [orders, deliveryPayouts, expenses, range.startKey, range.endKey, profitLossUseBusinessDay, fromHour]
   );
   const profitLossTotal = useMemo(() => totalProfitLoss(profitLossRows), [profitLossRows]);
 
@@ -564,14 +563,15 @@ export default function AccountingPage() {
             <CardDescription>
               {profitLossUseBusinessDay ? (
                 <>
-                  นับเป็นวันทำการตามกะ ({String(fromHour).padStart(2, "0")}:00 ถึง {String(toHour).padStart(2, "0")}:00 ของวันถัดไป) เหมือน
-                  ตารางด้านบน — ปรับเวลาที่ช่อง &quot;1 วันทำการ นับตั้งแต่&quot; ด้านบนสุดของหน้า
+                  ยอดขาย POS นับเป็นวันทำการตามกะ ({String(fromHour).padStart(2, "0")}:00 ถึง {String(toHour).padStart(2, "0")}:00 ของวันถัดไป)
+                  เหมือนตารางด้านบน — ปรับเวลาที่ช่อง &quot;1 วันทำการ นับตั้งแต่&quot; ด้านบนสุดของหน้า ส่วนค่าใช้จ่ายและรายได้ Delivery ยึดวันที่ที่บันทึกไว้
+                  เสมอไม่ว่าสวิตช์นี้จะเปิดหรือปิด (ตรงกับตาราง &quot;รายจ่าย&quot; และตารางด้านบนทุกครั้ง)
                 </>
               ) : (
                 <>
-                  นับตามวันปฏิทินจริง (เที่ยงคืนถึงเที่ยงคืน) เพราะค่าใช้จ่ายและรายได้ Delivery บันทึกเป็นวันปฏิทินอยู่แล้ว — ไม่ใช่วันทำการตามกะแบบ
-                  ตารางด้านบน ยอดขาย POS ของวันที่เดียวกันจึงอาจเห็นไม่ตรงกับตารางด้านบน (ไม่ใช่ข้อมูลผิด แค่นับวันคนละแบบ) — เปิดสวิตช์ด้านขวา
-                  เพื่อนับแบบเดียวกับตารางด้านบนแทน
+                  นับตามวันปฏิทินจริง (เที่ยงคืนถึงเที่ยงคืน) — ค่าใช้จ่ายและรายได้ Delivery ยึดวันที่ที่บันทึกไว้เสมอไม่ว่าสวิตช์นี้จะเปิดหรือปิด
+                  (ตรงกับตาราง &quot;รายจ่าย&quot; ด้านล่างทุกครั้ง) มีแค่ยอดขาย POS เท่านั้นที่จะต่างจากตารางด้านบน เพราะตารางด้านบนนับเป็นวันทำการตามกะ
+                  (ไม่ใช่ข้อมูลผิด แค่นับวันคนละแบบ) — เปิดสวิตช์ด้านขวาเพื่อนับยอดขาย POS แบบเดียวกับตารางด้านบนแทน
                 </>
               )}
             </CardDescription>
