@@ -33,9 +33,10 @@ import {
 } from "@/lib/pos/reports";
 import { deliveryPayoutRepository } from "@/repositories/deliveryPayoutRepository";
 import { expenseRepository } from "@/repositories/expenseRepository";
+import { modifierGroupRepository } from "@/repositories/modifierRepository";
 import { orderRepository } from "@/repositories/orderRepository";
 import { shopRepository } from "@/repositories/shopRepository";
-import type { DeliveryPayout, Expense, Order } from "@/types";
+import type { DeliveryPayout, Expense, ModifierGroup, Order } from "@/types";
 
 const PRESETS: { value: ReportPreset; label: string }[] = [
   { value: "today", label: "วันนี้" },
@@ -79,6 +80,7 @@ export default function ReportsPage() {
 
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [deliveryPayouts, setDeliveryPayouts] = useState<DeliveryPayout[]>([]);
+  const [modifierGroups, setModifierGroups] = useState<ModifierGroup[]>([]);
 
   useEffect(() => {
     if (!shopId) return;
@@ -98,6 +100,14 @@ export default function ReportsPage() {
   useEffect(() => {
     if (!shopId) return;
     return deliveryPayoutRepository.subscribeForShop(shopId, setDeliveryPayouts);
+  }, [shopId]);
+
+  // Groups flagged "แยกยอดขายดีตามตัวเลือกนี้" — fed into `topProducts` below so this page's
+  // "สินค้าขายดี" agrees with the Telegram daily summary, which reads the same flag (see
+  // `ModifierGroup.splitSalesReport`'s comment).
+  useEffect(() => {
+    if (!shopId) return;
+    return modifierGroupRepository.subscribeForShop(shopId, setModifierGroups);
   }, [shopId]);
 
   const range: DateRange = useMemo(() => {
@@ -178,8 +188,13 @@ export default function ReportsPage() {
     });
   }, [orders, useBusinessDay, fromHour, range.startKey, range.endKey]);
 
+  const splitGroupIds = useMemo(
+    () => new Set(modifierGroups.filter((g) => g.splitSalesReport).map((g) => g.id)),
+    [modifierGroups]
+  );
+
   const summary = useMemo(() => summarizeOrders(scopedOrders), [scopedOrders]);
-  const products = useMemo(() => topProducts(scopedOrders, 10), [scopedOrders]);
+  const products = useMemo(() => topProducts(scopedOrders, 10, splitGroupIds), [scopedOrders, splitGroupIds]);
   const days = useMemo(
     () => dailySales(scopedOrders, range.startKey, range.endKey, useBusinessDay ? fromHour : 0),
     [scopedOrders, range.startKey, range.endKey, useBusinessDay, fromHour]
@@ -342,7 +357,9 @@ export default function ReportsPage() {
           </CardHeader>
           <CardContent>
             <BarList
-              rows={products.map((p) => ({ key: p.productId, label: p.productName, value: p.qty, detail: formatCurrency(p.revenue, currency) }))}
+              // key: productName, not productId — a split product (see `splitGroupIds` above)
+              // produces several rows sharing one productId, one per modifier option.
+              rows={products.map((p) => ({ key: p.productName, label: p.productName, value: p.qty, detail: formatCurrency(p.revenue, currency) }))}
               formatValue={(v) => `${v.toLocaleString("th-TH")} ชิ้น`}
             />
           </CardContent>

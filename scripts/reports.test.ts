@@ -22,7 +22,7 @@ import {
   summarizeOrders,
   topProducts,
 } from "../src/lib/pos/reports";
-import type { Order, OrderItem } from "../src/types";
+import type { Order, OrderItem, OrderItemModifier } from "../src/types";
 
 function makeItem(overrides: Partial<OrderItem> & Pick<OrderItem, "id" | "productId">): OrderItem {
   return {
@@ -156,6 +156,109 @@ test("topProducts: aggregates quantity and revenue across orders, sorted by qty 
   assert.equal(top[0].qty, 3);
   assert.equal(top[0].revenue, 180);
   assert.equal(top[1].productId, "p2");
+});
+
+function meatModifier(optionId: string, optionName: string): OrderItemModifier {
+  return { groupId: "g-meat", groupName: "เนื้อสัตว์", optionId, optionName, priceDelta: 0 };
+}
+
+test("topProducts: with no splitByGroupIds (default), items with different modifiers still combine into one line — unchanged behavior", () => {
+  const orders = [
+    makeOrder({
+      id: "o1",
+      total: 120,
+      paidAt: 1,
+      items: [
+        makeItem({ id: "i1", productId: "p1", productName: "ก๋วยเตี๋ยวหมู / เนื้อ", quantity: 1, lineTotal: 60, modifiers: [meatModifier("m-pork", "หมู")] }),
+        makeItem({ id: "i2", productId: "p1", productName: "ก๋วยเตี๋ยวหมู / เนื้อ", quantity: 1, lineTotal: 60, modifiers: [meatModifier("m-beef", "เนื้อ")] }),
+      ],
+    }),
+  ];
+  const top = topProducts(orders);
+  assert.equal(top.length, 1);
+  assert.equal(top[0].qty, 2);
+  assert.equal(top[0].revenue, 120);
+  assert.equal(top[0].productName, "ก๋วยเตี๋ยวหมู / เนื้อ");
+});
+
+test("topProducts: splitByGroupIds breaks one product into a line per modifier option chosen from a flagged group", () => {
+  const orders = [
+    makeOrder({
+      id: "o1",
+      total: 240,
+      paidAt: 1,
+      items: [
+        makeItem({ id: "i1", productId: "p1", productName: "ก๋วยเตี๋ยว", quantity: 2, lineTotal: 120, modifiers: [meatModifier("m-pork", "หมู")] }),
+        makeItem({ id: "i2", productId: "p1", productName: "ก๋วยเตี๋ยว", quantity: 1, lineTotal: 60, modifiers: [meatModifier("m-beef", "เนื้อ")] }),
+        makeItem({ id: "i3", productId: "p1", productName: "ก๋วยเตี๋ยว", quantity: 1, lineTotal: 60, modifiers: [meatModifier("m-tomyum", "ต้มยำ")] }),
+      ],
+    }),
+  ];
+  const top = topProducts(orders, 10, new Set(["g-meat"]));
+  assert.equal(top.length, 3);
+  const pork = top.find((p) => p.productName === "ก๋วยเตี๋ยว (หมู)");
+  const beef = top.find((p) => p.productName === "ก๋วยเตี๋ยว (เนื้อ)");
+  const tomyum = top.find((p) => p.productName === "ก๋วยเตี๋ยว (ต้มยำ)");
+  assert.ok(pork && beef && tomyum, "all three variants should appear as separate lines");
+  assert.equal(pork!.qty, 2);
+  assert.equal(pork!.revenue, 120);
+  assert.equal(beef!.qty, 1);
+  assert.equal(tomyum!.qty, 1);
+  // All three still carry the same underlying productId, for anything that wants to link back.
+  assert.equal(pork!.productId, "p1");
+  assert.equal(beef!.productId, "p1");
+});
+
+test("topProducts: splitByGroupIds only splits on modifiers from a flagged group — an unflagged modifier (e.g. \"ไม่ใส่ผักชี\") never splits the line", () => {
+  const orders = [
+    makeOrder({
+      id: "o1",
+      total: 120,
+      paidAt: 1,
+      items: [
+        makeItem({
+          id: "i1",
+          productId: "p1",
+          productName: "ก๋วยเตี๋ยว",
+          quantity: 1,
+          lineTotal: 60,
+          modifiers: [{ groupId: "g-extras", groupName: "เพิ่มเติม", optionId: "o-no-cilantro", optionName: "ไม่ใส่ผักชี", priceDelta: 0 }],
+        }),
+        makeItem({ id: "i2", productId: "p1", productName: "ก๋วยเตี๋ยว", quantity: 1, lineTotal: 60, modifiers: [] }),
+      ],
+    }),
+  ];
+  // "g-meat" is flagged, but neither item carries a modifier from that group, so both items stay
+  // combined into a single line exactly as if splitByGroupIds were empty.
+  const top = topProducts(orders, 10, new Set(["g-meat"]));
+  assert.equal(top.length, 1);
+  assert.equal(top[0].qty, 2);
+  assert.equal(top[0].productName, "ก๋วยเตี๋ยว");
+});
+
+test("topProducts: a product with two flagged-group modifiers at once (multi-select) lists both options together on one line", () => {
+  const orders = [
+    makeOrder({
+      id: "o1",
+      total: 70,
+      paidAt: 1,
+      items: [
+        makeItem({
+          id: "i1",
+          productId: "p1",
+          productName: "เกาเหลา",
+          quantity: 1,
+          lineTotal: 70,
+          modifiers: [meatModifier("m-beef", "เนื้อ"), meatModifier("m-pork", "หมู")],
+        }),
+      ],
+    }),
+  ];
+  const top = topProducts(orders, 10, new Set(["g-meat"]));
+  assert.equal(top.length, 1);
+  // Sorted by optionId ("m-beef" < "m-pork"), so the display order is deterministic regardless of
+  // the order the modifiers happened to be stored on the item.
+  assert.equal(top[0].productName, "เกาเหลา (เนื้อ, หมู)");
 });
 
 test("dailySales: fills every day in range, including zero-revenue days", () => {

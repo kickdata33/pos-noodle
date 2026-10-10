@@ -178,6 +178,7 @@ export function GroupCard({
                 : ""}
             </Badge>
           ) : null}
+          {group.splitSalesReport ? <Badge variant="muted">แยกยอดขายดี</Badge> : null}
           <Badge variant={group.active ? "success" : "muted"}>
             {group.active ? "เปิดใช้งาน" : "ปิดใช้งาน"}
           </Badge>

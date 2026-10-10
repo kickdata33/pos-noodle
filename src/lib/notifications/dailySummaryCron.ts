@@ -98,9 +98,19 @@ export async function runDailySummaryCron(
     const paymentMethods = paymentMethodsSnap.docs.map((d) => ({ ...d.data(), id: d.id }) as PaymentMethod);
     const [daySales] = businessDaySales(orders, paymentMethods, businessDayKey, businessDayKey, BUSINESS_DAY_FROM_HOUR);
 
+    // Groups flagged "แยกยอดขายดีตามตัวเลือกนี้" (e.g. a "เนื้อสัตว์" choice of หมู/เนื้อ/ต้มยำ) — see
+    // `ModifierGroup.splitSalesReport`'s comment — so this summary's top-sellers break a product
+    // out by that choice instead of combining every variant into one line, same as `/admin/reports`.
+    const modifierGroupsSnap = await db
+      .collection(COLLECTIONS.modifierGroups)
+      .where("shopId", "==", shopId)
+      .where("splitSalesReport", "==", true)
+      .get();
+    const splitGroupIds = new Set(modifierGroupsSnap.docs.map((d) => d.id));
+
     const summary = summarizeOrders(orders);
     // 10 — shop owner asked for "สินค้าขายดีสัก 10 รายการ" (was 5).
-    const best = topProducts(orders, 10);
+    const best = topProducts(orders, 10, splitGroupIds);
 
     const bestLines = best.length
       ? best.map((p, i) => `${i + 1}. ${p.productName} — ${p.qty} ชิ้น`).join("\n")

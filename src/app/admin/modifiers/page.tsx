@@ -14,6 +14,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Switch } from "@/components/ui/switch";
 import { useAuth } from "@/hooks/useAuth";
 import { computeSwap } from "@/lib/admin/sortOrder";
 import { modifierGroupRepository, modifierOptionRepository } from "@/repositories/modifierRepository";
@@ -38,6 +39,8 @@ interface FormState {
    * pricing requires a known upper bound (unlike the free-form "no cap" `maxSelect` otherwise
    * allows), enforced on save below. */
   tierPrices: string[];
+  /** See `ModifierGroup.splitSalesReport`'s comment. */
+  splitSalesReport: boolean;
 }
 
 const EMPTY_FORM: FormState = {
@@ -47,6 +50,7 @@ const EMPTY_FORM: FormState = {
   maxSelect: "",
   pricingMode: "perOption",
   tierPrices: [],
+  splitSalesReport: false,
 };
 
 /** Keeps `tierPrices`'s length equal to `maxSelect` when the cap changes — pads new tiers with
@@ -101,6 +105,7 @@ export default function ModifiersPage() {
             group.maxSelect
           )
         : [],
+      splitSalesReport: group.splitSalesReport ?? false,
     });
     setDialogOpen(true);
   }
@@ -146,6 +151,7 @@ export default function ModifiersPage() {
           maxSelect: maxSelect ?? null,
           pricingMode: tiered ? "tieredByCount" : "perOption",
           tierPricing: tierPricing ?? null,
+          splitSalesReport: form.splitSalesReport,
         });
       } else {
         // The Firestore client SDK throws on a field explicitly set to `undefined` (unlike a key
@@ -158,6 +164,7 @@ export default function ModifiersPage() {
           selectionType: form.selectionType,
           ...(maxSelect !== undefined ? { maxSelect } : {}),
           ...(tiered ? { pricingMode: "tieredByCount" as const, tierPricing } : {}),
+          splitSalesReport: form.splitSalesReport,
           active: true,
           sortOrder: groups.length,
           createdAt: Date.now(),
@@ -351,6 +358,20 @@ export default function ModifiersPage() {
                   <SelectItem value="optional">ไม่บังคับ</SelectItem>
                 </SelectContent>
               </Select>
+            </div>
+
+            <div className="flex items-center justify-between gap-4 rounded-md border border-border p-3">
+              <div>
+                <p className="text-sm font-medium">แยกยอดขายดีตามตัวเลือกนี้</p>
+                <p className="text-xs text-muted-foreground">
+                  เช่นกลุ่ม &quot;เนื้อสัตว์&quot; (หมู/เนื้อ/ต้มยำ) — เปิดแล้วหน้า &quot;สินค้าขายดี&quot; กับสรุปยอด
+                  Telegram รายวันจะแยกเป็นคนละบรรทัดตามตัวเลือกที่เลือก แทนที่จะรวมเป็นยอดเดียว
+                </p>
+              </div>
+              <Switch
+                checked={form.splitSalesReport}
+                onCheckedChange={(checked) => setForm((f) => ({ ...f, splitSalesReport: checked }))}
+              />
             </div>
           </div>
           <DialogFooter>

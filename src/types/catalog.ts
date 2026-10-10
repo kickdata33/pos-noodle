@@ -110,6 +110,19 @@ export interface ModifierGroup extends WithId {
    * `maxSelect` above) so the Admin UI can explicitly clear it when switching a group back to
    * `"perOption"` pricing, rather than leaving a stale tier list sitting unused in Firestore. */
   tierPricing?: ModifierTier[] | null;
+  /**
+   * When a customer's pick from this group is the real distinction between what otherwise reads
+   * as "the same product" in "สินค้าขายดี" (top-sellers) — e.g. a required single-select
+   * "เนื้อสัตว์" group of หมู/เนื้อ/ต้มยำ on one "ก๋วยเตี๋ยว" product (item: "ต้องการให้แยก ก๋วยเตี๋ยว
+   * เนื้อ หมู ต้มยำ แยกออก" — the shop's Telegram daily summary and `/admin/reports` were both
+   * combining every meat choice into one "ก๋วยเตี๋ยวหมู / เนื้อ" line because they only ever grouped
+   * by `productId`) — flip this on and `topProducts` (`lib/pos/reports.ts`) breaks that product's
+   * sales into one line per option picked from this group instead of one combined total. Off by
+   * default (and for every group created before this field existed), since splitting by every
+   * modifier (e.g. "ไม่ใส่ผักชี") would make most products' reporting unreadably granular — this is
+   * an explicit per-group opt-in, not automatic from `required`/`selectionType`.
+   */
+  splitSalesReport?: boolean;
   active: boolean;
   sortOrder: number;
   createdAt: EpochMillis;
