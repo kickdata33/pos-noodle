@@ -1,4 +1,4 @@
-import type { CashSafeCount, DailyFloat } from "@/types";
+import type { CashSafeCount, CashSafeWithdrawal, DailyFloat } from "@/types";
 
 /**
  * Pure math behind "ตารางตัดเงินสดออก" (item: cash physically pulled from the drawer mid-shift
@@ -10,6 +10,10 @@ import type { CashSafeCount, DailyFloat } from "@/types";
  *   per month — a month is only how the table groups rows for display.
  * - "ตอนนี้มีเท่าไหร่" is a separate, manually-entered figure (`CashSafeCount`), not derived from
  *   `cashMovedOut` at all — someone actually counted the stash.
+ * - Money can also come back *out* of the stash to be spent on something (`CashSafeWithdrawal`,
+ *   item: "หักเงินที่หยิบไปใช้ออกจากยอดสะสม จะได้นับใหม่แล้วตรงกัน") — `totalWithdrawn` nets
+ *   against `totalMovedOut` (see `netShouldHave`) so a legitimate withdrawal doesn't read as a
+ *   permanent, unexplained gap between "ควรมี" and a later physical count.
  */
 
 export interface CashMoveOutRow {
@@ -69,4 +73,20 @@ export function availableMonths(rows: readonly CashMoveOutRow[]): string[] {
 export function latestCashSafeCount(counts: readonly CashSafeCount[]): CashSafeCount | null {
   if (counts.length === 0) return null;
   return [...counts].sort((a, b) => b.dateKey.localeCompare(a.dateKey) || b.createdAt - a.createdAt)[0];
+}
+
+/** "รวมที่หยิบออกไปใช้สะสม" — the all-time total of every logged `CashSafeWithdrawal`. Same
+ * "sum everything, never reset" shape as `totalMovedOut` (0 if nothing's ever been logged). */
+export function totalWithdrawn(withdrawals: readonly CashSafeWithdrawal[]): number {
+  return withdrawals.reduce((sum, w) => sum + w.amount, 0);
+}
+
+/** "รวมที่ควรจะมี" net of money taken back out — `totalMovedOut` minus `totalWithdrawn`. This,
+ * not the raw `totalMovedOut`, is what should be compared against a physical `CashSafeCount`:
+ * money moved into the stash and later spent back out of it is no longer expected to still be
+ * sitting there, so a legitimate withdrawal shouldn't read as an unexplained shortage once
+ * counted. Can go negative if more has been logged as withdrawn than was ever moved in (a data-
+ * entry mistake worth investigating, not clamped to 0 — clamping would hide that mistake). */
+export function netShouldHave(totalMovedOutAmount: number, totalWithdrawnAmount: number): number {
+  return totalMovedOutAmount - totalWithdrawnAmount;
 }

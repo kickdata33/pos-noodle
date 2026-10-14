@@ -25,4 +25,5 @@ export * from "./payrollAbsence";
 export * from "./payrollSettlement";
 export * from "./shopClosedDate";
 export * from "./cashSafeCount";
+export * from "./cashSafeWithdrawal";
 export * from "./investment";

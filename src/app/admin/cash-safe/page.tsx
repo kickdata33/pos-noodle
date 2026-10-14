@@ -24,14 +24,17 @@ import {
   availableMonths,
   cashMoveOutRows,
   latestCashSafeCount,
+  netShouldHave,
   rowsForMonth,
   totalMovedOut,
+  totalWithdrawn,
 } from "@/lib/pos/cashMoveOut";
 import { shiftMonthKey } from "@/lib/pos/dateRange";
 import { cashSafeCountRepository } from "@/repositories/cashSafeCountRepository";
+import { cashSafeWithdrawalRepository } from "@/repositories/cashSafeWithdrawalRepository";
 import { dailyFloatRepository } from "@/repositories/dailyFloatRepository";
 import { shopRepository } from "@/repositories/shopRepository";
-import type { CashSafeCount, DailyFloat } from "@/types";
+import type { CashSafeCount, CashSafeWithdrawal, DailyFloat } from "@/types";
 
 function todayKey(): string {
   return bangkokDateKey(Date.now());
@@ -68,6 +71,10 @@ function formatMonthKey(monthKey: string): string {
  *   resets per month, only the table view groups rows by month).
  * - "ตอนนี้มีเท่าไหร่" — a separate, manually-entered `CashSafeCount` checkpoint; someone actually
  *   counted the stash. The difference between the two is what this page exists to surface.
+ * - "รวมที่โยกออกสะสม (ควรมี)" is shown *net* of every logged `CashSafeWithdrawal` (money taken
+ *   back out of the stash to spend) — see `lib/pos/cashMoveOut.ts`'s `netShouldHave`. Without
+ *   this, spending any of the stash would permanently read as an unexplained shortage the moment
+ *   someone counts it again.
  */
 export default function CashSafePage() {
   const { appUser } = useAuth();
@@ -76,8 +83,10 @@ export default function CashSafePage() {
   const [currency, setCurrency] = useState("THB");
   const [floats, setFloats] = useState<DailyFloat[]>([]);
   const [counts, setCounts] = useState<CashSafeCount[]>([]);
+  const [withdrawals, setWithdrawals] = useState<CashSafeWithdrawal[]>([]);
   const [monthKey, setMonthKey] = useState(() => currentMonthKey());
   const [countOpen, setCountOpen] = useState(false);
+  const [withdrawOpen, setWithdrawOpen] = useState(false);
 
   useEffect(() => {
     if (!shopId) return;
@@ -96,8 +105,16 @@ export default function CashSafePage() {
     return cashSafeCountRepository.subscribeForShop(shopId, setCounts);
   }, [shopId]);
 
+  useEffect(() => {
+    if (!shopId) return;
+    return cashSafeWithdrawalRepository.subscribeForShop(shopId, setWithdrawals);
+  }, [shopId]);
+
   const rows = useMemo(() => cashMoveOutRows(floats), [floats]);
   const total = useMemo(() => totalMovedOut(rows), [rows]);
+  const withdrawnTotal = useMemo(() => totalWithdrawn(withdrawals), [withdrawals]);
+  // "ควรมี" net of money already taken back out of the stash — see this file's comment.
+  const netTotal = useMemo(() => netShouldHave(total, withdrawnTotal), [total, withdrawnTotal]);
   const months = useMemo(() => availableMonths(rows), [rows]);
   // Descending (latest day first) for the table — `cashMoveOutRows` computes the cumulative in
   // ascending order first (it has to, to be correct), this just reverses for display.
@@ -105,11 +122,16 @@ export default function CashSafePage() {
   const monthTotal = useMemo(() => monthRows.reduce((sum, r) => sum + r.movedOut, 0), [monthRows]);
 
   const latestCount = useMemo(() => latestCashSafeCount(counts), [counts]);
-  const difference = latestCount != null ? latestCount.amount - total : null;
+  const difference = latestCount != null ? latestCount.amount - netTotal : null;
 
   const sortedCounts = useMemo(
     () => [...counts].sort((a, b) => b.dateKey.localeCompare(a.dateKey) || b.createdAt - a.createdAt),
     [counts]
+  );
+
+  const sortedWithdrawals = useMemo(
+    () => [...withdrawals].sort((a, b) => b.dateKey.localeCompare(a.dateKey) || b.createdAt - a.createdAt),
+    [withdrawals]
   );
 
   return (
@@ -119,9 +141,18 @@ export default function CashSafePage() {
       description="เงินสดที่โยกออกเก็บระหว่างกะ สะสมทั้งหมด เทียบกับยอดที่นับได้จริง"
       actionLabel="+ บันทึกยอดนับจริง"
       onAction={() => setCountOpen(true)}
+      extraActions={
+        <Button size="sm" variant="outline" onClick={() => setWithdrawOpen(true)}>
+          − หยิบออกไปใช้
+        </Button>
+      }
     >
       <div className="grid gap-4 sm:grid-cols-3">
-        <SummaryStat label="รวมที่โยกออกสะสม (ควรมี)" value={formatCurrency(total, currency)} />
+        <SummaryStat
+          label="รวมที่โยกออกสะสม (ควรมี)"
+          value={formatCurrency(netTotal, currency)}
+          sub={withdrawnTotal > 0 ? `หยิบไปใช้แล้วรวม ${formatCurrency(withdrawnTotal, currency)}` : undefined}
+        />
         <SummaryStat
           label="ยอดนับจริงล่าสุด"
           value={latestCount ? formatCurrency(latestCount.amount, currency) : "ยังไม่ได้นับ"}
@@ -232,9 +263,56 @@ export default function CashSafePage() {
         </Card>
       ) : null}
 
+      {sortedWithdrawals.length > 0 ? (
+        <Card className="mt-4">
+          <CardHeader>
+            <CardTitle>ประวัติการหยิบออกไปใช้</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>วันที่</TableHead>
+                  <TableHead className="text-right">จำนวน</TableHead>
+                  <TableHead>ใช้ทำอะไร</TableHead>
+                  <TableHead />
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {sortedWithdrawals.map((w) => (
+                  <TableRow key={w.id}>
+                    <TableCell className="whitespace-nowrap">{formatDateKey(w.dateKey)}</TableCell>
+                    <TableCell className="text-right">{formatCurrency(w.amount, currency)}</TableCell>
+                    <TableCell className="text-muted-foreground">{w.note || "-"}</TableCell>
+                    <TableCell className="text-right">
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="h-6 px-2 text-xs text-destructive"
+                        onClick={() => cashSafeWithdrawalRepository.remove(w.id)}
+                      >
+                        ลบ
+                      </Button>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </CardContent>
+        </Card>
+      ) : null}
+
       <AddCashSafeCountDialog
         open={countOpen}
         onOpenChange={setCountOpen}
+        shopId={shopId ?? ""}
+        createdBy={appUser?.id ?? ""}
+        createdByName={appUser?.name ?? ""}
+      />
+
+      <AddCashSafeWithdrawalDialog
+        open={withdrawOpen}
+        onOpenChange={setWithdrawOpen}
         shopId={shopId ?? ""}
         createdBy={appUser?.id ?? ""}
         createdByName={appUser?.name ?? ""}
@@ -342,6 +420,102 @@ function AddCashSafeCountDialog({
           <div className="grid gap-2">
             <Label htmlFor="count-note">หมายเหตุ (ถ้ามี)</Label>
             <Input id="count-note" value={note} onChange={(e) => setNote(e.target.value)} placeholder="เช่น นับพร้อมยอดสิ้นเดือน" />
+          </div>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={() => onOpenChange(false)}>
+            ยกเลิก
+          </Button>
+          <Button onClick={handleSave} disabled={!canSave || saving}>
+            บันทึก
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+/**
+ * บันทึก "หยิบออกไปใช้" — logs a `CashSafeWithdrawal`, which `netShouldHave` subtracts from the
+ * cumulative "ควรมี" going forward (see this file's top comment). Amount must be > 0 (unlike
+ * `CashSafeCount`, a ฿0 withdrawal has no meaning), and the note is nudged for via the
+ * placeholder but, same as every other `note` field in this codebase, not required to save.
+ */
+function AddCashSafeWithdrawalDialog({
+  open,
+  onOpenChange,
+  shopId,
+  createdBy,
+  createdByName,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  shopId: string;
+  createdBy: string;
+  createdByName: string;
+}) {
+  const [dateKey, setDateKey] = useState(() => todayKey());
+  const [amountText, setAmountText] = useState("");
+  const [note, setNote] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    if (open) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setDateKey(todayKey());
+      setAmountText("");
+      setNote("");
+    }
+  }, [open]);
+
+  const amount = Number(amountText);
+  const canSave = Boolean(shopId) && Boolean(dateKey) && Number.isFinite(amount) && amount > 0;
+
+  async function handleSave() {
+    if (!canSave || saving) return;
+    setSaving(true);
+    try {
+      await cashSafeWithdrawalRepository.create({
+        shopId,
+        dateKey,
+        amount,
+        note: note.trim(),
+        createdBy,
+        createdByName,
+        createdAt: Date.now(),
+      });
+      onOpenChange(false);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>หยิบเงินออกไปใช้</DialogTitle>
+        </DialogHeader>
+        <div className="grid gap-4">
+          <div className="grid gap-2">
+            <Label htmlFor="withdraw-date">วันที่หยิบออก</Label>
+            <DateField id="withdraw-date" value={dateKey} onChange={setDateKey} />
+          </div>
+          <div className="grid gap-2">
+            <Label htmlFor="withdraw-amount">จำนวนที่หยิบออก (บาท)</Label>
+            <Input
+              id="withdraw-amount"
+              type="number"
+              inputMode="decimal"
+              min={0}
+              value={amountText}
+              onChange={(e) => setAmountText(e.target.value)}
+              placeholder="0"
+            />
+          </div>
+          <div className="grid gap-2">
+            <Label htmlFor="withdraw-note">ใช้ทำอะไร (แนะนำให้กรอก)</Label>
+            <Input id="withdraw-note" value={note} onChange={(e) => setNote(e.target.value)} placeholder="เช่น จ่ายค่าของสด" />
           </div>
         </div>
         <DialogFooter>

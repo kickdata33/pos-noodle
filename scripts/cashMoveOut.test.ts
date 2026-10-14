@@ -8,10 +8,12 @@ import {
   availableMonths,
   cashMoveOutRows,
   latestCashSafeCount,
+  netShouldHave,
   rowsForMonth,
   totalMovedOut,
+  totalWithdrawn,
 } from "../src/lib/pos/cashMoveOut";
-import type { CashSafeCount, DailyFloat } from "../src/types";
+import type { CashSafeCount, CashSafeWithdrawal, DailyFloat } from "../src/types";
 
 function float(businessDayKey: string, cashMovedOut: number | null): DailyFloat {
   return {
@@ -31,6 +33,10 @@ function float(businessDayKey: string, cashMovedOut: number | null): DailyFloat 
 
 function count(dateKey: string, amount: number, createdAt = 0): CashSafeCount {
   return { id: `${dateKey}-${createdAt}`, shopId: "shop1", dateKey, amount, note: "", createdBy: "u1", createdByName: "Admin", createdAt };
+}
+
+function withdrawal(dateKey: string, amount: number, note = ""): CashSafeWithdrawal {
+  return { id: `${dateKey}-${amount}`, shopId: "shop1", dateKey, amount, note, createdBy: "u1", createdByName: "Admin", createdAt: 0 };
 }
 
 test("cashMoveOutRows: skips days with no cashMovedOut entered (null, not zero)", () => {
@@ -95,4 +101,18 @@ test("latestCashSafeCount: picks the most recent by dateKey", () => {
 test("latestCashSafeCount: ties on the same dateKey break by createdAt (the later entry wins)", () => {
   const latest = latestCashSafeCount([count("2026-09-15", 1800, 100), count("2026-09-15", 1900, 200)]);
   assert.equal(latest?.amount, 1900);
+});
+
+test("totalWithdrawn: 0 when nothing's ever been logged, otherwise a plain sum", () => {
+  assert.equal(totalWithdrawn([]), 0);
+  assert.equal(totalWithdrawn([withdrawal("2026-09-01", 1000), withdrawal("2026-09-10", 1500)]), 2500);
+});
+
+test("netShouldHave: subtracts total withdrawn from total moved out", () => {
+  assert.equal(netShouldHave(29000, 15000), 14000);
+  assert.equal(netShouldHave(29000, 0), 29000);
+});
+
+test("netShouldHave: can go negative (more withdrawn than ever moved out) without clamping — a data-entry mistake should stay visible, not be hidden", () => {
+  assert.equal(netShouldHave(5000, 8000), -3000);
 });
