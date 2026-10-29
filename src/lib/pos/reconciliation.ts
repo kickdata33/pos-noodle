@@ -126,6 +126,17 @@ export interface ReconciliationRow {
   /** totalSales - expenses for this business day — cash + QR + other, regardless of whether the
    * QR portion has actually landed in the bank yet (that's what `pendingTransfer` is for). */
   net: number;
+  /**
+   * สุทธิ (รับจริง) — cash + *actually transferred* + other, minus expenses: what's really landed
+   * for this business day instead of assuming every baht of `qrSales` already has. Equal to `net`
+   * once a day is fully `settled` (same number, since `transferred` catches up to `qrSales`);
+   * lower than `net` by exactly `pendingTransfer` while money is still outstanding, or higher by
+   * exactly `overTransferred` on a day that picked up a late/misattributed transfer that actually
+   * belongs elsewhere. `net - pendingTransfer + overTransferred`, spelled out from the same inputs
+   * (`cashSales + transferred + otherSales - expenses`) rather than via that identity, so a bug in
+   * one doesn't silently become a bug in the other.
+   */
+  netReceived: number;
   /** True once every baht of this day's QR sales has a matching logged transfer (within a small
    * rounding tolerance) — drives the "ครบ"/"รอ" badge. */
   settled: boolean;
@@ -177,6 +188,7 @@ export function reconciliationRows(
       overTransferred,
       expenses: dayExpenses,
       net: round2(day.total - dayExpenses),
+      netReceived: round2(cashSales + transferred + day.other - dayExpenses),
       settled: pendingTransfer <= SETTLE_TOLERANCE_THB,
     };
   });

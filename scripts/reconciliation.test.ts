@@ -161,6 +161,10 @@ test("reconciliationRows: the exact '980 baht missing' scenario reads as pending
   assert.equal(row.pendingTransfer, 980);
   assert.equal(row.overTransferred, 0);
   assert.equal(row.settled, false);
+  // Only the 810 that's actually transferred counts toward netReceived — not the full 1790 `net`
+  // already assumes landed.
+  assert.equal(row.net, 1790);
+  assert.equal(row.netReceived, 810);
 });
 
 test("reconciliationRows: settled once the second transfer batch lands, expenses reduce net", () => {
@@ -181,6 +185,8 @@ test("reconciliationRows: settled once the second transfer batch lands, expenses
   assert.equal(row.settled, true);
   assert.equal(row.expenses, 300);
   assert.equal(row.net, 1790 - 300);
+  // Fully settled — netReceived agrees exactly with net, same as `net` once nothing's pending.
+  assert.equal(row.netReceived, row.net);
 });
 
 test("reconciliationRows: a transfer larger than that day's QR sales never produces a negative pending, and is reported as overTransferred instead", () => {
@@ -191,6 +197,9 @@ test("reconciliationRows: a transfer larger than that day's QR sales never produ
   assert.equal(row.pendingTransfer, 0);
   assert.equal(row.overTransferred, 400);
   assert.equal(row.settled, true);
+  // netReceived picks up the extra 400 that actually landed, on top of what `net` already counted.
+  assert.equal(row.net, 100);
+  assert.equal(row.netReceived, 500);
 });
 
 test("reconciliationRows: a positive cashTransferAdjustment moves money from cashSales into qrSales, totalSales unchanged", () => {

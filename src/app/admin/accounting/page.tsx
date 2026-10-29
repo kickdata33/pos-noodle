@@ -389,14 +389,24 @@ export default function AccountingPage() {
       rows.reduce(
         (acc, r) => ({
           totalSales: acc.totalSales + r.totalSales,
+          transferred: acc.transferred + r.transferred,
           pendingTransfer: acc.pendingTransfer + r.pendingTransfer,
+          overTransferred: acc.overTransferred + r.overTransferred,
           expenses: acc.expenses + r.expenses,
           net: acc.net + r.net,
+          netReceived: acc.netReceived + r.netReceived,
         }),
-        { totalSales: 0, pendingTransfer: 0, expenses: 0, net: 0 }
+        { totalSales: 0, transferred: 0, pendingTransfer: 0, overTransferred: 0, expenses: 0, net: 0, netReceived: 0 }
       ),
     [rows]
   );
+  // เกิน−ขาด รวมทั้งช่วง (item: "ยอด รอโอน มันมีขาด มีเกิน เอามา +- กับยอดจริง สรุปรวมมาหน่อย") — if
+  // this is roughly 0, or roughly equal to just the most recent day(s)' own `pendingTransfer` (the
+  // last business day's late-night portion genuinely hasn't settled yet), everything's fine: it's
+  // only the K SHOP cutoff timing from `lib/pos/reconciliation.ts`'s file comment, nothing missing.
+  // A gap bigger than that, or one that includes an *older*, already-"ครบ" day, is worth chasing
+  // down — see that same column's tooltip for what to check.
+  const netTransferGap = totals.overTransferred - totals.pendingTransfer;
   // เฉลี่ยรายจ่าย/วัน (item request) — over every business day actually shown, not just the ones
   // with a nonzero expense, so a run of "day off, no expense" days pulls the average down same as
   // it would pull down a real bookkeeper's mental average.
@@ -495,6 +505,9 @@ export default function AccountingPage() {
                 <TableHead className="text-right">รอโอน</TableHead>
                 <TableHead className="text-right">รายจ่าย</TableHead>
                 <TableHead className="text-right">สุทธิ</TableHead>
+                <TableHead className="text-right" title="เงินสด + ที่โอนเข้าบัญชีจริงแล้ว + อื่นๆ − รายจ่าย — ต่างจาก &quot;สุทธิ&quot; ตรงที่ไม่เหมาว่า QR ที่ยังรอโอนเข้ามาแล้ว">
+                  สุทธิ (รับจริง)
+                </TableHead>
                 <TableHead>สถานะ</TableHead>
               </TableRow>
             </TableHeader>
@@ -534,6 +547,9 @@ export default function AccountingPage() {
                   <TableCell className={cn("whitespace-nowrap text-right font-medium", netClassName(r.net))}>
                     {formatCurrency(r.net, currency)}
                   </TableCell>
+                  <TableCell className={cn("whitespace-nowrap text-right font-medium", netClassName(r.netReceived))}>
+                    {formatCurrency(r.netReceived, currency)}
+                  </TableCell>
                   <TableCell>
                     <Badge variant={r.settled ? "success" : "default"}>{r.settled ? "ครบ" : "รอ"}</Badge>
                   </TableCell>
@@ -541,18 +557,31 @@ export default function AccountingPage() {
               ))}
               {rows.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={9} className="text-center text-muted-foreground">
+                  <TableCell colSpan={10} className="text-center text-muted-foreground">
                     ไม่มีข้อมูลในช่วงนี้
                   </TableCell>
                 </TableRow>
               ) : null}
             </TableBody>
           </Table>
-          <p className="mt-3 text-xs text-muted-foreground">
-            รวมช่วงนี้ — ยอดขาย {formatCurrency(totals.totalSales, currency)}, รอโอน {formatCurrency(totals.pendingTransfer, currency)},
-            รายจ่าย {formatCurrency(totals.expenses, currency)} (เฉลี่ย {formatCurrency(avgExpensePerDay, currency)}/วัน), สุทธิ{" "}
-            <span className={cn("font-medium", netClassName(totals.net))}>{formatCurrency(totals.net, currency)}</span>
-          </p>
+          <div className="mt-3 space-y-1 text-xs text-muted-foreground">
+            <p>
+              รวมช่วงนี้ — ยอดขาย {formatCurrency(totals.totalSales, currency)}, โอนเข้าแล้ว {formatCurrency(totals.transferred, currency)},
+              รอโอน {formatCurrency(totals.pendingTransfer, currency)}, โอนเกิน {formatCurrency(totals.overTransferred, currency)}, รายจ่าย{" "}
+              {formatCurrency(totals.expenses, currency)} (เฉลี่ย {formatCurrency(avgExpensePerDay, currency)}/วัน)
+            </p>
+            <p>
+              สุทธิ{" "}
+              <span className={cn("font-medium", netClassName(totals.net))}>{formatCurrency(totals.net, currency)}</span> · สุทธิ (รับจริง){" "}
+              <span className={cn("font-medium", netClassName(totals.netReceived))}>{formatCurrency(totals.netReceived, currency)}</span> ·
+              ผลต่างโอนเกิน−รอโอน{" "}
+              <span className={cn("font-medium", netTransferGap < 0 ? "text-destructive" : netTransferGap > 0 ? "text-blue-600 dark:text-blue-400" : "")}>
+                {formatCurrency(netTransferGap, currency)}
+              </span>{" "}
+              — ถ้าใกล้ 0 หรือใกล้เคียงยอดรอโอนของวันล่าสุดวันเดียว ถือว่าปกติ (แค่รอรอบโอนของ K SHOP) แต่ถ้าค้างเยอะกว่านั้นหรือมีวันเก่าที่ขึ้น
+              &quot;ครบ&quot; แล้วแต่ยังโอนเกิน ควรเช็คย้อนหลัง
+            </p>
+          </div>
         </CardContent>
       </Card>
 
