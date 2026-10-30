@@ -34,7 +34,20 @@ export interface LedgerDayRow extends ReconciliationRow {
    * `combined`, this is never `null` — it only needs POS-recorded sales and logged expenses, neither
    * of which requires a physical cash count to exist. */
   netProfit: number;
+  /** The day's own `DailyFloat.startingCash`, or `null` if never explicitly entered for this exact
+   * business day. Kept distinct from `effectiveStartingCash` below — this is "did the owner
+   * actually confirm today's figure", not "what value do calculations use". */
   startingCash: number | null;
+  /** `startingCash` if explicitly entered for this day, otherwise carried forward from the most
+   * recent earlier business day's `closingCashCounted` (physical cash left in the drawer at close
+   * is still sitting there at the next open, so re-typing the same number every single day was
+   * pure friction). This is what the cash-float check actually calculates with, so "เงินสดคงเหลือ"
+   * and "ส่วนต่างจากการนับ" don't go blank just because today hasn't been re-confirmed yet. `null`
+   * only when there is truly no known figure to fall back on at all (e.g. the very first day). */
+  effectiveStartingCash: number | null;
+  /** True when `effectiveStartingCash` came from carry-forward rather than today's own entry — lets
+   * the UI show it as a suggested default (still editable) instead of implying it was confirmed. */
+  startingCashIsCarriedForward: boolean;
   cashMovedOut: number;
   /** ปลายกะที่นับได้จริง, AFTER cashMovedOut was already set aside — see `DailyFloat.closingCashCounted`'s comment. */
   closingCashCounted: number | null;
@@ -63,6 +76,22 @@ function cashExpensesForDay(expenses: readonly Expense[], dateKey: string): numb
   );
 }
 
+/** Walks `floats` for the most recent business day strictly before `dateKey` that actually has a
+ * counted closing figure. `businessDayKey` is a plain "YYYY-MM-DD" string, which sorts
+ * chronologically as-is, so this needs no date-arithmetic. Skips over any gap (a day with no float
+ * doc at all, or one whose `closingCashCounted` is still null) rather than only ever looking
+ * exactly one calendar day back, so a shop-closed day or a day nobody counted doesn't break the
+ * chain for every day after it. */
+function mostRecentClosingCashBefore(floats: readonly DailyFloat[], dateKey: string): number | null {
+  let best: DailyFloat | null = null;
+  for (const f of floats) {
+    if (f.businessDayKey < dateKey && f.closingCashCounted != null && (!best || f.businessDayKey > best.businessDayKey)) {
+      best = f;
+    }
+  }
+  return best?.closingCashCounted ?? null;
+}
+
 export function ledgerDayRows(
   rows: readonly ReconciliationRow[],
   floats: readonly DailyFloat[],
@@ -80,8 +109,10 @@ export function ledgerDayRows(
     const deliveryRevenue = deliveryByDay[r.dateKey] ?? 0;
     const cashMovedOut = float?.cashMovedOut ?? 0;
     const cashExpenses = cashExpensesForDay(expenses, r.dateKey);
+    const carriedStartingCash = float?.startingCash == null ? mostRecentClosingCashBefore(floats, r.dateKey) : null;
+    const effectiveStartingCash = float?.startingCash ?? carriedStartingCash;
     const { expectedCashBeforeMoveOut, cashDifference } = checkCashFloat(
-      float?.startingCash ?? null,
+      effectiveStartingCash,
       r.cashSales,
       cashExpenses,
       float?.closingCashCounted ?? null,
@@ -97,6 +128,8 @@ export function ledgerDayRows(
       receivedTotal: round2(r.netReceived + deliveryRevenue),
       netProfit: round2(salesTotal - r.expenses),
       startingCash: float?.startingCash ?? null,
+      effectiveStartingCash,
+      startingCashIsCarriedForward: float?.startingCash == null && carriedStartingCash != null,
       cashMovedOut,
       closingCashCounted: float?.closingCashCounted ?? null,
       expectedCashBeforeMoveOut,

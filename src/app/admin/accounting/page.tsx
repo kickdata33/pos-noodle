@@ -556,8 +556,20 @@ function profitClassName(net: number): string {
 // which layout is currently visible (only one is ever shown via CSS, but both mount).
 // ================================================================================================
 
-function useDailyFloatFields(shopId: string | undefined, businessDayKey: string, float: DailyFloat | null, updatedBy: string, updatedByName: string) {
-  const [startingCashText, setStartingCashText] = useState(float?.startingCash != null ? String(float.startingCash) : "");
+function useDailyFloatFields(
+  shopId: string | undefined,
+  businessDayKey: string,
+  float: DailyFloat | null,
+  // Pre-fills "เงินสดเริ่มต้น" with yesterday's นับปลายกะ when today's own figure hasn't been
+  // entered yet (`LedgerDayRow.effectiveStartingCash`) — still just a suggestion sitting in the
+  // text field, not written anywhere until the person actually blurs the input.
+  carriedStartingCash: number | null,
+  updatedBy: string,
+  updatedByName: string
+) {
+  const [startingCashText, setStartingCashText] = useState(
+    float?.startingCash != null ? String(float.startingCash) : carriedStartingCash != null ? String(carriedStartingCash) : ""
+  );
   const [cashMovedOutText, setCashMovedOutText] = useState(float?.cashMovedOut != null ? String(float.cashMovedOut) : "");
   const [closingCashText, setClosingCashText] = useState(float?.closingCashCounted != null ? String(float.closingCashCounted) : "");
   const [adjustmentText, setAdjustmentText] = useState(float?.cashTransferAdjustment != null ? String(float.cashTransferAdjustment) : "");
@@ -566,11 +578,11 @@ function useDailyFloatFields(shopId: string | undefined, businessDayKey: string,
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
-    setStartingCashText(float?.startingCash != null ? String(float.startingCash) : "");
+    setStartingCashText(float?.startingCash != null ? String(float.startingCash) : carriedStartingCash != null ? String(carriedStartingCash) : "");
     setCashMovedOutText(float?.cashMovedOut != null ? String(float.cashMovedOut) : "");
     setClosingCashText(float?.closingCashCounted != null ? String(float.closingCashCounted) : "");
     setAdjustmentText(float?.cashTransferAdjustment != null ? String(float.cashTransferAdjustment) : "");
-  }, [businessDayKey, float?.startingCash, float?.cashMovedOut, float?.closingCashCounted, float?.cashTransferAdjustment]);
+  }, [businessDayKey, float?.startingCash, carriedStartingCash, float?.cashMovedOut, float?.closingCashCounted, float?.cashTransferAdjustment]);
 
   function parseOrNull(text: string): number | null {
     const trimmed = text.trim();
@@ -701,7 +713,7 @@ function LedgerTableRow({
   onSelectOrder,
 }: LedgerListProps & { row: LedgerDayRow; isExpanded: boolean }) {
   const float = floats.find((f) => f.businessDayKey === row.dateKey) ?? null;
-  const fields = useDailyFloatFields(shopId, row.dateKey, float, appUser?.id ?? "", appUser?.name ?? "");
+  const fields = useDailyFloatFields(shopId, row.dateKey, float, row.effectiveStartingCash, appUser?.id ?? "", appUser?.name ?? "");
   const isToday = isTodayRow(row.dateKey, fromHour);
 
   return (
@@ -782,7 +794,7 @@ function LedgerCardItem({
   onSelectOrder,
 }: LedgerListProps & { row: LedgerDayRow; isExpanded: boolean }) {
   const float = floats.find((f) => f.businessDayKey === row.dateKey) ?? null;
-  const fields = useDailyFloatFields(shopId, row.dateKey, float, appUser?.id ?? "", appUser?.name ?? "");
+  const fields = useDailyFloatFields(shopId, row.dateKey, float, row.effectiveStartingCash, appUser?.id ?? "", appUser?.name ?? "");
   const isToday = isTodayRow(row.dateKey, fromHour);
 
   return (
@@ -974,6 +986,9 @@ function LedgerDetailPanel({
               placeholder="–"
               className="h-9 text-right"
             />
+            {row.startingCashIsCarriedForward ? (
+              <p className="mt-1 text-[11px] leading-tight text-muted-foreground">ดึงจากนับปลายกะเมื่อวาน ถ้าตรงไม่ต้องแก้</p>
+            ) : null}
           </div>
           <div>
             <Label className="mb-1 block text-xs text-muted-foreground">โยกออก</Label>

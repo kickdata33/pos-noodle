@@ -112,6 +112,51 @@ test("ledgerDayRows: netProfit is never null, even on a day with no DailyFloat d
   assert.equal(rows[0].cashRemainingNow, null); // still null — no starting cash entered yet to compute it from
 });
 
+test("ledgerDayRows: a day with no startingCash of its own carries forward yesterday's closingCashCounted", () => {
+  const rows = ledgerDayRows(
+    [row({ dateKey: "2026-10-29", cashSales: 1770 })],
+    [
+      float({ businessDayKey: "2026-10-28", closingCashCounted: 1720 }), // no startingCash on the 29th's own doc
+    ],
+    [],
+    []
+  );
+  const r = rows[0];
+  assert.equal(r.startingCash, null); // today's own doc still has no explicit figure
+  assert.equal(r.effectiveStartingCash, 1720); // carried from the 28th's closing count
+  assert.equal(r.startingCashIsCarriedForward, true);
+  assert.equal(r.expectedCashBeforeMoveOut, 1720 + 1770); // calculations actually use the carried figure
+});
+
+test("ledgerDayRows: an explicitly entered startingCash always wins over carry-forward", () => {
+  const rows = ledgerDayRows(
+    [row({ dateKey: "2026-10-29", cashSales: 1770 })],
+    [float({ businessDayKey: "2026-10-28", closingCashCounted: 1720 }), float({ businessDayKey: "2026-10-29", startingCash: 1800 })],
+    [],
+    []
+  );
+  const r = rows[0];
+  assert.equal(r.startingCash, 1800);
+  assert.equal(r.effectiveStartingCash, 1800); // today's own entry, not the 28th's 1720
+  assert.equal(r.startingCashIsCarriedForward, false);
+});
+
+test("ledgerDayRows: carry-forward skips over a gap (no float doc, or an uncounted one) to the last real count", () => {
+  const rows = ledgerDayRows(
+    [row({ dateKey: "2026-10-31", cashSales: 1000 })],
+    [
+      float({ businessDayKey: "2026-10-28", closingCashCounted: 1720 }),
+      // 29th: shop closed, no float doc at all
+      float({ businessDayKey: "2026-10-30", closingCashCounted: null }), // 30th: never got counted
+    ],
+    [],
+    []
+  );
+  const r = rows[0];
+  assert.equal(r.effectiveStartingCash, 1720); // reaches back past both gaps to the 28th
+  assert.equal(r.startingCashIsCarriedForward, true);
+});
+
 test("ledgerDayRows: only cash-paid expenses reduce the cash-float check — transfer-paid ones don't", () => {
   const rows = ledgerDayRows(
     [row({ dateKey: "2026-10-01", cashSales: 1000 })],
