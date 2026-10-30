@@ -1,10 +1,20 @@
 /**
- * Pure math behind "ยอดเริ่มต้นประจำวัน" (the เงินสดเริ่มต้น/เงินสดรวมปลายกะ/เงินสดที่โยกออกเก็บ card
- * inside `/admin/accounting`'s day-detail dialog) — extracted out of `DailyFloatSection` so the
- * exact same formula backs both that dialog's "ผลต่างเงินสด" figure and the main reconciliation
- * table's combined over/short column (item: "ยอดเงินเกิน/ขาด ของทั้งเงินสดและเงินโอน ให้เอามา +- กันหา
+ * Pure math behind "ยอดเริ่มต้นประจำวัน" (the เงินสดเริ่มต้น/นับเงินสดปลายกะ/เงินสดที่โยกออกเก็บ fields
+ * inside `/admin/accounting`'s per-day ledger row) — backs both that row's "ผลต่างเงินสด" figure and
+ * the "ส่วนต่างรวม (เงินสด+โอน)" column (item: "ยอดเงินเกิน/ขาด ของทั้งเงินสดและเงินโอน ให้เอามา +- กันหา
  * ส่วนต่างที่ขาด/เกินจริง"). No Firestore, no `Date.now()`, same split as the rest of `lib/pos`,
  * unit-tested directly (`scripts/dailyFloat.test.ts`).
+ *
+ * `closingCashCounted` means the physical count taken AFTER cash was moved out to the safe — not
+ * before. Earlier this asked for the pre-move-out count instead, which is backwards from how the
+ * shop actually works the till (cash gets set aside *first*, then whatever is left gets counted),
+ * and caused a real production mistake: the owner typed the post-move-out count into a field that
+ * expected the pre-move-out one, double-subtracting `cashMovedOut` and reading as a ฿1,945
+ * shortage that was never real. Flipping which number this field wants removes the mental "add
+ * cashMovedOut back before typing" step entirely — `cashMovedOut` is added back here, in code,
+ * every time this is computed, from whatever its current value is, rather than once at save time —
+ * so correcting a mistyped `cashMovedOut` later never leaves a stale, silently-wrong comparison
+ * sitting behind an already-saved count.
  */
 
 function round2(n: number): number {
@@ -15,27 +25,33 @@ export interface CashFloatCheck {
   /** เงินสดที่ควรมี (ก่อนโยกออก) — startingCash + cashSales - cashExpenses. `null` when
    * `startingCash` was never entered for the day (nothing to check against yet). */
   expectedCashBeforeMoveOut: number | null;
-  /** ผลต่างเงินสด (รวมปลายกะ - ที่ควรมี) — positive is เงินเกิน, negative is เงินขาด. `null` when
-   * either `closingCash` hasn't been counted yet or `expectedCashBeforeMoveOut` is itself `null`
-   * — there's nothing meaningful to diff against yet, same as the dialog's own display rule. */
+  /** The pre-move-out equivalent of whatever was actually counted — closingCashCounted (the
+   * post-move-out physical count) + cashMovedOut added back — so it's directly comparable to
+   * `expectedCashBeforeMoveOut` above. `null` when `closingCashCounted` hasn't been entered yet. */
+  countedBeforeMoveOut: number | null;
+  /** ผลต่างเงินสด (countedBeforeMoveOut - ที่ควรมี) — positive is เงินเกิน, negative is เงินขาด. `null`
+   * when either side of the comparison is itself `null` — there's nothing meaningful to diff
+   * against yet, same as the row's own display rule. */
   cashDifference: number | null;
 }
 
 /**
- * `startingCash`/`closingCash` are already-parsed numbers (or `null` for "not entered yet" — see
- * `DailyFloat`'s own field comments for why missing is never treated as zero); `cashSales` and
- * `cashExpenses` are always real numbers (0 when there simply weren't any).
+ * `startingCash`/`closingCashCounted` are already-parsed numbers (or `null` for "not entered yet"
+ * — see `DailyFloat`'s own field comments for why missing is never treated as zero); `cashSales`,
+ * `cashExpenses` and `cashMovedOut` are always real numbers (0 when there simply weren't any).
  */
 export function checkCashFloat(
   startingCash: number | null,
   cashSales: number,
   cashExpenses: number,
-  closingCash: number | null
+  closingCashCounted: number | null,
+  cashMovedOut: number
 ): CashFloatCheck {
   const expectedCashBeforeMoveOut = startingCash != null ? round2(startingCash + cashSales - cashExpenses) : null;
+  const countedBeforeMoveOut = closingCashCounted != null ? round2(closingCashCounted + cashMovedOut) : null;
   const cashDifference =
-    closingCash != null && expectedCashBeforeMoveOut != null ? round2(closingCash - expectedCashBeforeMoveOut) : null;
-  return { expectedCashBeforeMoveOut, cashDifference };
+    countedBeforeMoveOut != null && expectedCashBeforeMoveOut != null ? round2(countedBeforeMoveOut - expectedCashBeforeMoveOut) : null;
+  return { expectedCashBeforeMoveOut, countedBeforeMoveOut, cashDifference };
 }
 
 /**

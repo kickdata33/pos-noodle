@@ -14,9 +14,8 @@ export interface DailyFloat extends WithId {
   /**
    * เงินสดเริ่มต้น (ทอน) — the change float placed in the drawer before the shift opens. Combined
    * with that business day's own `cashSales` (already computed by `reconciliationRows`, never
-   * re-derived here) and `cashMovedOut` to show "เงินสดที่ควรมีปลายกะ" =
-   * startingCash + cashSales - cashMovedOut — the number to check a physical count against at
-   * closing, not something this app counts itself.
+   * re-derived here) and `cashExpenses` (cash-paid รายจ่าย) to produce "เงินสดที่ควรมี (ก่อนโยกออก)" —
+   * see `lib/pos/dailyFloat.ts`'s `checkCashFloat` for the exact formula.
    */
   startingCash: number | null;
   /**
@@ -39,10 +38,11 @@ export interface DailyFloat extends WithId {
    */
   cashTransferAdjustment: number | null;
   /**
-   * เงินสดที่นับได้จริงตอนปิดกะ — the physical count from the drawer, entered once at close.
-   * Compared against "เงินสดที่ควรมีปลายกะ" (startingCash + cashSales - cashMovedOut, computed in
-   * `DailyFloatSection`, never stored) — a second, independent number to catch a shortage/overage,
-   * not something this app derives or corrects on its own.
+   * เงินสดรวมปลายกะ ที่นับได้จริง — the physical drawer count taken AFTER `cashMovedOut` has already
+   * been set aside (matches how the shift actually closes: cash gets pulled out for the safe
+   * first, then whatever's left in the drawer gets counted) — never before. `checkCashFloat`
+   * (`lib/pos/dailyFloat.ts`) adds `cashMovedOut` back internally to compare against "เงินสดที่ควรมี
+   * (ก่อนโยกออก)"; this field itself always stores the plain post-move-out count, nothing baked in.
    */
   closingCashCounted: number | null;
   closingCashCountedAt: EpochMillis | null;

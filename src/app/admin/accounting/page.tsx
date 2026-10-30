@@ -7,12 +7,11 @@ import { DateField } from "@/components/admin/DateField";
 import { ModuleGate } from "@/components/admin/ModuleGate";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Switch } from "@/components/ui/switch";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { formatCurrency } from "@/lib/format";
 import { cn } from "@/lib/utils";
@@ -24,12 +23,10 @@ import {
   bangkokDayBounds,
   customRange,
   resolvePreset,
-  shiftMonthKey,
   type DateRange,
   type ReportPreset,
 } from "@/lib/pos/dateRange";
-import { checkCashFloat, combinedDifference, type CashFloatCheck } from "@/lib/pos/dailyFloat";
-import { dailyProfitLossRows, totalProfitLoss } from "@/lib/pos/dailyProfitLoss";
+import { ledgerDayRows, ledgerRangeTotals, type LedgerDayRow } from "@/lib/pos/ledgerDay";
 import { reconciliationRows } from "@/lib/pos/reconciliation";
 import { computeMissingRecurringExpenses, recurringExpenseDayKey } from "@/lib/pos/recurringExpenses";
 import { bankTransferRepository } from "@/repositories/bankTransferRepository";
@@ -63,13 +60,17 @@ const PRESETS: { value: ReportPreset; label: string }[] = [
 ];
 
 /**
- * บัญชีรายรับ-รายจ่าย (item: กระทบยอดขาย QR กับเงินที่โอนเข้าบัญชีจริง, แยกรายจ่าย). Three parts:
- * 1) a reconciliation table per business day (ยอดขายเงินสด/QR, โอนเข้าแล้ว, รอโอน, รายจ่าย, สุทธิ)
- * 2) a รายจ่าย log (categorized, admin-entered)
- * 3) a เงินโอนเข้าบัญชี log (admin-entered by hand from the bank's own app/statement)
- * See `lib/pos/reconciliation.ts`'s file comment for why (1) exists and how it avoids the
- * "980 baht missing" illusion caused by K SHOP's 23:00 cutoff not lining up with the shop's own
- * 16:00-start business day.
+ * บัญชีรายรับ-รายจ่าย — 1 แถว = 1 วันทำการ, ยอดสุทธิ (รวม Delivery) + ส่วนต่างรวม (เงินสด+โอน) อยู่ใน
+ * แถวเดียวกันเลย, กดแถวเพื่อดูรายละเอียด (รายจ่ายแยกรายการ, เงินโอนแยกรอบ, บิลวันนี้) แทนที่จะต้องเปิด
+ * ป๊อปอัปแยกหรือเลื่อนไปดูอีกตาราง — redesigned from the previous multi-table layout (item: "ช่วยออกแบบ
+ * หน้ากรอกข้อมูลเพื่อให้ทำบัญชี ง่ายดูได้จากตารางเดียว ... อยากให้ delivery รวมไปด้วยจะได้แบบ ดูแค่ตาราง
+ * เดียว ยอดสุทธิไปเลย หักขาด หักเกิน ระบุชัดเจน ใช้ทั้งมือถือทั้งคอม"), reviewed first as an HTML mockup
+ * before being built for real here. See `lib/pos/ledgerDay.ts`'s file comment for how Delivery gets
+ * folded in, and `lib/pos/dailyFloat.ts`'s file comment for the "นับเงินสดปลายกะ" field's corrected
+ * (post-move-out) semantics.
+ *
+ * รายจ่ายประจำ (recurring expense templates) is the one piece left as its own card below — it's
+ * config, not a per-day figure, so it never belonged inside a per-business-day row.
  */
 export default function AccountingPage() {
   const { appUser } = useAuth();
@@ -78,48 +79,15 @@ export default function AccountingPage() {
   const [preset, setPreset] = useState<ReportPreset | "custom">("last7");
   const [customFrom, setCustomFrom] = useState("");
   const [customTo, setCustomTo] = useState("");
-  // Business-day boundary — same "จาก..ถึง.." picker as the reports page's cutoff toggle, but
-  // always on here since this whole page only makes sense in shift terms. Defaults match the
-  // shop's real operating hours (16:00-04:00), not K SHOP's settlement cutoff (23:00) — those
-  // are two different things now that transfers are matched by an explicit `businessDayKey`
-  // instead of guessed from the clock (see `BankTransfer.businessDayKey`'s comment).
+  // Business-day boundary — defaults match the shop's real operating hours (16:00-04:00), not
+  // K SHOP's settlement cutoff (23:00) — see `lib/pos/reconciliation.ts`'s file comment.
   const [fromHour, setFromHour] = useState(16);
-  // 06:00, not 04:00 — some nights a table sits until closer to 6am ("มีลูกค้านั่งยาว"). The
-  // actual business-day math never depended on this value (a business day already spans a full
-  // 24h from `fromHour`, covering any close time up to 16:00 the next day) — `toHour` only
-  // controls what the shift-hours label reads on screen.
   const [toHour, setToHour] = useState(6);
 
-  // The รายจ่าย table has its own single-day filter (for the quick-add row below — a new entry
-  // always lands on this one day) but the *list* shows the whole month at once (item: "เรียง
-  // รายการของเดือนนี้ไว้ดูรวดเร็ว ไม่ต้องเลื่อนหน้า" — the old one-day-at-a-time view meant
-  // clicking through dates one by one to see a week's worth of spending). `expenseMonthKey`
-  // starts on whatever month `expenseDay` falls in, and also jumps to follow it whenever
-  // `expenseDay` itself changes (`handleExpenseDayChange` below) — an earlier version left the two
-  // fully independent after mount, so picking a backdated day in "เพิ่มรายจ่ายวันที่" silently kept
-  // the list on whatever month it already happened to be showing, making a just-added backdated
-  // entry look like it never saved (reported in production: "เลือกรายจ่ายย้อนหลังแล้วไม่ยอมเปลี่ยน
-  // ตาม"). `expenseMonthKey` still moves independently via the ‹/› buttons afterward, so reviewing
-  // a different month doesn't get interrupted unless the add-date is actually changed — see
-  // `monthExpenseGroups`/`ExpenseQuickAddRow` below for how the two are used.
-  const [expenseDay, setExpenseDay] = useState(() => todayKey());
-  const [expenseMonthKey, setExpenseMonthKey] = useState(() => todayKey().slice(0, 7));
-  const handleExpenseDayChange = (next: string) => {
-    setExpenseDay(next);
-    setExpenseMonthKey(next.slice(0, 7));
-  };
-
-  // "กำไร/ขาดทุนสุทธิรายวัน" ด้านล่างเลือกได้ว่าจะนับเป็นวันปฏิทินจริง (ค่าเริ่มต้น) หรือสลับไปนับ
-  // เป็นกะแบบเดียวกับตาราง "ยอดขายเทียบกับเงินโอนเข้าบัญชี" ด้านบน (item: "มีฟังก์ชันเปิดปิด ยอดขาย
-  // 16:00-06:00 หรือตั้งเวลาเองได้") — ใช้ `fromHour`/`toHour` ชุดเดียวกับตารางด้านบนเลย ไม่แยกเป็น
-  // ชั่วโมงของตัวเอง ปรับที่เดียวกระทบทั้งสองตารางพร้อมกัน.
-  const [profitLossUseBusinessDay, setProfitLossUseBusinessDay] = useState(false);
-
-  // Clicking a row in the reconciliation table opens a detail dialog for that business day —
-  // the transfer amounts already logged for it (item: "ไม่ต้องเลื่อนลงไปดู" — no scrolling down to
-  // the เงินโอนเข้าบัญชี card), plus every bill (order) that fell inside that day's shift window,
-  // so a discrepancy can be chased down without leaving this one popup.
-  const [selectedDay, setSelectedDay] = useState<string | null>(null);
+  // Which row's detail panel (รายจ่าย/เงินโอน/Delivery/บิลวันนี้ ของวันนั้น) is open — replaces the
+  // old day-detail Dialog. Shared between the desktop table and the mobile card list so switching
+  // viewport width mid-session doesn't lose which day was open.
+  const [expandedDay, setExpandedDay] = useState<string | null>(null);
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
 
   const [orders, setOrders] = useState<Order[]>([]);
@@ -146,8 +114,9 @@ export default function AccountingPage() {
   }, [shopId]);
 
   // Small collections (a shop logs a handful of rows a day at most) — live subscriptions so a
-  // just-added expense/transfer shows up immediately without a manual refresh, same reasoning
-  // as every other admin CRUD page in this app. Filtered to the visible range client-side below.
+  // just-added expense/transfer shows up immediately without a manual refresh, same reasoning as
+  // every other admin CRUD page in this app. Filtered to the visible range (or the one expanded
+  // day) client-side below.
   useEffect(() => {
     if (!shopId) return;
     return expenseRepository.subscribeForShop(shopId, setExpenses);
@@ -163,8 +132,6 @@ export default function AccountingPage() {
     return dailyFloatRepository.subscribeForShop(shopId, setFloats);
   }, [shopId]);
 
-  // Feeds the "กำไร/ขาดทุนสุทธิรายวัน" card below (item: "เอายอดขาย delivery มาขึ้นโชว์ในหน้าสรุป
-  // และรวมเข้าไป") — same live subscription pattern already used for `expenses`.
   useEffect(() => {
     if (!shopId) return;
     return deliveryPayoutRepository.subscribeForShop(shopId, setDeliveryPayouts);
@@ -183,11 +150,7 @@ export default function AccountingPage() {
   // Auto-fills today's (and, catching up after a few days offline, the recent past's) row for
   // every active รายจ่ายประจำ template — item: "ต้องการให้รายจ่ายประจำ ขึ้นอัตโนมัติเลยหากวันไหน
   // ไม่มีจะออกเอง". Runs on every mount/data change but is a no-op once everything's already
-  // generated (`computeMissingRecurringExpenses` only ever returns what's actually missing), so
-  // this is safe to leave running passively rather than gating it behind a button. 30 days is an
-  // arbitrary but generous catch-up window — far enough to cover the shop being unattended for a
-  // while, not so far that a brand-new template silently backfills months of history (it also
-  // never backfills earlier than its own `createdDateKey` regardless of this window).
+  // generated (`computeMissingRecurringExpenses` only ever returns what's actually missing).
   const generatingRecurringRef = useRef(false);
   useEffect(() => {
     if (!shopId || generatingRecurringRef.current || recurringExpenses.length === 0) return;
@@ -205,22 +168,11 @@ export default function AccountingPage() {
     generatingRecurringRef.current = true;
     Promise.all(
       missing.map((m) =>
-        // Deterministic id (`${recurringExpenseId}_${dateKey}`), not an auto-generated one — the
-        // `generatingRecurringRef` guard above only stops *this one browser tab* from generating
-        // the same row twice; it can't stop a second tab/device open on this page at the same
-        // moment (e.g. the owner's phone and a staff tablet both loading `/admin/accounting`
-        // around the same time) from independently deciding the same (template, day) pair is
-        // still missing — each sees the same not-yet-arrived `expenses` snapshot and both create
-        // one, producing the exact-duplicate "ประจำ" rows reported in production. A `setDoc` with
-        // this same deterministic id makes the second write land on the *same* document instead
-        // of a new one — same construction as `DailyFloat`'s `${shopId}_${businessDayKey}`.
+        // Deterministic id so two devices racing to generate the same (template, day) pair land
+        // on the same doc instead of creating a duplicate — see the original comment history for
+        // the exact production bug this prevents.
         expenseRepository.create(
-          {
-            ...m,
-            createdBy: "system-recurring",
-            createdByName: "รายจ่ายประจำ (อัตโนมัติ)",
-            createdAt: Date.now(),
-          },
+          { ...m, createdBy: "system-recurring", createdByName: "รายจ่ายประจำ (อัตโนมัติ)", createdAt: Date.now() },
           `${m.recurringExpenseId}_${m.dateKey}`
         )
       )
@@ -237,13 +189,9 @@ export default function AccountingPage() {
     return resolvePreset(preset);
   }, [preset, customFrom, customTo]);
 
-  // Business-day grouping means an order physically paid on one calendar day can belong to the
-  // *previous* day's label (see `bangkokDateKeyWithCutoff`'s comment) — a plain calendar-day
-  // fetch for "just today" would silently miss that order (it falls outside `range.startMs`),
-  // undercounting a business day's own total. Padding the fetch by a full calendar day on each
-  // side guarantees every order that could possibly land in a requested business day gets
-  // fetched; `businessDaySales`'s own day-map still only counts the labels actually requested
-  // (`range.startKey`..`range.endKey`), so the padding never leaks a neighboring day's numbers in.
+  // Padding the order fetch by a full calendar day on each side guarantees every order that
+  // could possibly land in a requested business day gets fetched — see `bangkokDateKeyWithCutoff`'s
+  // comment for why a business day can start on the previous calendar day's paidAt.
   const fetchRange = useMemo(
     () => ({
       startMs: bangkokDayBounds(addDaysToKey(range.startKey, -1)).startMs,
@@ -271,9 +219,7 @@ export default function AccountingPage() {
   }, [shopId, fetchRange.startMs, fetchRange.endMs]);
 
   // One signed correction per business day for a bill rung in under the wrong payment method —
-  // see `DailyFloat.cashTransferAdjustment`'s comment. Built from the already-loaded `floats`
-  // rather than a separate fetch, since every business day's adjustment (if any) lives on the
-  // same doc as its starting-cash/closing-count fields.
+  // see `DailyFloat.cashTransferAdjustment`'s comment.
   const cashTransferAdjustments = useMemo(() => {
     const map: Record<string, number> = {};
     for (const f of floats) {
@@ -282,179 +228,31 @@ export default function AccountingPage() {
     return map;
   }, [floats]);
 
-  // Cash-paid รายจ่าย (จ่ายด้วยเงินสด) physically leave the till the same as a cash sale coming
-  // in — needed so `DailyFloatSection`'s "เงินสดที่ควรมี" doesn't read as a mysterious shortage
-  // every time the owner pays a supplier out of the drawer (item: ยอดขาด 490 ตรงกับรายจ่ายเงินสด
-  // ถั่วงอก 90 + แก๊ส 400 พอดี). Keyed by `Expense.dateKey` (plain calendar date, same string the
-  // day-detail dialog's businessDayKey uses in normal operation) — a transfer-paid expense never
-  // touches actual cash in the drawer, so only `paymentMethod === "cash"` counts here.
-  const cashExpensesByDay = useMemo(() => {
-    const map: Record<string, number> = {};
-    for (const e of expenses) {
-      if (e.paymentMethod === "cash") map[e.dateKey] = (map[e.dateKey] ?? 0) + e.amount;
-    }
-    return map;
-  }, [expenses]);
-
-  const rows = useMemo(
+  const reconciliation = useMemo(
     () => reconciliationRows(orders, paymentMethods, transfers, expenses, range.startKey, range.endKey, fromHour, cashTransferAdjustments),
     [orders, paymentMethods, transfers, expenses, range.startKey, range.endKey, fromHour, cashTransferAdjustments]
   );
 
-  // ผลต่างเงินสดต่อวัน (สูตรเดียวกับที่กล่องรายละเอียดวันใช้ — `checkCashFloat`) ดึงมาคำนวณระดับ
-  // ทั้งช่วงที่นี่ด้วย เพื่อป้อนคอลัมน์ "ส่วนต่างรวม (เงินสด+โอน)" ของตารางด้านบน (item: "ยอดเงินเกิน/
-  // ขาด ของทั้งเงินสดและเงินโอน ให้เอามา +- กันหาส่วนต่างที่ขาด/เกินจริง") แทนที่จะเห็นได้แค่ทีละวันตอน
-  // เปิดกล่องรายละเอียดเท่านั้น.
-  const cashChecksByDay = useMemo(() => {
-    const floatsByDay = new Map(floats.map((f) => [f.businessDayKey, f]));
-    const map = new Map<string, CashFloatCheck>();
-    for (const r of rows) {
-      const float = floatsByDay.get(r.dateKey) ?? null;
-      map.set(
-        r.dateKey,
-        checkCashFloat(float?.startingCash ?? null, r.cashSales, cashExpensesByDay[r.dateKey] ?? 0, float?.closingCashCounted ?? null)
-      );
-    }
-    return map;
-  }, [floats, rows, cashExpensesByDay]);
-
-  // รวมผลต่างเงินสด + ผลต่างโอน เป็นตัวเดียว ต่อแถว — `null` (ไม่ใช่ 0) ของวันที่ยังไม่ได้นับเงินสด
-  // เลย ไม่ให้ "ยังไม่ได้เช็ค" ไปปนกับ "เช็คแล้วไม่ขาดไม่เกิน" โดยไม่ตั้งใจ.
-  const rowsWithCombined = useMemo(
-    () =>
-      rows.map((r) => ({
-        ...r,
-        combined: combinedDifference(cashChecksByDay.get(r.dateKey)?.cashDifference ?? null, r.overTransferred, r.pendingTransfer),
-      })),
-    [rows, cashChecksByDay]
+  // The one merge that makes this a single table: folds Delivery revenue and the cash-float
+  // check (เงินสดที่ควรมี/ผลต่างเงินสด/ส่วนต่างรวม) into `reconciliation` — see `lib/pos/ledgerDay.ts`.
+  const ledgerRows: LedgerDayRow[] = useMemo(
+    () => ledgerDayRows(reconciliation, floats, expenses, deliveryPayouts),
+    [reconciliation, floats, expenses, deliveryPayouts]
   );
-  const combinedTotal = useMemo(() => {
-    const known = rowsWithCombined.filter((r) => r.combined != null);
-    return { sum: round2(known.reduce((sum, r) => sum + (r.combined ?? 0), 0)), countKnown: known.length, countTotal: rowsWithCombined.length };
-  }, [rowsWithCombined]);
-
-  // "กำไร/ขาดทุนสุทธิรายวัน" — plain calendar day by default, combining POS sales, รายได้
-  // Delivery and ค่าใช้จ่ายรวม so a day's actual money picture doesn't require mentally adding up
-  // three separate pages — see `lib/pos/dailyProfitLoss.ts`'s file comment for why this is
-  // deliberately a second, separate view from the shift-based `rows` above rather than a
-  // replacement for it. `profitLossUseBusinessDay` can switch it to that same shift-based grouping
-  // (passing both `fromHour`/`toHour` — see `dailyProfitLossRows`' and `ledgerBusinessDayKey`'s
-  // comments for why ledger rows need `toHour`, not `fromHour`, to disambiguate).
-  const profitLossRows = useMemo(
-    () =>
-      dailyProfitLossRows(
-        orders,
-        deliveryPayouts,
-        expenses,
-        range.startKey,
-        range.endKey,
-        profitLossUseBusinessDay ? fromHour : undefined
-      ),
-    [orders, deliveryPayouts, expenses, range.startKey, range.endKey, profitLossUseBusinessDay, fromHour]
-  );
-  const profitLossTotal = useMemo(() => totalProfitLoss(profitLossRows), [profitLossRows]);
-
-  // รายจ่ายทั้งเดือน (item: "เรียงรายการของเดือนนี้ไว้ดูรวดเร็ว ไม่ต้องเลื่อนหน้า") — grouped by day,
-  // newest day first, so a week's worth of spending is visible in one scroll instead of clicking
-  // through the date picker one day at a time. `expenseMonthKey` jumps to follow `expenseDay`
-  // whenever the add-expense date changes (see `handleExpenseDayChange` above), so a newly added
-  // backdated entry is immediately visible in this list instead of looking like it didn't save.
-  const monthExpenseGroups = useMemo(() => {
-    const groups = new Map<string, Expense[]>();
-    for (const e of expenses) {
-      if (!e.dateKey.startsWith(expenseMonthKey)) continue;
-      const list = groups.get(e.dateKey) ?? [];
-      list.push(e);
-      groups.set(e.dateKey, list);
-    }
-    return [...groups.entries()]
-      .sort((a, b) => b[0].localeCompare(a[0]))
-      .map(([dateKey, items]) => ({
-        dateKey,
-        // Newest first within the day, same as before this redesign.
-        items: [...items].sort((a, b) => b.createdAt - a.createdAt),
-        total: items.reduce((sum, e) => sum + e.amount, 0),
-      }));
-  }, [expenses, expenseMonthKey]);
-  const monthExpenseTotal = useMemo(() => monthExpenseGroups.reduce((sum, g) => sum + g.total, 0), [monthExpenseGroups]);
-  const visibleTransfers = useMemo(
-    () =>
-      transfers
-        .filter((t) => t.businessDayKey >= range.startKey && t.businessDayKey <= range.endKey)
-        // Group by business day first (newest first) so the two settlement batches of the same
-        // day always sit together, then by transferredAt (newest first) within that day.
-        .sort((a, b) =>
-          a.businessDayKey === b.businessDayKey ? b.transferredAt - a.transferredAt : a.businessDayKey < b.businessDayKey ? 1 : -1
-        ),
-    [transfers, range.startKey, range.endKey]
-  );
-
-  const selectedDayRow = useMemo(() => rows.find((r) => r.dateKey === selectedDay) ?? null, [rows, selectedDay]);
-
-  const selectedDayFloat = useMemo(() => floats.find((f) => f.businessDayKey === selectedDay) ?? null, [floats, selectedDay]);
-
-  const selectedDayTransfers = useMemo(
-    () =>
-      selectedDay
-        ? transfers
-            .filter((t) => t.businessDayKey === selectedDay)
-            .sort((a, b) => b.transferredAt - a.transferredAt)
-        : [],
-    [transfers, selectedDay]
-  );
-
-  // Same business-day grouping as `businessDaySales` (`bangkokDateKeyWithCutoff`,
-  // paidAt-or-createdAt) so "บิลวันนี้" shows exactly the orders this row's QR/เงินสด figures were
-  // computed from — the shift runs from `fromHour` (16:00) through the small hours of the next
-  // calendar day, not plain midnight-to-midnight.
-  const selectedDayOrders = useMemo(
-    () =>
-      selectedDay
-        ? orders
-            .filter((o) => bangkokDateKeyWithCutoff(o.paidAt ?? o.createdAt, fromHour) === selectedDay)
-            .sort((a, b) => (a.paidAt ?? a.createdAt) - (b.paidAt ?? b.createdAt))
-        : [],
-    [orders, selectedDay, fromHour]
-  );
-
-  const totals = useMemo(
-    () =>
-      rows.reduce(
-        (acc, r) => ({
-          totalSales: acc.totalSales + r.totalSales,
-          transferred: acc.transferred + r.transferred,
-          pendingTransfer: acc.pendingTransfer + r.pendingTransfer,
-          overTransferred: acc.overTransferred + r.overTransferred,
-          expenses: acc.expenses + r.expenses,
-          net: acc.net + r.net,
-          netReceived: acc.netReceived + r.netReceived,
-        }),
-        { totalSales: 0, transferred: 0, pendingTransfer: 0, overTransferred: 0, expenses: 0, net: 0, netReceived: 0 }
-      ),
-    [rows]
-  );
-  // เกิน−ขาด รวมทั้งช่วง (item: "ยอด รอโอน มันมีขาด มีเกิน เอามา +- กับยอดจริง สรุปรวมมาหน่อย") — if
-  // this is roughly 0, or roughly equal to just the most recent day(s)' own `pendingTransfer` (the
-  // last business day's late-night portion genuinely hasn't settled yet), everything's fine: it's
-  // only the K SHOP cutoff timing from `lib/pos/reconciliation.ts`'s file comment, nothing missing.
-  // A gap bigger than that, or one that includes an *older*, already-"ครบ" day, is worth chasing
-  // down — see that same column's tooltip for what to check.
-  const netTransferGap = totals.overTransferred - totals.pendingTransfer;
-  // เฉลี่ยรายจ่าย/วัน (item request) — over every business day actually shown, not just the ones
-  // with a nonzero expense, so a run of "day off, no expense" days pulls the average down same as
-  // it would pull down a real bookkeeper's mental average.
-  const avgExpensePerDay = rows.length > 0 ? totals.expenses / rows.length : 0;
+  const totals = useMemo(() => ledgerRangeTotals(ledgerRows), [ledgerRows]);
+  // เกิน−ขาด รวมทั้งช่วง — if this is roughly 0, or roughly equal to just the most recent day(s)'
+  // own pendingTransfer (the last business day's late-night portion genuinely hasn't settled
+  // yet), everything's fine: it's only the K SHOP cutoff timing. A gap bigger than that is worth
+  // chasing down.
+  const netTransferGap = round2(totals.overTransferred - totals.pendingTransfer);
+  const avgExpensePerDay = ledgerRows.length > 0 ? totals.expenses / ledgerRows.length : 0;
 
   // Marks a day's outstanding QR-not-yet-transferred amount as settled without requiring the
-  // owner to re-type it into the เงินโอนเข้าบัญชี form below — item request: "ยอดรอโอน ทำให้กดติ๊ก
-  // ได้แล้วหายไป เท่ากับว่าโอนแล้ว". Writes a real `BankTransfer` for exactly today's outstanding
-  // amount (so it sums correctly with anything logged normally), tagged so it's obviously a
-  // manual confirmation rather than a real bank-line entry if anyone reviews the โอนเข้าบัญชี list
-  // later. `confirmingDays` just disables the checkbox mid-write — no undo here, same as every
-  // other "log a transfer" action; fixing a mistaken confirmation means deleting that transfer row
-  // from the เงินโอนเข้าบัญชี table below, same as any other logged transfer.
+  // owner to re-type it into the เงินโอนเข้าบัญชี form — writes a real `BankTransfer` for exactly
+  // today's outstanding amount, tagged so it's obviously a manual confirmation if anyone reviews
+  // the โอนเข้าบัญชี list later.
   const [confirmingDays, setConfirmingDays] = useState<Set<string>>(new Set());
-  async function confirmPendingTransfer(row: (typeof rows)[number]) {
+  async function confirmPendingTransfer(row: LedgerDayRow) {
     if (!shopId || !appUser || row.pendingTransfer <= 0 || confirmingDays.has(row.dateKey)) return;
     setConfirmingDays((prev) => new Set(prev).add(row.dateKey));
     try {
@@ -463,7 +261,7 @@ export default function AccountingPage() {
         transferredAt: Date.now(),
         amount: row.pendingTransfer,
         businessDayKey: row.dateKey,
-        note: "ยืนยันด้วยตนเองว่าโอนเข้าแล้ว (ติ๊กจากตารางกระทบยอด)",
+        note: "ยืนยันด้วยตนเองว่าโอนเข้าแล้ว (ติ๊กจากตารางบัญชี)",
         createdBy: appUser.id,
         createdByName: appUser.name,
         createdAt: Date.now(),
@@ -477,529 +275,153 @@ export default function AccountingPage() {
     }
   }
 
+  function toggleExpand(dateKey: string) {
+    setExpandedDay((cur) => (cur === dateKey ? null : dateKey));
+  }
+
   return (
     <ModuleGate module="accounting">
-    <AdminSection
-      title="บัญชีรายรับ-รายจ่าย"
-      description="กระทบยอดขาย QR กับเงินที่โอนเข้าบัญชีจริง แยกตามวันทำการ พร้อมบันทึกรายจ่าย"
-    >
-      <div className="mb-4 flex flex-wrap items-end gap-2">
-        {PRESETS.map((p) => (
-          <Button key={p.value} variant={preset === p.value ? "default" : "outline"} onClick={() => setPreset(p.value)}>
-            {p.label}
+      <AdminSection
+        title="บัญชีรายรับ-รายจ่าย"
+        description="1 แถว = 1 วันทำการ — ยอดขาย เงินเข้าบัญชีจริง รายจ่าย และส่วนต่างรวม (รวม Delivery) ดูได้ในตารางเดียว กดแถวเพื่อดูรายละเอียด"
+      >
+        <div className="mb-4 flex flex-wrap items-end gap-2">
+          {PRESETS.map((p) => (
+            <Button key={p.value} variant={preset === p.value ? "default" : "outline"} onClick={() => setPreset(p.value)}>
+              {p.label}
+            </Button>
+          ))}
+          <Button variant={preset === "custom" ? "default" : "outline"} onClick={() => setPreset("custom")}>
+            กำหนดเอง
           </Button>
-        ))}
-        <Button variant={preset === "custom" ? "default" : "outline"} onClick={() => setPreset("custom")}>
-          กำหนดเอง
-        </Button>
-        {preset === "custom" && (
-          <div className="flex flex-wrap items-end gap-2">
-            <div>
-              <Label htmlFor="from" className="mb-1 block">
-                จากวันที่
-              </Label>
-              <DateField id="from" value={customFrom} onChange={setCustomFrom} className="h-12 w-40" />
+          {preset === "custom" && (
+            <div className="flex flex-wrap items-end gap-2">
+              <div>
+                <Label htmlFor="from" className="mb-1 block">
+                  จากวันที่
+                </Label>
+                <DateField id="from" value={customFrom} onChange={setCustomFrom} className="h-12 w-40" />
+              </div>
+              <div>
+                <Label htmlFor="to" className="mb-1 block">
+                  ถึงวันที่
+                </Label>
+                <DateField id="to" value={customTo} onChange={setCustomTo} className="h-12 w-40" />
+              </div>
             </div>
-            <div>
-              <Label htmlFor="to" className="mb-1 block">
-                ถึงวันที่
-              </Label>
-              <DateField id="to" value={customTo} onChange={setCustomTo} className="h-12 w-40" />
-            </div>
-          </div>
-        )}
-      </div>
+          )}
+        </div>
 
-      <div className="mb-6 flex flex-wrap items-center gap-2">
-        <Label className="text-sm text-muted-foreground">1 วันทำการ นับตั้งแต่</Label>
-        <HourSelect label="จาก" value={fromHour} onChange={setFromHour} />
-        <span className="text-sm text-muted-foreground">ถึง</span>
-        <HourSelect label="ถึง" value={toHour} onChange={setToHour} />
-        <span className="text-sm text-muted-foreground">ของวันถัดไป{loading && " · กำลังโหลด..."}</span>
-      </div>
+        <div className="mb-4 flex flex-wrap items-center gap-2">
+          <Label className="text-sm text-muted-foreground">1 วันทำการ นับตั้งแต่</Label>
+          <HourSelect label="จาก" value={fromHour} onChange={setFromHour} />
+          <span className="text-sm text-muted-foreground">ถึง</span>
+          <HourSelect label="ถึง" value={toHour} onChange={setToHour} />
+          <span className="text-sm text-muted-foreground">ของวันถัดไป{loading && " · กำลังโหลด..."}</span>
+        </div>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>ยอดขายเทียบกับเงินโอนเข้าบัญชี</CardTitle>
-          <CardDescription>
-            นับเป็น &quot;วันทำการ&quot; ตามกะ (เช่น {fromHour}:00 ถึง {toHour}:00 ของวันถัดไป นับเป็นวันเดียวกัน) ไม่ใช่เที่ยงคืนถึงเที่ยงคืน —
-            ต่างจากตาราง &quot;กำไร/ขาดทุนสุทธิรายวัน&quot; ด้านล่างที่นับตามวันปฏิทินจริง จึงอาจเห็นยอดขายของวันที่ตัวเลขเดียวกันไม่ตรงกัน
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>วันทำการ (ตามกะ)</TableHead>
-                <TableHead className="text-right">ยอดทั้งหมด</TableHead>
-                <TableHead className="text-right">เงินสด</TableHead>
-                <TableHead className="text-right">QR</TableHead>
-                <TableHead className="text-right">โอนเข้าแล้ว</TableHead>
-                <TableHead className="text-right">รอโอน</TableHead>
-                <TableHead className="text-right">รายจ่าย</TableHead>
-                <TableHead className="text-right">สุทธิ</TableHead>
-                <TableHead className="text-right" title="เงินสด + ที่โอนเข้าบัญชีจริงแล้ว + อื่นๆ − รายจ่าย — ต่างจาก &quot;สุทธิ&quot; ตรงที่ไม่เหมาว่า QR ที่ยังรอโอนเข้ามาแล้ว">
-                  สุทธิ (รับจริง)
-                </TableHead>
-                <TableHead
-                  className="text-right"
-                  title="ผลต่างเงินสด (จากกล่องรายละเอียดวัน) + ผลต่างโอนเกิน/รอโอน รวมเป็นตัวเดียว — ขีด (-) แปลว่ายังไม่ได้นับเงินสดวันนั้น"
-                >
-                  ส่วนต่างรวม (เงินสด+โอน)
-                </TableHead>
-                <TableHead>สถานะ</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {rowsWithCombined.map((r) => (
-                <TableRow key={r.dateKey} className="cursor-pointer hover:bg-accent/50" onClick={() => setSelectedDay(r.dateKey)}>
-                  <TableCell className="font-medium">{formatKey(r.dateKey)}</TableCell>
-                  <TableCell className="text-right font-medium">{formatCurrency(r.totalSales, currency)}</TableCell>
-                  <TableCell className="text-right">{formatCurrency(r.cashSales, currency)}</TableCell>
-                  <TableCell className="text-right">{formatCurrency(r.qrSales, currency)}</TableCell>
-                  <TableCell className="text-right">{formatCurrency(r.transferred, currency)}</TableCell>
-                  <TableCell className="text-right">
-                    {r.pendingTransfer > 0 ? (
-                      <span className="inline-flex items-center justify-end gap-2">
-                        {formatCurrency(r.pendingTransfer, currency)}
-                        <input
-                          type="checkbox"
-                          className="h-4 w-4 cursor-pointer accent-primary"
-                          title="ติ๊กถ้าโอนเข้าบัญชีแล้ว (ยืนยันด้วยตนเอง ไม่ต้องกรอกฟอร์มด้านล่าง)"
-                          disabled={confirmingDays.has(r.dateKey)}
-                          onClick={(e) => e.stopPropagation()}
-                          onChange={(e) => e.target.checked && confirmPendingTransfer(r)}
-                        />
-                      </span>
-                    ) : r.overTransferred > 0 ? (
-                      <span
-                        className="inline-flex items-center justify-end gap-1 text-destructive"
-                        title="ยอดที่กรอกไว้ในตาราง &quot;เงินโอนเข้าบัญชี&quot; ของวันนี้ มากกว่ายอด QR ที่ระบบคำนวณ — เช็คว่ามีแถวกรอกผิด/กรอกซ้ำ หรือมี QR ที่ขายจริงแต่ระบบไม่ได้บันทึกไว้"
-                      >
-                        เกิน {formatCurrency(r.overTransferred, currency)}
-                      </span>
-                    ) : (
-                      "-"
-                    )}
-                  </TableCell>
-                  <TableCell className="text-right">{formatCurrency(r.expenses, currency)}</TableCell>
-                  <TableCell className={cn("whitespace-nowrap text-right font-medium", netClassName(r.net))}>
-                    {formatCurrency(r.net, currency)}
-                  </TableCell>
-                  <TableCell className={cn("whitespace-nowrap text-right font-medium", netClassName(r.netReceived))}>
-                    {formatCurrency(r.netReceived, currency)}
-                  </TableCell>
-                  <TableCell className="whitespace-nowrap text-right">
-                    {r.combined != null ? (
-                      <span className={cn("font-medium", netClassName(r.combined))}>{formatCurrency(r.combined, currency)}</span>
-                    ) : (
-                      <span className="text-muted-foreground" title="ยังไม่ได้กรอกเงินสดรวมปลายกะในกล่องรายละเอียดวันนี้ เลยยังสรุปส่วนต่างรวมไม่ได้">
-                        -
-                      </span>
-                    )}
-                  </TableCell>
-                  <TableCell>
-                    <Badge variant={r.settled ? "success" : "default"}>{r.settled ? "ครบ" : "รอ"}</Badge>
-                  </TableCell>
-                </TableRow>
-              ))}
-              {rows.length === 0 ? (
-                <TableRow>
-                  <TableCell colSpan={11} className="text-center text-muted-foreground">
-                    ไม่มีข้อมูลในช่วงนี้
-                  </TableCell>
-                </TableRow>
-              ) : null}
-            </TableBody>
-          </Table>
-          <div className="mt-3 space-y-1 text-xs text-muted-foreground">
-            <p>
-              รวมช่วงนี้ — ยอดขาย {formatCurrency(totals.totalSales, currency)}, โอนเข้าแล้ว {formatCurrency(totals.transferred, currency)},
-              รอโอน {formatCurrency(totals.pendingTransfer, currency)}, โอนเกิน {formatCurrency(totals.overTransferred, currency)}, รายจ่าย{" "}
-              {formatCurrency(totals.expenses, currency)} (เฉลี่ย {formatCurrency(avgExpensePerDay, currency)}/วัน)
+        <div className="mb-6 grid grid-cols-2 gap-2 sm:grid-cols-4">
+          <SummaryTile label="ยอดขายรวม (รวม Delivery)" value={formatCurrency(totals.salesTotal, currency)} />
+          <SummaryTile label="รายจ่ายรวม" value={formatCurrency(totals.expenses, currency)} sub={`เฉลี่ย ${formatCurrency(avgExpensePerDay, currency)}/วัน`} />
+          <SummaryTile
+            label="ผลต่างโอนเกิน−รอโอน"
+            value={formatCurrency(netTransferGap, currency)}
+            tone={netTransferGap < 0 ? "neg" : netTransferGap > 0 ? "pos" : "flat"}
+          />
+          <SummaryTile
+            label={`ส่วนต่างรวมจริง (เงินสด+โอน)${totals.combinedKnownDays < totals.totalDays ? ` · นับแล้ว ${totals.combinedKnownDays}/${totals.totalDays} วัน` : ""}`}
+            value={formatCurrency(totals.combined, currency)}
+            tone={totals.combined < 0 ? "neg" : totals.combined > 0 ? "pos" : "flat"}
+            highlight
+          />
+        </div>
+
+        {/* Desktop/tablet: one wide table, horizontal-scroll if needed. Mobile: a stacked card per
+            day instead — the same data and the same inline cash-count inputs, just laid out for a
+            narrow screen a person is actually typing on at the end of a shift. */}
+        <div className="hidden md:block">
+          <LedgerTable
+            rows={ledgerRows}
+            currency={currency}
+            shopId={shopId}
+            appUser={appUser}
+            expandedDay={expandedDay}
+            onToggle={toggleExpand}
+            confirmingDays={confirmingDays}
+            onConfirmPending={confirmPendingTransfer}
+            expenses={expenses}
+            transfers={transfers}
+            orders={orders}
+            floats={floats}
+            fromHour={fromHour}
+            onSelectOrder={setSelectedOrder}
+          />
+        </div>
+        <div className="space-y-3 md:hidden">
+          <LedgerCards
+            rows={ledgerRows}
+            currency={currency}
+            shopId={shopId}
+            appUser={appUser}
+            expandedDay={expandedDay}
+            onToggle={toggleExpand}
+            confirmingDays={confirmingDays}
+            onConfirmPending={confirmPendingTransfer}
+            expenses={expenses}
+            transfers={transfers}
+            orders={orders}
+            floats={floats}
+            fromHour={fromHour}
+            onSelectOrder={setSelectedOrder}
+          />
+        </div>
+        {ledgerRows.length === 0 ? <p className="mt-3 text-center text-sm text-muted-foreground">ไม่มีข้อมูลในช่วงนี้</p> : null}
+
+        <Card className="mt-6">
+          <CardHeader>
+            <CardTitle>รายจ่ายประจำ</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="mb-3 text-sm text-muted-foreground">
+              รายการที่ตั้งไว้ที่นี่จะถูกสร้างเป็นแถวรายจ่ายในตารางด้านบนให้อัตโนมัติทุกวัน (เช่น ค่าเช่าที่ ค่าพนักงาน ค่าเน็ต) — ถ้าวันไหนหยุด
+              ให้ไปลบแถวรายจ่ายของวันนั้นในรายละเอียดแถวได้เลย ระบบจะไม่สร้างซ้ำให้วันนั้นอีก
             </p>
-            <p>
-              สุทธิ{" "}
-              <span className={cn("font-medium", netClassName(totals.net))}>{formatCurrency(totals.net, currency)}</span> · สุทธิ (รับจริง){" "}
-              <span className={cn("font-medium", netClassName(totals.netReceived))}>{formatCurrency(totals.netReceived, currency)}</span> ·
-              ผลต่างโอนเกิน−รอโอน{" "}
-              <span className={cn("font-medium", netTransferGap < 0 ? "text-destructive" : netTransferGap > 0 ? "text-blue-600 dark:text-blue-400" : "")}>
-                {formatCurrency(netTransferGap, currency)}
-              </span>{" "}
-              — ถ้าใกล้ 0 หรือใกล้เคียงยอดรอโอนของวันล่าสุดวันเดียว ถือว่าปกติ (แค่รอรอบโอนของ K SHOP) แต่ถ้าค้างเยอะกว่านั้นหรือมีวันเก่าที่ขึ้น
-              &quot;ครบ&quot; แล้วแต่ยังโอนเกิน ควรเช็คย้อนหลัง
-            </p>
-            <p>
-              <span className="font-medium text-foreground">ส่วนต่างรวมจริง (เงินสด+โอน) ทั้งช่วงนี้:{" "}
-                <span className={netClassName(combinedTotal.sum)}>{formatCurrency(combinedTotal.sum, currency)}</span>
-              </span>{" "}
-              — เอาผลต่างเงินสด (จากกล่องรายละเอียดวัน) บวกกับผลต่างโอนเกิน/รอโอน ของแต่ละวันรวมกัน ติดลบคือขาดจริง บวกคือเกินจริง{" "}
-              {combinedTotal.countKnown < combinedTotal.countTotal
-                ? `(นับเงินสดแล้ว ${combinedTotal.countKnown} จาก ${combinedTotal.countTotal} วัน — วันที่เหลือยังไม่ได้กรอกเงินสดรวมปลายกะ เลยไม่รวมอยู่ในยอดนี้)`
-                : `(นับเงินสดครบทุกวันในช่วงนี้แล้ว)`}
-            </p>
-          </div>
-        </CardContent>
-      </Card>
-
-      <Card className="mt-4">
-        <CardHeader className="flex flex-row flex-wrap items-start justify-between gap-4 space-y-0">
-          <div>
-            <CardTitle>กำไร/ขาดทุนสุทธิรายวัน (รวม Delivery)</CardTitle>
-            <CardDescription>
-              {profitLossUseBusinessDay ? (
-                <>
-                  ยอดขาย POS นับเป็นวันทำการตามกะ ({String(fromHour).padStart(2, "0")}:00 ถึง {String(toHour).padStart(2, "0")}:00 ของวันถัดไป)
-                  เหมือนตารางด้านบน — ปรับเวลาที่ช่อง &quot;1 วันทำการ นับตั้งแต่&quot; ด้านบนสุดของหน้า ส่วนค่าใช้จ่ายและรายได้ Delivery ยึดวันที่ที่บันทึกไว้
-                  เสมอไม่ว่าสวิตช์นี้จะเปิดหรือปิด (ตรงกับตาราง &quot;รายจ่าย&quot; และตารางด้านบนทุกครั้ง)
-                </>
-              ) : (
-                <>
-                  นับตามวันปฏิทินจริง (เที่ยงคืนถึงเที่ยงคืน) — ค่าใช้จ่ายและรายได้ Delivery ยึดวันที่ที่บันทึกไว้เสมอไม่ว่าสวิตช์นี้จะเปิดหรือปิด
-                  (ตรงกับตาราง &quot;รายจ่าย&quot; ด้านล่างทุกครั้ง) มีแค่ยอดขาย POS เท่านั้นที่จะต่างจากตารางด้านบน เพราะตารางด้านบนนับเป็นวันทำการตามกะ
-                  (ไม่ใช่ข้อมูลผิด แค่นับวันคนละแบบ) — เปิดสวิตช์ด้านขวาเพื่อนับยอดขาย POS แบบเดียวกับตารางด้านบนแทน
-                </>
-              )}
-            </CardDescription>
-          </div>
-          <div className="flex shrink-0 items-center gap-2">
-            <Label htmlFor="pl-business-day" className="text-xs text-muted-foreground">
-              นับเป็นวันทำการ (กะ)
-            </Label>
-            <Switch id="pl-business-day" checked={profitLossUseBusinessDay} onCheckedChange={setProfitLossUseBusinessDay} />
-          </div>
-        </CardHeader>
-        <CardContent>
-          {/* วันปฏิทินธรรมดา (ไม่ใช่ business day แบบตารางด้านบน) — เพราะ Expense/DeliveryPayout
-              เก็บเป็นวันปฏิทินธรรมดาอยู่แล้ว (ยืนยันกับเจ้าของร้านแล้ว) เห็นยอดขาย POS + รายได้
-              Delivery รวมกัน หักค่าใช้จ่าย ว่าแต่ละวันได้หรือขาดทุนเท่าไหร่ โดยไม่ต้องไปเปิดหลายหน้า
-              มาบวกลบเอง. ใช้ช่วงวันที่เดียวกับตารางด้านบน (ปุ่มพรีเซ็ตบนสุดของหน้า). */}
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>{profitLossUseBusinessDay ? "วันทำการ (ตามกะ)" : "วันที่ (ตามปฏิทิน)"}</TableHead>
-                <TableHead className="text-right">ยอดขาย POS</TableHead>
-                <TableHead className="text-right">รายได้ Delivery</TableHead>
-                <TableHead className="text-right">ค่าใช้จ่าย</TableHead>
-                <TableHead className="text-right">กำไร/ขาดทุนสุทธิ</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {profitLossRows.map((r) => (
-                <TableRow key={r.dateKey}>
-                  <TableCell className="font-medium">{formatKey(r.dateKey)}</TableCell>
-                  <TableCell className="text-right">{formatCurrency(r.posSales, currency)}</TableCell>
-                  <TableCell className="text-right">{formatCurrency(r.deliveryRevenue, currency)}</TableCell>
-                  <TableCell className="text-right">{formatCurrency(r.expenses, currency)}</TableCell>
-                  <TableCell className={cn("whitespace-nowrap text-right font-medium", netClassName(r.net))}>
-                    {formatCurrency(r.net, currency)}
-                  </TableCell>
-                </TableRow>
-              ))}
-              {profitLossRows.length === 0 ? (
-                <TableRow>
-                  <TableCell colSpan={5} className="text-center text-muted-foreground">
-                    ไม่มีข้อมูลในช่วงนี้
-                  </TableCell>
-                </TableRow>
-              ) : null}
-            </TableBody>
-          </Table>
-          <p className="mt-3 text-xs text-muted-foreground">
-            รวมช่วงนี้ — ยอดขาย POS {formatCurrency(profitLossTotal.posSales, currency)}, รายได้ Delivery{" "}
-            {formatCurrency(profitLossTotal.deliveryRevenue, currency)}, ค่าใช้จ่าย {formatCurrency(profitLossTotal.expenses, currency)}, สุทธิ{" "}
-            <span className={cn("font-medium", netClassName(profitLossTotal.net))}>{formatCurrency(profitLossTotal.net, currency)}</span>
-          </p>
-        </CardContent>
-      </Card>
-
-      <Card className="mt-4">
-        <CardHeader>
-          <CardTitle>รายจ่าย</CardTitle>
-        </CardHeader>
-        <CardContent>
-          {/* เพิ่มรายจ่ายใหม่ — เลือกวันที่ตรงนี้ครั้งเดียว ก่อนกรอกแถวด้านล่าง เปลี่ยนวันที่ตรงนี้จะ
-              พารายการเดือนนี้ด้านล่างเลื่อนตามไปด้วย (ดูคอมเมนต์ `handleExpenseDayChange`) — เพิ่ม
-              รายจ่ายย้อนหลังแล้วเห็นผลทันทีว่าไปอยู่ตรงไหน. */}
-          <div className="mb-3 flex items-center gap-2">
-            <Label className="text-sm text-muted-foreground">เพิ่มรายจ่ายวันที่</Label>
-            <DateField value={expenseDay} onChange={handleExpenseDayChange} className="h-9 w-36" />
-            <span className="text-sm font-medium">{formatKey(expenseDay)}</span>
-          </div>
-          <Table className="table-fixed min-w-[560px]">
-            {/* Fixed, percentage-based column widths (sum to 100%) so every cell's Input/Select
-                below can fill its column with `w-full` instead of a fixed px width. `min-w-[560px]`
-                is what actually matters on a phone: without it, `table-fixed` + `w-full` shrinks
-                the table down to the screen's own width, squeezing every Select/Input/Badge below
-                the space they need and making them visually overlap. */}
-            <colgroup>
-              <col className="w-[18%]" />
-              <col className="w-[32%]" />
-              <col className="w-[16%]" />
-              <col className="w-[18%]" />
-              <col className="w-[16%]" />
-            </colgroup>
-            <TableBody>
-              {shopId && appUser ? (
-                <ExpenseQuickAddRow shopId={shopId} createdBy={appUser.id} createdByName={appUser.name} dateKey={expenseDay} />
-              ) : null}
-            </TableBody>
-          </Table>
-
-          {/* รายการเดือนนี้ (item: "เรียงรายการของเดือนนี้ไว้ดูรวดเร็ว ไม่ต้องเลื่อนหน้า") — ทุกวันใน
-              เดือนที่เลือกแสดงพร้อมกันในตารางเดียว กลุ่มตามวัน (ใหม่สุดอยู่บนสุด) แทนที่จะต้องกดเลือก
-              วันที่ทีละวันเหมือนเดิม. เลื่อนเดือนเองด้วย ‹/› ได้อิสระ แต่จะกระโดดตาม `expenseDay`
-              ทันทีที่เปลี่ยนวันที่เพิ่มรายจ่ายด้านบน. */}
-          <div className="mb-3 mt-6 flex flex-wrap items-center justify-between gap-2">
-            <Label className="text-sm text-muted-foreground">รายการเดือนนี้</Label>
-            <div className="flex items-center gap-2">
-              <Button size="sm" variant="outline" onClick={() => setExpenseMonthKey((k) => shiftMonthKey(k, -1))}>
-                ‹ เดือนก่อน
-              </Button>
-              <span className="min-w-[9rem] text-center text-sm font-medium">{formatMonthKey(expenseMonthKey)}</span>
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={() => setExpenseMonthKey((k) => shiftMonthKey(k, 1))}
-                disabled={expenseMonthKey >= todayKey().slice(0, 7)}
-              >
-                เดือนถัดไป ›
-              </Button>
-            </div>
-          </div>
-          <Table className="table-fixed min-w-[560px]">
-            <colgroup>
-              <col className="w-[18%]" />
-              <col className="w-[32%]" />
-              <col className="w-[16%]" />
-              <col className="w-[18%]" />
-              <col className="w-[16%]" />
-            </colgroup>
-            <TableHeader>
-              <TableRow>
-                <TableHead>หมวด</TableHead>
-                <TableHead>รายการ</TableHead>
-                <TableHead>จ่ายด้วย</TableHead>
-                <TableHead className="text-right">จำนวนเงิน</TableHead>
-                <TableHead />
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {monthExpenseGroups.map((group) => (
-                <Fragment key={group.dateKey}>
-                  <TableRow className="bg-muted/40 hover:bg-muted/40">
-                    <TableCell colSpan={4} className="py-1.5 text-sm font-medium">
-                      {formatKey(group.dateKey)}
-                    </TableCell>
-                    <TableCell className="py-1.5 text-right text-sm font-medium">{formatCurrency(group.total, currency)}</TableCell>
-                  </TableRow>
-                  {group.items.map((e) => (
-                    <ExpenseRow key={e.id} expense={e} currency={currency} />
-                  ))}
-                </Fragment>
-              ))}
-              {monthExpenseGroups.length === 0 ? (
-                <TableRow>
-                  <TableCell colSpan={5} className="text-center text-muted-foreground">
-                    ยังไม่มีรายจ่ายเดือนนี้
-                  </TableCell>
-                </TableRow>
-              ) : null}
-            </TableBody>
-          </Table>
-          <p className="mt-3 text-right text-sm font-medium">
-            ยอดรวมเดือน {formatMonthKey(expenseMonthKey)}{" "}
-            <span className={monthExpenseTotal < 0 ? "text-destructive" : undefined}>{formatCurrency(monthExpenseTotal, currency)}</span>
-          </p>
-        </CardContent>
-      </Card>
-
-      <Card className="mt-4">
-        <CardHeader>
-          <CardTitle>รายจ่ายประจำ</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <p className="mb-3 text-sm text-muted-foreground">
-            รายการที่ตั้งไว้ที่นี่จะถูกสร้างเป็นแถวในตาราง &quot;รายจ่าย&quot; ด้านบนให้อัตโนมัติทุกวัน
-            (เช่น ค่าเช่าที่ ค่าพนักงาน ค่าเน็ต) — ถ้าวันไหนหยุด ให้ไปลบแถวของวันนั้นในตาราง
-            &quot;รายจ่าย&quot; ได้เลย ระบบจะไม่สร้างซ้ำให้วันนั้นอีก
-          </p>
-          <Table className="table-fixed min-w-[640px]">
-            {/* Same `min-w-[640px]` fix as the รายจ่าย table above — without it this table's Select
-                (จ่ายด้วย), and the สถานะ/ลบ buttons collapse into overlapping slivers on a phone. */}
-            <colgroup>
-              <col className="w-[16%]" />
-              <col className="w-[32%]" />
-              <col className="w-[16%]" />
-              <col className="w-[14%]" />
-              <col className="w-[10%]" />
-              <col className="w-[12%]" />
-            </colgroup>
-            <TableHeader>
-              <TableRow>
-                <TableHead>หมวด</TableHead>
-                <TableHead>รายการ</TableHead>
-                <TableHead className="text-right">จำนวนเงิน/วัน</TableHead>
-                <TableHead>จ่ายด้วย</TableHead>
-                <TableHead>สถานะ</TableHead>
-                <TableHead />
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {shopId ? <RecurringExpenseQuickAddRow shopId={shopId} /> : null}
-              {recurringExpenses.map((t) => (
-                <RecurringExpenseRow key={t.id} template={t} currency={currency} />
-              ))}
-              {recurringExpenses.length === 0 ? (
-                <TableRow>
-                  <TableCell colSpan={6} className="text-center text-muted-foreground">
-                    ยังไม่มีรายจ่ายประจำ
-                  </TableCell>
-                </TableRow>
-              ) : null}
-            </TableBody>
-          </Table>
-        </CardContent>
-      </Card>
-
-      <Card className="mt-4">
-        <CardHeader>
-          <CardTitle>เงินโอนเข้าบัญชี</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>สำหรับวันทำการ</TableHead>
-                <TableHead className="text-right">ยอด 16:00-23:00</TableHead>
-                <TableHead className="text-right">ยอด 23:00-04:00</TableHead>
-                <TableHead>หมายเหตุ</TableHead>
-                <TableHead className="w-32" />
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {shopId && appUser ? (
-                <TransferQuickAddRow
-                  shopId={shopId}
-                  fromHour={fromHour}
-                  createdBy={appUser.id}
-                  createdByName={appUser.name}
-                />
-              ) : null}
-              {visibleTransfers.map((t) => (
-                <TransferRow key={t.id} transfer={t} currency={currency} />
-              ))}
-              {visibleTransfers.length === 0 ? (
-                <TableRow>
-                  <TableCell colSpan={5} className="text-center text-muted-foreground">
-                    ยังไม่มีรายการโอนในช่วงนี้
-                  </TableCell>
-                </TableRow>
-              ) : null}
-            </TableBody>
-          </Table>
-        </CardContent>
-      </Card>
-
-      <Dialog open={selectedDay !== null} onOpenChange={(open) => !open && setSelectedDay(null)}>
-        <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-2xl">
-          <DialogHeader>
-            <DialogTitle>รายละเอียดวันที่ {selectedDay ? formatKey(selectedDay) : ""}</DialogTitle>
-          </DialogHeader>
-          {selectedDayRow ? (
-            <p className="-mt-2 text-sm text-muted-foreground">
-              QR {formatCurrency(selectedDayRow.qrSales, currency)} · โอนเข้าแล้ว {formatCurrency(selectedDayRow.transferred, currency)} · รอโอน{" "}
-              {selectedDayRow.pendingTransfer > 0 ? formatCurrency(selectedDayRow.pendingTransfer, currency) : "-"} ·{" "}
-              <Badge variant={selectedDayRow.settled ? "success" : "default"}>{selectedDayRow.settled ? "ครบ" : "รอ"}</Badge>
-            </p>
-          ) : null}
-
-          {shopId && appUser && selectedDay ? (
-            <DailyFloatSection
-              shopId={shopId}
-              businessDayKey={selectedDay}
-              float={selectedDayFloat}
-              cashSales={selectedDayRow?.cashSales ?? 0}
-              cashExpenses={cashExpensesByDay[selectedDay] ?? 0}
-              currency={currency}
-              updatedBy={appUser.id}
-              updatedByName={appUser.name}
-            />
-          ) : null}
-
-          <div>
-            <h3 className="mb-2 text-sm font-semibold">เงินโอนเข้าบัญชี</h3>
-            <Table>
+            <Table className="table-fixed min-w-[640px]">
+              <colgroup>
+                <col className="w-[16%]" />
+                <col className="w-[32%]" />
+                <col className="w-[16%]" />
+                <col className="w-[14%]" />
+                <col className="w-[10%]" />
+                <col className="w-[12%]" />
+              </colgroup>
               <TableHeader>
                 <TableRow>
-                  <TableHead>สำหรับวันทำการ</TableHead>
-                  <TableHead className="text-right">ยอด 16:00-23:00</TableHead>
-                  <TableHead className="text-right">ยอด 23:00-04:00</TableHead>
-                  <TableHead>หมายเหตุ</TableHead>
-                  <TableHead className="w-32" />
+                  <TableHead>หมวด</TableHead>
+                  <TableHead>รายการ</TableHead>
+                  <TableHead className="text-right">จำนวนเงิน/วัน</TableHead>
+                  <TableHead>จ่ายด้วย</TableHead>
+                  <TableHead>สถานะ</TableHead>
+                  <TableHead />
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {selectedDayTransfers.map((t) => (
-                  <TransferRow key={t.id} transfer={t} currency={currency} />
+                {shopId ? <RecurringExpenseQuickAddRow shopId={shopId} /> : null}
+                {recurringExpenses.map((t) => (
+                  <RecurringExpenseRow key={t.id} template={t} currency={currency} />
                 ))}
-                {selectedDayTransfers.length === 0 ? (
+                {recurringExpenses.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={5} className="text-center text-muted-foreground">
-                      ยังไม่มีรายการโอนวันนี้
+                    <TableCell colSpan={6} className="text-center text-muted-foreground">
+                      ยังไม่มีรายจ่ายประจำ
                     </TableCell>
                   </TableRow>
                 ) : null}
               </TableBody>
             </Table>
-          </div>
-
-          <div>
-            <h3 className="mb-1 text-sm font-semibold">บิลวันนี้ ({selectedDayOrders.length} บิล)</h3>
-            {selectedDayRow ? (
-              <p className="mb-2 text-sm text-muted-foreground">
-                รวม {formatCurrency(selectedDayRow.totalSales, currency)} — เงินสด {formatCurrency(selectedDayRow.cashSales, currency)} ·
-                โอน/QR {formatCurrency(selectedDayRow.qrSales, currency)}
-                {selectedDayRow.otherSales > 0 ? ` · อื่นๆ ${formatCurrency(selectedDayRow.otherSales, currency)}` : ""}
-              </p>
-            ) : null}
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>เลขที่ออเดอร์</TableHead>
-                  <TableHead>ช่องทาง/โต๊ะ</TableHead>
-                  <TableHead>ชำระโดย</TableHead>
-                  <TableHead className="text-right">ยอด</TableHead>
-                  <TableHead>เวลา</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {selectedDayOrders.map((o) => (
-                  <TableRow key={o.id} className="cursor-pointer hover:bg-accent" onClick={() => setSelectedOrder(o)}>
-                    <TableCell>{o.orderNumber || "—"}</TableCell>
-                    <TableCell>
-                      {o.tableName ? `โต๊ะ ${o.tableName}` : o.channelName}
-                      {o.customerLabel ? ` · ${o.customerLabel}` : ""}
-                    </TableCell>
-                    <TableCell>{o.paymentMethodName || "-"}</TableCell>
-                    <TableCell className="text-right">{formatCurrency(o.total, currency)}</TableCell>
-                    <TableCell>
-                      {new Date(o.paidAt ?? o.createdAt).toLocaleTimeString("th-TH", { hour: "2-digit", minute: "2-digit" })}
-                    </TableCell>
-                  </TableRow>
-                ))}
-                {selectedDayOrders.length === 0 ? (
-                  <TableRow>
-                    <TableCell colSpan={5} className="text-center text-muted-foreground">
-                      ไม่มีบิลวันนี้
-                    </TableCell>
-                  </TableRow>
-                ) : null}
-              </TableBody>
-            </Table>
-          </div>
-        </DialogContent>
-      </Dialog>
+          </CardContent>
+        </Card>
+      </AdminSection>
 
       <Dialog open={selectedOrder !== null} onOpenChange={(open) => !open && setSelectedOrder(null)}>
         <DialogContent>
@@ -1032,16 +454,37 @@ export default function AccountingPage() {
                   <span>ยอดสุทธิ</span>
                   <span>{formatCurrency(selectedOrder.total, currency)}</span>
                 </div>
-                {selectedOrder.paymentMethodName ? (
-                  <p className="text-muted-foreground">ชำระโดย {selectedOrder.paymentMethodName}</p>
-                ) : null}
+                {selectedOrder.paymentMethodName ? <p className="text-muted-foreground">ชำระโดย {selectedOrder.paymentMethodName}</p> : null}
               </div>
             ) : null}
           </div>
         </DialogContent>
       </Dialog>
-    </AdminSection>
     </ModuleGate>
+  );
+}
+
+function SummaryTile({
+  label,
+  value,
+  sub,
+  tone = "flat",
+  highlight = false,
+}: {
+  label: string;
+  value: string;
+  sub?: string;
+  tone?: "neg" | "pos" | "flat";
+  highlight?: boolean;
+}) {
+  return (
+    <div className={cn("rounded-lg border border-border p-3", highlight && "border-primary sm:col-span-2")}>
+      <p className="text-xs text-muted-foreground">{label}</p>
+      <p className={cn("mt-0.5 font-semibold", highlight ? "text-lg" : "text-base", netClassName(tone === "neg" ? -1 : tone === "pos" ? 1 : 0))}>
+        {value}
+      </p>
+      {sub ? <p className="text-xs text-muted-foreground">{sub}</p> : null}
+    </div>
   );
 }
 
@@ -1064,32 +507,14 @@ function HourSelect({ label, value, onChange }: { label: string; value: number; 
 
 function formatKey(dateKey: string): string {
   const [y, m, d] = dateKey.split("-").map(Number);
-  return new Date(Date.UTC(y, m - 1, d)).toLocaleDateString("th-TH", {
-    day: "numeric",
-    month: "short",
-    year: "numeric",
-    timeZone: "UTC",
-  });
+  return new Date(Date.UTC(y, m - 1, d)).toLocaleDateString("th-TH", { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" });
 }
 
 function todayKey(): string {
   return bangkokDateKey(Date.now());
 }
 
-function formatMonthKey(monthKey: string): string {
-  const [y, m] = monthKey.split("-").map(Number);
-  return new Date(Date.UTC(y, m - 1, 1)).toLocaleDateString("th-TH", { month: "long", year: "numeric", timeZone: "UTC" });
-}
-
-/**
- * Color-codes a สุทธิ (net) figure so it reads unambiguously without relying on spotting a
- * lone "-" — item request: a negative amount's minus sign was wrapping onto its own line in the
- * narrow สุทธิ column (`whitespace-nowrap` above fixes the wrap itself), and losing/dropping the
- * "-" for one careless glance is exactly the kind of bookkeeping mistake a color makes hard to
- * make. Red for a loss uses the same `text-destructive` token every other negative/dangerous
- * value in this app uses; blue for a profit is a deliberate one-off here (not the app's existing
- * green `success` token) per the shop owner's explicit color choice for this specific figure.
- */
+/** Color-codes a net figure so it reads unambiguously without relying on spotting a lone "-". */
 function netClassName(net: number): string {
   if (net < 0) return "text-destructive";
   if (net > 0) return "text-blue-600 dark:text-blue-400";
@@ -1100,14 +525,572 @@ function round2(n: number): number {
   return Math.round(n * 100) / 100;
 }
 
-/**
- * One always-visible editable row at the top of the รายจ่าย table — added after the user found
- * the earlier "+ บันทึกรายจ่าย" popup dialog too slow for entering several expenses in a row
- * ("คลิกแบบนี้เสียเวลา"). Typing an amount and pressing Enter (or the ✓ button) saves and clears
- * only the fields that change every time (รายการ, จำนวนเงิน) — วันที่/หมวด/จ่ายด้วย stay as last
- * set, since consecutive entries are usually the same day and often the same category.
- */
-function ExpenseQuickAddRow({
+// ================================================================================================
+// Row-level editable cash-float fields — shared by the desktop table row and the mobile card via
+// one hook per rendered instance, so each stays in sync with live Firestore data independently of
+// which layout is currently visible (only one is ever shown via CSS, but both mount).
+// ================================================================================================
+
+function useDailyFloatFields(shopId: string | undefined, businessDayKey: string, float: DailyFloat | null, updatedBy: string, updatedByName: string) {
+  const [startingCashText, setStartingCashText] = useState(float?.startingCash != null ? String(float.startingCash) : "");
+  const [cashMovedOutText, setCashMovedOutText] = useState(float?.cashMovedOut != null ? String(float.cashMovedOut) : "");
+  const [closingCashText, setClosingCashText] = useState(float?.closingCashCounted != null ? String(float.closingCashCounted) : "");
+  const [adjustmentText, setAdjustmentText] = useState(float?.cashTransferAdjustment != null ? String(float.cashTransferAdjustment) : "");
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setStartingCashText(float?.startingCash != null ? String(float.startingCash) : "");
+    setCashMovedOutText(float?.cashMovedOut != null ? String(float.cashMovedOut) : "");
+    setClosingCashText(float?.closingCashCounted != null ? String(float.closingCashCounted) : "");
+    setAdjustmentText(float?.cashTransferAdjustment != null ? String(float.cashTransferAdjustment) : "");
+  }, [businessDayKey, float?.startingCash, float?.cashMovedOut, float?.closingCashCounted, float?.cashTransferAdjustment]);
+
+  function parseOrNull(text: string): number | null {
+    const trimmed = text.trim();
+    if (trimmed === "") return null;
+    const n = Number(trimmed);
+    return Number.isFinite(n) ? n : null;
+  }
+  function parseNonNegativeOrNull(text: string): number | null {
+    const n = parseOrNull(text);
+    return n != null ? Math.abs(n) : null;
+  }
+
+  async function save(patch: Partial<Pick<DailyFloat, "startingCash" | "cashMovedOut" | "cashTransferAdjustment" | "closingCashCounted" | "closingCashCountedAt">>) {
+    if (!shopId) return;
+    setSaving(true);
+    setSaveError(null);
+    try {
+      await dailyFloatRepository.upsert(shopId, businessDayKey, { ...patch, updatedBy, updatedByName, updatedAt: Date.now() });
+    } catch (err) {
+      console.error(`[dailyFloats] upsert(${businessDayKey}) failed — is firestore.rules deployed?`, err);
+      setSaveError("บันทึกไม่สำเร็จ — ลองใหม่อีกครั้ง");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return {
+    startingCashText,
+    setStartingCashText,
+    saveStartingCash: () => save({ startingCash: parseOrNull(startingCashText) }),
+    cashMovedOutText,
+    setCashMovedOutText,
+    saveCashMovedOut: () => {
+      const normalized = parseNonNegativeOrNull(cashMovedOutText);
+      setCashMovedOutText(normalized != null ? String(normalized) : "");
+      save({ cashMovedOut: normalized });
+    },
+    closingCashText,
+    setClosingCashText,
+    saveClosingCash: () => {
+      const counted = parseOrNull(closingCashText);
+      save({ closingCashCounted: counted, closingCashCountedAt: counted != null ? Date.now() : null });
+    },
+    adjustmentText,
+    setAdjustmentText,
+    saveAdjustment: () => save({ cashTransferAdjustment: parseOrNull(adjustmentText) }),
+    saving,
+    saveError,
+  };
+}
+
+type FloatFields = ReturnType<typeof useDailyFloatFields>;
+
+function blurOnEnter(e: React.KeyboardEvent<HTMLInputElement>) {
+  if (e.key === "Enter") (e.currentTarget as HTMLInputElement).blur();
+}
+
+// ================================================================================================
+// Desktop table
+// ================================================================================================
+
+interface LedgerListProps {
+  rows: LedgerDayRow[];
+  currency: string;
+  shopId: string | undefined;
+  appUser: { id: string; name: string } | null | undefined;
+  expandedDay: string | null;
+  onToggle: (dateKey: string) => void;
+  confirmingDays: Set<string>;
+  onConfirmPending: (row: LedgerDayRow) => void;
+  expenses: Expense[];
+  transfers: BankTransfer[];
+  orders: Order[];
+  floats: DailyFloat[];
+  fromHour: number;
+  onSelectOrder: (order: Order) => void;
+}
+
+function LedgerTable(props: LedgerListProps) {
+  const { rows } = props;
+  return (
+    <Table>
+      <TableHeader>
+        <TableRow>
+          <TableHead />
+          <TableHead>วันทำการ</TableHead>
+          <TableHead className="text-right">เงินสดเริ่มต้น</TableHead>
+          <TableHead className="text-right">ยอดขาย</TableHead>
+          <TableHead className="text-right">เข้าบัญชีจริง</TableHead>
+          <TableHead className="text-right">รายจ่าย</TableHead>
+          <TableHead className="text-right">โยกออก</TableHead>
+          <TableHead className="text-right" title="นับหลังหยิบเงินออกไปเก็บแล้ว">
+            นับปลายกะ
+          </TableHead>
+          <TableHead className="text-right" title="ผลต่างเงินสด + ผลต่างโอนเกิน/รอโอน รวมเป็นตัวเดียว">
+            ส่วนต่างรวม
+          </TableHead>
+          <TableHead>สถานะ</TableHead>
+        </TableRow>
+      </TableHeader>
+      <TableBody>
+        {rows.map((r) => (
+          <LedgerTableRow key={r.dateKey} row={r} {...props} isExpanded={props.expandedDay === r.dateKey} />
+        ))}
+        {rows.length === 0 ? (
+          <TableRow>
+            <TableCell colSpan={10} className="text-center text-muted-foreground">
+              ไม่มีข้อมูลในช่วงนี้
+            </TableCell>
+          </TableRow>
+        ) : null}
+      </TableBody>
+    </Table>
+  );
+}
+
+function LedgerTableRow({
+  row,
+  currency,
+  shopId,
+  appUser,
+  isExpanded,
+  onToggle,
+  confirmingDays,
+  onConfirmPending,
+  expenses,
+  transfers,
+  orders,
+  floats,
+  fromHour,
+  onSelectOrder,
+}: LedgerListProps & { row: LedgerDayRow; isExpanded: boolean }) {
+  const float = floats.find((f) => f.businessDayKey === row.dateKey) ?? null;
+  const fields = useDailyFloatFields(shopId, row.dateKey, float, appUser?.id ?? "", appUser?.name ?? "");
+  const isToday = isTodayRow(row.dateKey, fromHour);
+
+  return (
+    <Fragment>
+      <TableRow className={cn("cursor-pointer hover:bg-accent/50", isToday && "bg-primary/5")} onClick={() => onToggle(row.dateKey)}>
+        <TableCell className="w-6 text-muted-foreground">
+          <span className={cn("inline-block transition-transform", isExpanded && "rotate-90")}>▶</span>
+        </TableCell>
+        <TableCell className="font-medium">{formatKey(row.dateKey)}</TableCell>
+        <TableCell className="text-right" onClick={(e) => e.stopPropagation()}>
+          <Input
+            type="number"
+            inputMode="decimal"
+            value={fields.startingCashText}
+            onChange={(e) => fields.setStartingCashText(e.target.value)}
+            onBlur={fields.saveStartingCash}
+            onKeyDown={blurOnEnter}
+            placeholder="–"
+            className="h-9 w-24 text-right"
+          />
+        </TableCell>
+        <TableCell className="text-right font-medium">{formatCurrency(row.salesTotal, currency)}</TableCell>
+        <TableCell className="text-right">
+          {formatCurrency(row.receivedTotal, currency)}
+          <FlowBadge row={row} />
+        </TableCell>
+        <TableCell className="text-right">{formatCurrency(row.expenses, currency)}</TableCell>
+        <TableCell className="text-right" onClick={(e) => e.stopPropagation()}>
+          <Input
+            type="number"
+            inputMode="decimal"
+            min={0}
+            value={fields.cashMovedOutText}
+            onChange={(e) => fields.setCashMovedOutText(e.target.value)}
+            onBlur={fields.saveCashMovedOut}
+            onKeyDown={blurOnEnter}
+            className="h-9 w-20 text-right"
+          />
+        </TableCell>
+        <TableCell className="text-right" onClick={(e) => e.stopPropagation()}>
+          <Input
+            type="number"
+            inputMode="decimal"
+            value={fields.closingCashText}
+            onChange={(e) => fields.setClosingCashText(e.target.value)}
+            onBlur={fields.saveClosingCash}
+            onKeyDown={blurOnEnter}
+            placeholder="ยังไม่นับ"
+            className="h-9 w-24 text-right"
+          />
+        </TableCell>
+        <TableCell className="text-right">
+          <CombinedCell row={row} currency={currency} />
+        </TableCell>
+        <TableCell>
+          <StatusBadge row={row} />
+        </TableCell>
+      </TableRow>
+      {isExpanded ? (
+        <TableRow>
+          <TableCell colSpan={10} className="bg-muted/30 p-0">
+            <LedgerDetailPanel
+              row={row}
+              fields={fields}
+              currency={currency}
+              shopId={shopId}
+              appUser={appUser}
+              confirmingDays={confirmingDays}
+              onConfirmPending={onConfirmPending}
+              expenses={expenses}
+              transfers={transfers}
+              orders={orders}
+              fromHour={fromHour}
+              onSelectOrder={onSelectOrder}
+            />
+          </TableCell>
+        </TableRow>
+      ) : null}
+    </Fragment>
+  );
+}
+
+// ================================================================================================
+// Mobile cards
+// ================================================================================================
+
+function LedgerCards(props: LedgerListProps) {
+  return (
+    <>
+      {props.rows.map((r) => (
+        <LedgerCardItem key={r.dateKey} row={r} {...props} isExpanded={props.expandedDay === r.dateKey} />
+      ))}
+    </>
+  );
+}
+
+function LedgerCardItem({
+  row,
+  currency,
+  shopId,
+  appUser,
+  isExpanded,
+  onToggle,
+  confirmingDays,
+  onConfirmPending,
+  expenses,
+  transfers,
+  orders,
+  floats,
+  fromHour,
+  onSelectOrder,
+}: LedgerListProps & { row: LedgerDayRow; isExpanded: boolean }) {
+  const float = floats.find((f) => f.businessDayKey === row.dateKey) ?? null;
+  const fields = useDailyFloatFields(shopId, row.dateKey, float, appUser?.id ?? "", appUser?.name ?? "");
+  const isToday = isTodayRow(row.dateKey, fromHour);
+
+  return (
+    <Card className={cn(isToday && "border-primary")}>
+      <CardContent className="p-3">
+        <div className="mb-2 flex items-center justify-between">
+          <span className="font-medium">{formatKey(row.dateKey)}</span>
+          <StatusBadge row={row} />
+        </div>
+        <div className="mb-2 rounded-md bg-muted/40 p-2 text-center">
+          <CombinedCell row={row} currency={currency} big />
+          <p className="text-xs text-muted-foreground">ส่วนต่างรวม (เงินสด+โอน)</p>
+        </div>
+        <div className="mb-2 grid grid-cols-2 gap-2 text-sm">
+          <StatPair label="ยอดขาย" value={formatCurrency(row.salesTotal, currency)} />
+          <StatPair label="เข้าบัญชีจริง" value={formatCurrency(row.receivedTotal, currency)} extra={<FlowBadge row={row} />} />
+          <StatPair label="รายจ่าย" value={formatCurrency(row.expenses, currency)} />
+          <StatPair label="นับปลายกะ" value={row.closingCashCounted != null ? formatCurrency(row.closingCashCounted, currency) : "ยังไม่นับ"} />
+        </div>
+        <div className="mb-2 grid grid-cols-3 gap-2">
+          <div>
+            <Label className="mb-1 block text-xs text-muted-foreground">เงินสดเริ่มต้น</Label>
+            <Input
+              type="number"
+              inputMode="decimal"
+              value={fields.startingCashText}
+              onChange={(e) => fields.setStartingCashText(e.target.value)}
+              onBlur={fields.saveStartingCash}
+              onKeyDown={blurOnEnter}
+              placeholder="–"
+              className="h-9 text-right"
+            />
+          </div>
+          <div>
+            <Label className="mb-1 block text-xs text-muted-foreground">โยกออก</Label>
+            <Input
+              type="number"
+              inputMode="decimal"
+              min={0}
+              value={fields.cashMovedOutText}
+              onChange={(e) => fields.setCashMovedOutText(e.target.value)}
+              onBlur={fields.saveCashMovedOut}
+              onKeyDown={blurOnEnter}
+              className="h-9 text-right"
+            />
+          </div>
+          <div>
+            <Label className="mb-1 block text-xs text-muted-foreground">นับปลายกะ</Label>
+            <Input
+              type="number"
+              inputMode="decimal"
+              value={fields.closingCashText}
+              onChange={(e) => fields.setClosingCashText(e.target.value)}
+              onBlur={fields.saveClosingCash}
+              onKeyDown={blurOnEnter}
+              placeholder="ยังไม่นับ"
+              className="h-9 text-right"
+            />
+          </div>
+        </div>
+        <Button variant="outline" size="sm" className="w-full" onClick={() => onToggle(row.dateKey)}>
+          {isExpanded ? "ซ่อนรายละเอียด ▲" : "ดูรายละเอียด / แก้ไข ▼"}
+        </Button>
+        {isExpanded ? (
+          <div className="mt-3 -mx-3 -mb-3 border-t border-border bg-muted/30 p-3">
+            <LedgerDetailPanel
+              row={row}
+              fields={fields}
+              currency={currency}
+              shopId={shopId}
+              appUser={appUser}
+              confirmingDays={confirmingDays}
+              onConfirmPending={onConfirmPending}
+              expenses={expenses}
+              transfers={transfers}
+              orders={orders}
+              fromHour={fromHour}
+              onSelectOrder={onSelectOrder}
+            />
+          </div>
+        ) : null}
+      </CardContent>
+    </Card>
+  );
+}
+
+function StatPair({ label, value, extra }: { label: string; value: string; extra?: React.ReactNode }) {
+  return (
+    <div>
+      <p className="text-xs text-muted-foreground">{label}</p>
+      <p className="font-medium">
+        {value}
+        {extra}
+      </p>
+    </div>
+  );
+}
+
+// ================================================================================================
+// Shared small bits (combined cell, flow badge, status badge)
+// ================================================================================================
+
+function isTodayRow(dateKey: string, fromHour: number): boolean {
+  return dateKey === bangkokDateKeyWithCutoff(Date.now(), fromHour);
+}
+
+function CombinedCell({ row, currency, big = false }: { row: LedgerDayRow; currency: string; big?: boolean }) {
+  if (row.combined == null) {
+    return (
+      <span className="text-muted-foreground" title="ยังไม่ได้กรอกเงินสดนับปลายกะวันนี้ เลยยังสรุปส่วนต่างรวมไม่ได้">
+        -
+      </span>
+    );
+  }
+  const label = row.combined < 0 ? "ขาด" : row.combined > 0 ? "เกิน" : "ตรง";
+  return (
+    <span className={cn("font-semibold", netClassName(row.combined), big && "text-xl")}>
+      {formatCurrency(Math.abs(row.combined), currency)} {label}
+    </span>
+  );
+}
+
+function FlowBadge({ row }: { row: LedgerDayRow }) {
+  if (row.pendingTransfer > 0) return <span className="ml-1 text-xs text-amber-600 dark:text-amber-400">รอโอน</span>;
+  if (row.overTransferred > 0) return <span className="ml-1 text-xs text-blue-600 dark:text-blue-400">เกิน</span>;
+  return null;
+}
+
+function StatusBadge({ row }: { row: LedgerDayRow }) {
+  return <Badge variant={row.settled ? "success" : "default"}>{row.settled ? "ครบ" : "รอ"}</Badge>;
+}
+
+// ================================================================================================
+// Expanded detail panel — รายจ่าย/เงินโอน/Delivery/บิลวันนี้ for exactly this one business day.
+// ================================================================================================
+
+function LedgerDetailPanel({
+  row,
+  fields,
+  currency,
+  shopId,
+  appUser,
+  confirmingDays,
+  onConfirmPending,
+  expenses,
+  transfers,
+  orders,
+  fromHour,
+  onSelectOrder,
+}: {
+  row: LedgerDayRow;
+  fields: FloatFields;
+  currency: string;
+  shopId: string | undefined;
+  appUser: { id: string; name: string } | null | undefined;
+  confirmingDays: Set<string>;
+  onConfirmPending: (row: LedgerDayRow) => void;
+  expenses: Expense[];
+  transfers: BankTransfer[];
+  orders: Order[];
+  fromHour: number;
+  onSelectOrder: (order: Order) => void;
+}) {
+  const dayExpenses = useMemo(
+    () => expenses.filter((e) => e.dateKey === row.dateKey).sort((a, b) => b.createdAt - a.createdAt),
+    [expenses, row.dateKey]
+  );
+  const dayTransfers = useMemo(
+    () => transfers.filter((t) => t.businessDayKey === row.dateKey).sort((a, b) => b.transferredAt - a.transferredAt),
+    [transfers, row.dateKey]
+  );
+  const dayOrders = useMemo(
+    () =>
+      orders
+        .filter((o) => bangkokDateKeyWithCutoff(o.paidAt ?? o.createdAt, fromHour) === row.dateKey)
+        .sort((a, b) => (a.paidAt ?? a.createdAt) - (b.paidAt ?? b.createdAt)),
+    [orders, row.dateKey, fromHour]
+  );
+
+  return (
+    <div className="grid gap-5 p-4 sm:grid-cols-3">
+      <div>
+        <h4 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">สรุปการคำนวณ</h4>
+        <div className="mb-3">
+          <Label className="mb-1 block text-xs text-muted-foreground">ยอดปรับ (สลับเงินสด/โอน)</Label>
+          <Input
+            type="number"
+            inputMode="decimal"
+            value={fields.adjustmentText}
+            onChange={(e) => fields.setAdjustmentText(e.target.value)}
+            onBlur={fields.saveAdjustment}
+            onKeyDown={blurOnEnter}
+            className="h-9 text-right"
+          />
+          <p className="mt-1 text-[11px] leading-tight text-muted-foreground">+ = บันทึกเป็นเงินสดผิด ที่จริงเป็นโอน · - = บันทึกเป็นโอนผิด ที่จริงเป็นเงินสด</p>
+        </div>
+        <CalcRow k="เงินสดที่ควรมี (ก่อนโยกออก)" v={row.expectedCashBeforeMoveOut != null ? formatCurrency(row.expectedCashBeforeMoveOut, currency) : "-"} />
+        <CalcRow
+          k="ผลต่างเงินสด"
+          v={row.cashDifference != null ? `${row.cashDifference > 0 ? "+" : ""}${formatCurrency(row.cashDifference, currency)}` : "-"}
+          tone={row.cashDifference ?? 0}
+        />
+        <CalcRow k="ยอดขาย Delivery วันนี้" v={formatCurrency(row.deliveryRevenue, currency)} />
+        <div className="mt-2 flex items-center justify-between border-t border-border pt-2 text-sm">
+          <span>รอโอน / เกิน</span>
+          {row.pendingTransfer > 0 ? (
+            <span className="inline-flex items-center gap-2">
+              <span className="text-amber-600 dark:text-amber-400">{formatCurrency(row.pendingTransfer, currency)}</span>
+              <button
+                type="button"
+                className="text-xs text-primary underline disabled:opacity-50"
+                disabled={confirmingDays.has(row.dateKey)}
+                onClick={() => onConfirmPending(row)}
+              >
+                ติ๊กว่าโอนแล้ว
+              </button>
+            </span>
+          ) : row.overTransferred > 0 ? (
+            <span className="text-blue-600 dark:text-blue-400" title="ยอดที่โอนเข้ามากกว่ายอด QR ที่ระบบคำนวณ — เช็คว่ามีแถวกรอกผิด/กรอกซ้ำ">
+              เกิน {formatCurrency(row.overTransferred, currency)}
+            </span>
+          ) : (
+            <span className="text-muted-foreground">-</span>
+          )}
+        </div>
+        {fields.saving ? <p className="mt-2 text-xs text-muted-foreground">กำลังบันทึก...</p> : null}
+        {fields.saveError ? <p className="mt-2 text-xs text-destructive">{fields.saveError}</p> : null}
+      </div>
+
+      <div>
+        <h4 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">รายจ่าย</h4>
+        <div className="space-y-1">
+          {shopId && appUser ? <ExpenseQuickAddRowInline shopId={shopId} createdBy={appUser.id} createdByName={appUser.name} dateKey={row.dateKey} /> : null}
+          {dayExpenses.map((e) => (
+            <ExpenseRowInline key={e.id} expense={e} currency={currency} />
+          ))}
+          {dayExpenses.length === 0 ? <p className="text-sm text-muted-foreground">ยังไม่มีรายจ่ายวันนี้</p> : null}
+          <p className="flex justify-between border-t border-dashed border-border pt-1 text-sm text-muted-foreground">
+            <span>รวมรายจ่าย</span>
+            <span>{formatCurrency(row.expenses, currency)}</span>
+          </p>
+        </div>
+      </div>
+
+      <div>
+        <h4 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">เงินโอนเข้าบัญชี</h4>
+        <div className="space-y-1">
+          {shopId && appUser ? (
+            <TransferQuickAddRowInline shopId={shopId} businessDayKey={row.dateKey} createdBy={appUser.id} createdByName={appUser.name} />
+          ) : null}
+          {dayTransfers.map((t) => (
+            <TransferRowInline key={t.id} transfer={t} currency={currency} />
+          ))}
+          {dayTransfers.length === 0 ? <p className="text-sm text-muted-foreground">ยังไม่มีรายการโอนวันนี้</p> : null}
+          <p className="flex justify-between border-t border-dashed border-border pt-1 text-sm text-muted-foreground">
+            <span>รวมที่โอนเข้า (ไม่รวม Delivery)</span>
+            <span>{formatCurrency(row.transferred, currency)}</span>
+          </p>
+        </div>
+
+        <h4 className="mb-2 mt-4 text-xs font-semibold uppercase tracking-wide text-muted-foreground">บิลวันนี้ ({dayOrders.length} บิล)</h4>
+        <div className="max-h-48 space-y-1 overflow-y-auto">
+          {dayOrders.map((o) => (
+            <button
+              key={o.id}
+              type="button"
+              onClick={() => onSelectOrder(o)}
+              className="flex w-full items-center justify-between gap-2 rounded-md px-1 py-1 text-left text-sm hover:bg-accent"
+            >
+              <span className="truncate text-muted-foreground">
+                {o.orderNumber || "—"} · {o.tableName ? `โต๊ะ ${o.tableName}` : o.channelName}
+              </span>
+              <span className="shrink-0">{formatCurrency(o.total, currency)}</span>
+            </button>
+          ))}
+          {dayOrders.length === 0 ? <p className="text-sm text-muted-foreground">ไม่มีบิลวันนี้</p> : null}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function CalcRow({ k, v, tone }: { k: string; v: string; tone?: number }) {
+  return (
+    <div className="flex justify-between py-0.5 text-sm">
+      <span className="text-muted-foreground">{k}</span>
+      <span className={cn("font-medium", tone != null ? netClassName(tone) : undefined)}>{v}</span>
+    </div>
+  );
+}
+
+// ================================================================================================
+// รายจ่าย — quick-add + row, scoped to one already-known day (no date picker needed, the day is
+// whichever row's detail panel this is rendered inside).
+// ================================================================================================
+
+function ExpenseQuickAddRowInline({
   shopId,
   createdBy,
   createdByName,
@@ -1116,9 +1099,6 @@ function ExpenseQuickAddRow({
   shopId: string;
   createdBy: string;
   createdByName: string;
-  // Whichever day the "วันที่" filter above the table is set to — new entries always land on
-  // that day, no separate date field here (removing the duplicate picker was the point: "วันที่มี
-  // เลือกด้านบนแล้วไม่จำเป็นต้องมีซ้ำ").
   dateKey: string;
 }) {
   const [category, setCategory] = useState<ExpenseCategory>(EXPENSE_CATEGORIES[0]);
@@ -1128,9 +1108,7 @@ function ExpenseQuickAddRow({
   const [saving, setSaving] = useState(false);
 
   const amount = Number(amountText);
-  // รายการ (description) is optional now — some expenses (e.g. a flat "ค่าเช่าที่" line) don't
-  // need a separate detail, and requiring one just slows down quick entry for no real benefit.
-  const canSave = Boolean(dateKey) && Number.isFinite(amount) && amount > 0;
+  const canSave = Number.isFinite(amount) && amount > 0;
 
   async function handleAdd() {
     if (!canSave || saving) return;
@@ -1156,70 +1134,53 @@ function ExpenseQuickAddRow({
   }
 
   return (
-    <TableRow className="bg-muted/30">
-      <TableCell>
-        <Select value={category} onValueChange={(v) => setCategory(v as ExpenseCategory)}>
-          <SelectTrigger className="h-9 w-full text-sm">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {EXPENSE_CATEGORIES.map((c) => (
-              <SelectItem key={c} value={c}>
-                {c}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      </TableCell>
-      <TableCell>
-        <Input
-          value={description}
-          onChange={(e) => setDescription(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && handleAdd()}
-          placeholder="เช่น หมู 5 กก. (ไม่บังคับ)"
-          className="h-9 w-full"
-        />
-      </TableCell>
-      <TableCell>
-        <Select value={paymentMethod} onValueChange={(v) => setPaymentMethod(v as "cash" | "transfer")}>
-          <SelectTrigger className="h-9 w-full text-sm">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="cash">เงินสด</SelectItem>
-            <SelectItem value="transfer">โอน</SelectItem>
-          </SelectContent>
-        </Select>
-      </TableCell>
-      <TableCell>
-        <Input
-          type="number"
-          inputMode="decimal"
-          min={0}
-          value={amountText}
-          onChange={(e) => setAmountText(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && handleAdd()}
-          placeholder="0.00"
-          className="h-9 w-full text-right"
-        />
-      </TableCell>
-      <TableCell>
-        <Button size="sm" onClick={handleAdd} disabled={!canSave || saving} className="w-full">
-          +
-        </Button>
-      </TableCell>
-    </TableRow>
+    <div className="flex flex-wrap items-center gap-1 rounded-md bg-muted/40 p-1.5">
+      <Select value={category} onValueChange={(v) => setCategory(v as ExpenseCategory)}>
+        <SelectTrigger className="h-8 w-24 text-xs">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          {EXPENSE_CATEGORIES.map((c) => (
+            <SelectItem key={c} value={c}>
+              {c}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+      <Input
+        value={description}
+        onChange={(e) => setDescription(e.target.value)}
+        onKeyDown={(e) => e.key === "Enter" && handleAdd()}
+        placeholder="รายการ (ไม่บังคับ)"
+        className="h-8 min-w-0 flex-1 text-xs"
+      />
+      <Select value={paymentMethod} onValueChange={(v) => setPaymentMethod(v as "cash" | "transfer")}>
+        <SelectTrigger className="h-8 w-20 text-xs">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="cash">เงินสด</SelectItem>
+          <SelectItem value="transfer">โอน</SelectItem>
+        </SelectContent>
+      </Select>
+      <Input
+        type="number"
+        inputMode="decimal"
+        min={0}
+        value={amountText}
+        onChange={(e) => setAmountText(e.target.value)}
+        onKeyDown={(e) => e.key === "Enter" && handleAdd()}
+        placeholder="0.00"
+        className="h-8 w-20 text-right text-xs"
+      />
+      <Button size="sm" className="h-8 px-2" onClick={handleAdd} disabled={!canSave || saving}>
+        +
+      </Button>
+    </div>
   );
 }
 
-/**
- * One row of the รายจ่าย table — a plain read row by default, or (after "แก้ไข") the same fields
- * as `ExpenseQuickAddRow` inline for correcting a typo or amount, plus "ลบ" for a mistaken entry
- * entirely. No date field to edit — every row shown is already filtered to the one day picked
- * above, so a per-row date column/input was a pure duplicate of that same picker; to move an
- * entry to a different day, delete it here and re-add it under that day instead.
- */
-function ExpenseRow({ expense, currency }: { expense: Expense; currency: string }) {
+function ExpenseRowInline({ expense, currency }: { expense: Expense; currency: string }) {
   const [editing, setEditing] = useState(false);
   const [category, setCategory] = useState<ExpenseCategory>(expense.category);
   const [description, setDescription] = useState(expense.description);
@@ -1251,13 +1212,8 @@ function ExpenseRow({ expense, currency }: { expense: Expense; currency: string 
 
   async function handleDelete() {
     const label = expense.description || expense.category;
-    // A row auto-generated from a รายจ่ายประจำ template needs an explicit skip record *first* —
-    // otherwise the generation effect above would just recreate this exact row on its very next
-    // run, since "no Expense doc" and "not generated yet" are otherwise indistinguishable (item:
-    // "ถ้าวันไหนหยุด เดี๋ยวลบออกเอง"). A manually-entered row has nothing to skip; deleting it is
-    // final, same as always.
     const confirmMessage = expense.recurringExpenseId
-      ? `ลบรายจ่ายประจำวันที่ ${formatKey(expense.dateKey)} "${label}" ${formatCurrency(expense.amount, currency)}? (จะไม่สร้างรายการนี้ซ้ำสำหรับวันนี้อีก)`
+      ? `ลบรายจ่ายประจำ "${label}" ${formatCurrency(expense.amount, currency)}? (จะไม่สร้างรายการนี้ซ้ำสำหรับวันนี้อีก)`
       : `ลบรายจ่าย "${label}" ${formatCurrency(expense.amount, currency)}?`;
     if (!window.confirm(confirmMessage)) return;
     if (expense.recurringExpenseId) {
@@ -1268,102 +1224,260 @@ function ExpenseRow({ expense, currency }: { expense: Expense; currency: string 
 
   if (editing) {
     return (
-      <TableRow className="bg-muted/20">
-        <TableCell>
-          <Select value={category} onValueChange={(v) => setCategory(v as ExpenseCategory)}>
-            <SelectTrigger className="h-9 w-full text-sm">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {EXPENSE_CATEGORIES.map((c) => (
-                <SelectItem key={c} value={c}>
-                  {c}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </TableCell>
-        <TableCell>
-          <Input
-            value={description}
-            onChange={(e) => setDescription(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && handleSave()}
-            placeholder="(ไม่บังคับ)"
-            className="h-9 w-full"
-          />
-        </TableCell>
-        <TableCell>
-          <Select value={paymentMethod} onValueChange={(v) => setPaymentMethod(v as "cash" | "transfer")}>
-            <SelectTrigger className="h-9 w-full text-sm">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="cash">เงินสด</SelectItem>
-              <SelectItem value="transfer">โอน</SelectItem>
-            </SelectContent>
-          </Select>
-        </TableCell>
-        <TableCell>
-          <Input
-            type="number"
-            inputMode="decimal"
-            min={0}
-            value={amountText}
-            onChange={(e) => setAmountText(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && handleSave()}
-            className="h-9 w-full text-right"
-          />
-        </TableCell>
-        <TableCell>
-          <div className="flex justify-end gap-1">
-            <Button size="sm" className="px-2" onClick={handleSave} disabled={!canSave || saving}>
-              บันทึก
-            </Button>
-            <Button size="sm" variant="ghost" className="px-2" onClick={() => setEditing(false)}>
-              ยกเลิก
-            </Button>
-          </div>
-        </TableCell>
-      </TableRow>
+      <div className="flex flex-wrap items-center gap-1 rounded-md bg-muted/40 p-1.5">
+        <Select value={category} onValueChange={(v) => setCategory(v as ExpenseCategory)}>
+          <SelectTrigger className="h-8 w-24 text-xs">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {EXPENSE_CATEGORIES.map((c) => (
+              <SelectItem key={c} value={c}>
+                {c}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <Input value={description} onChange={(e) => setDescription(e.target.value)} onKeyDown={(e) => e.key === "Enter" && handleSave()} className="h-8 min-w-0 flex-1 text-xs" />
+        <Select value={paymentMethod} onValueChange={(v) => setPaymentMethod(v as "cash" | "transfer")}>
+          <SelectTrigger className="h-8 w-20 text-xs">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="cash">เงินสด</SelectItem>
+            <SelectItem value="transfer">โอน</SelectItem>
+          </SelectContent>
+        </Select>
+        <Input
+          type="number"
+          inputMode="decimal"
+          min={0}
+          value={amountText}
+          onChange={(e) => setAmountText(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && handleSave()}
+          className="h-8 w-20 text-right text-xs"
+        />
+        <Button size="sm" className="h-8 px-2" onClick={handleSave} disabled={!canSave || saving}>
+          บันทึก
+        </Button>
+        <Button size="sm" variant="ghost" className="h-8 px-2" onClick={() => setEditing(false)}>
+          ยกเลิก
+        </Button>
+      </div>
     );
   }
 
   return (
-    <TableRow>
-      <TableCell className="truncate">
-        <Badge variant="muted">{expense.category}</Badge>
-      </TableCell>
-      <TableCell className="truncate text-muted-foreground">
-        {expense.description || "-"}
+    <div className="flex items-center justify-between gap-2 rounded-md px-1.5 py-1 text-sm hover:bg-accent/50">
+      <div className="min-w-0">
+        <Badge variant="muted" className="mr-1 align-middle text-[10px]">
+          {expense.category}
+        </Badge>
+        <span className="text-muted-foreground">{expense.description || "-"}</span>
         {expense.recurringExpenseId ? (
-          <Badge variant="muted" className="ml-2 align-middle text-[10px]">
+          <Badge variant="muted" className="ml-1 align-middle text-[10px]">
             ประจำ
           </Badge>
         ) : null}
-      </TableCell>
-      <TableCell className="truncate">{expense.paymentMethod === "cash" ? "เงินสด" : "โอน"}</TableCell>
-      <TableCell className="text-right">{formatCurrency(expense.amount, currency)}</TableCell>
-      <TableCell>
-        <div className="flex justify-end gap-1">
-          <Button size="sm" variant="ghost" className="px-2" onClick={startEdit}>
-            แก้ไข
-          </Button>
-          <Button size="sm" variant="ghost" className="px-2 text-destructive" onClick={handleDelete}>
-            ลบ
-          </Button>
-        </div>
-      </TableCell>
-    </TableRow>
+        <span className="ml-1 text-xs text-muted-foreground">({expense.paymentMethod === "cash" ? "เงินสด" : "โอน"})</span>
+      </div>
+      <div className="flex shrink-0 items-center gap-2">
+        <span className="font-medium">{formatCurrency(expense.amount, currency)}</span>
+        <button type="button" className="text-xs text-primary underline" onClick={startEdit}>
+          แก้ไข
+        </button>
+        <button type="button" className="text-xs text-destructive underline" onClick={handleDelete}>
+          ลบ
+        </button>
+      </div>
+    </div>
   );
 }
 
-/**
- * Same quick-add pattern as `ExpenseQuickAddRow`, for setting up a new รายจ่ายประจำ template
- * (item request: "ต้องการให้รายจ่ายประจำ ขึ้นอัตโนมัติเลย"). No dateKey field — a template isn't
- * itself pinned to one day, it *generates* a row for every day from today on (see the accounting
- * page's `generatingRecurringRef` effect and `createdDateKey`'s comment for why "from today" and
- * not earlier).
- */
+// ================================================================================================
+// เงินโอนเข้าบัญชี — quick-add + row, scoped to one already-known business day.
+// ================================================================================================
+
+function TransferQuickAddRowInline({
+  shopId,
+  businessDayKey,
+  createdBy,
+  createdByName,
+}: {
+  shopId: string;
+  businessDayKey: string;
+  createdBy: string;
+  createdByName: string;
+}) {
+  const [amount1Text, setAmount1Text] = useState("");
+  const [amount2Text, setAmount2Text] = useState("");
+  const [note, setNote] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  const amount1 = Number(amount1Text);
+  const amount2 = Number(amount2Text);
+  const hasAmount1 = amount1Text.trim() !== "" && Number.isFinite(amount1) && amount1 > 0;
+  const hasAmount2 = amount2Text.trim() !== "" && Number.isFinite(amount2) && amount2 > 0;
+  const canSave = hasAmount1 || hasAmount2;
+
+  async function handleAdd() {
+    if (!canSave || saving) return;
+    setSaving(true);
+    try {
+      // Batch 1 (16:00-23:00) settles at 23:00 on the business-day label date itself; batch 2
+      // (23:00-04:00) settles at 23:00 the *next* calendar day — see `reconciliation.ts`'s file
+      // comment for why K SHOP's cutoff splits one shift's transfers across two calendar nights.
+      const batch1At = bangkokDayBounds(businessDayKey).startMs + 23 * 60 * 60 * 1000;
+      const batch2At = bangkokDayBounds(addDaysToKey(businessDayKey, 1)).startMs + 23 * 60 * 60 * 1000;
+      const trimmedNote = note.trim();
+      await Promise.all([
+        hasAmount1
+          ? bankTransferRepository.create({
+              shopId,
+              transferredAt: batch1At,
+              amount: amount1,
+              businessDayKey,
+              note: trimmedNote ? `${trimmedNote} (16:00-23:00)` : "รอบ 16:00-23:00",
+              createdBy,
+              createdByName,
+              createdAt: Date.now(),
+            })
+          : Promise.resolve(),
+        hasAmount2
+          ? bankTransferRepository.create({
+              shopId,
+              transferredAt: batch2At,
+              amount: amount2,
+              businessDayKey,
+              note: trimmedNote ? `${trimmedNote} (23:00-04:00)` : "รอบ 23:00-04:00",
+              createdBy,
+              createdByName,
+              createdAt: Date.now(),
+            })
+          : Promise.resolve(),
+      ]);
+      setAmount1Text("");
+      setAmount2Text("");
+      setNote("");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="flex flex-wrap items-center gap-1 rounded-md bg-muted/40 p-1.5">
+      <Input
+        type="number"
+        inputMode="decimal"
+        min={0}
+        value={amount1Text}
+        onChange={(e) => setAmount1Text(e.target.value)}
+        onKeyDown={(e) => e.key === "Enter" && handleAdd()}
+        placeholder="16:00-23:00"
+        className="h-8 w-24 text-right text-xs"
+      />
+      <Input
+        type="number"
+        inputMode="decimal"
+        min={0}
+        value={amount2Text}
+        onChange={(e) => setAmount2Text(e.target.value)}
+        onKeyDown={(e) => e.key === "Enter" && handleAdd()}
+        placeholder="23:00-04:00"
+        className="h-8 w-24 text-right text-xs"
+      />
+      <Input
+        value={note}
+        onChange={(e) => setNote(e.target.value)}
+        onKeyDown={(e) => e.key === "Enter" && handleAdd()}
+        placeholder="หมายเหตุ"
+        className="h-8 min-w-0 flex-1 text-xs"
+      />
+      <Button size="sm" className="h-8 px-2" onClick={handleAdd} disabled={!canSave || saving}>
+        +
+      </Button>
+    </div>
+  );
+}
+
+function TransferRowInline({ transfer, currency }: { transfer: BankTransfer; currency: string }) {
+  const isBatch1 = bangkokDateKey(transfer.transferredAt) === transfer.businessDayKey;
+  const [editing, setEditing] = useState(false);
+  const [amountText, setAmountText] = useState(String(transfer.amount));
+  const [note, setNote] = useState(transfer.note);
+  const [saving, setSaving] = useState(false);
+
+  function startEdit() {
+    setAmountText(String(transfer.amount));
+    setNote(transfer.note);
+    setEditing(true);
+  }
+
+  const amount = Number(amountText);
+  const canSave = Number.isFinite(amount) && amount > 0;
+
+  async function handleSave() {
+    if (!canSave || saving) return;
+    setSaving(true);
+    try {
+      await bankTransferRepository.update(transfer.id, { amount, note: note.trim() });
+      setEditing(false);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handleDelete() {
+    if (!window.confirm(`ลบรายการโอน ${formatCurrency(transfer.amount, currency)}?`)) return;
+    await bankTransferRepository.remove(transfer.id);
+  }
+
+  if (editing) {
+    return (
+      <div className="flex flex-wrap items-center gap-1 rounded-md bg-muted/40 p-1.5">
+        <span className="text-xs text-muted-foreground">{isBatch1 ? "16:00-23:00" : "23:00-04:00"}</span>
+        <Input
+          type="number"
+          inputMode="decimal"
+          min={0}
+          value={amountText}
+          onChange={(e) => setAmountText(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && handleSave()}
+          className="h-8 w-24 text-right text-xs"
+        />
+        <Input value={note} onChange={(e) => setNote(e.target.value)} onKeyDown={(e) => e.key === "Enter" && handleSave()} className="h-8 min-w-0 flex-1 text-xs" />
+        <Button size="sm" className="h-8 px-2" onClick={handleSave} disabled={!canSave || saving}>
+          บันทึก
+        </Button>
+        <Button size="sm" variant="ghost" className="h-8 px-2" onClick={() => setEditing(false)}>
+          ยกเลิก
+        </Button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex items-center justify-between gap-2 rounded-md px-1.5 py-1 text-sm hover:bg-accent/50">
+      <span className="min-w-0 truncate text-muted-foreground">
+        {isBatch1 ? "16:00-23:00" : "23:00-04:00"}
+        {transfer.note ? ` · ${transfer.note}` : ""}
+      </span>
+      <div className="flex shrink-0 items-center gap-2">
+        <span className="font-medium">{formatCurrency(transfer.amount, currency)}</span>
+        <button type="button" className="text-xs text-primary underline" onClick={startEdit}>
+          แก้ไข
+        </button>
+        <button type="button" className="text-xs text-destructive underline" onClick={handleDelete}>
+          ลบ
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ================================================================================================
+// รายจ่ายประจำ — unchanged from the previous page: config, not a per-day ledger row.
+// ================================================================================================
+
 function RecurringExpenseQuickAddRow({ shopId }: { shopId: string }) {
   const [category, setCategory] = useState<ExpenseCategory>(EXPENSE_CATEGORIES[0]);
   const [description, setDescription] = useState("");
@@ -1455,12 +1569,6 @@ function RecurringExpenseQuickAddRow({ shopId }: { shopId: string }) {
   );
 }
 
-/**
- * One รายจ่ายประจำ template — a toggle to pause it without losing the setup/history, and a
- * delete that only removes the template itself. Every `Expense` row it already generated stays
- * exactly as-is either way (see `RecurringExpense.active`'s comment) — deleting the template just
- * means no *future* days get a new row from it.
- */
 function RecurringExpenseRow({ template, currency }: { template: RecurringExpense; currency: string }) {
   const [busy, setBusy] = useState(false);
 
@@ -1477,7 +1585,7 @@ function RecurringExpenseRow({ template, currency }: { template: RecurringExpens
     const label = template.description || template.category;
     if (
       !window.confirm(
-        `ลบรายจ่ายประจำ "${label}" ${formatCurrency(template.amount, currency)}/วัน? (รายการที่สร้างไปแล้วในตาราง "รายจ่าย" จะยังอยู่เหมือนเดิม แค่จะไม่สร้างวันใหม่ๆ ให้อีก)`
+        `ลบรายจ่ายประจำ "${label}" ${formatCurrency(template.amount, currency)}/วัน? (รายการที่สร้างไปแล้วจะยังอยู่เหมือนเดิม แค่จะไม่สร้างวันใหม่ๆ ให้อีก)`
       )
     )
       return;
@@ -1503,472 +1611,5 @@ function RecurringExpenseRow({ template, currency }: { template: RecurringExpens
         </Button>
       </TableCell>
     </TableRow>
-  );
-}
-
-/** Same quick-add pattern as `ExpenseQuickAddRow`, for the เงินโอนเข้าบัญชี table. */
-function TransferQuickAddRow({
-  shopId,
-  fromHour,
-  createdBy,
-  createdByName,
-}: {
-  shopId: string;
-  fromHour: number;
-  createdBy: string;
-  createdByName: string;
-}) {
-  // Guess which business day is "currently open" right now, given the chosen start hour — just
-  // a starting point the person can change, not a claim of correctness (see
-  // `BankTransfer.businessDayKey`'s comment on why this is always a human decision).
-  const [businessDayKey, setBusinessDayKey] = useState(() => bangkokDateKeyWithCutoff(Date.now(), fromHour));
-  // Split into the two real K SHOP settlement batches a single business day actually receives
-  // (see `lib/pos/reconciliation.ts`'s file comment) — the 16:00-23:00 portion transfers that
-  // same night, the 23:00-04:00 portion transfers the *next* night. Either can be left blank if
-  // only one has landed so far; each filled-in amount becomes its own `BankTransfer` doc, both
-  // tagged with the same `businessDayKey` so the reconciliation table sums them together.
-  const [amount1Text, setAmount1Text] = useState("");
-  const [amount2Text, setAmount2Text] = useState("");
-  const [note, setNote] = useState("");
-  const [saving, setSaving] = useState(false);
-
-  const amount1 = Number(amount1Text);
-  const amount2 = Number(amount2Text);
-  const hasAmount1 = amount1Text.trim() !== "" && Number.isFinite(amount1) && amount1 > 0;
-  const hasAmount2 = amount2Text.trim() !== "" && Number.isFinite(amount2) && amount2 > 0;
-  const canSave = Boolean(businessDayKey) && (hasAmount1 || hasAmount2);
-
-  async function handleAdd() {
-    if (!canSave || saving) return;
-    setSaving(true);
-    try {
-      // Batch 1 (16:00-23:00) settles at 23:00 on the business-day label date itself (a shift
-      // labeled "18" starts 16:00 on the 18th); batch 2 (23:00-04:00) settles at 23:00 the
-      // *next* calendar day — see `bangkokDateKeyWithCutoff`'s comment for why a business day is
-      // labeled by the date it starts on, not the date it ends on.
-      const batch1At = bangkokDayBounds(businessDayKey).startMs + 23 * 60 * 60 * 1000;
-      const batch2At = bangkokDayBounds(addDaysToKey(businessDayKey, 1)).startMs + 23 * 60 * 60 * 1000;
-      const trimmedNote = note.trim();
-      await Promise.all([
-        hasAmount1
-          ? bankTransferRepository.create({
-              shopId,
-              transferredAt: batch1At,
-              amount: amount1,
-              businessDayKey,
-              note: trimmedNote ? `${trimmedNote} (16:00-23:00)` : "รอบ 16:00-23:00",
-              createdBy,
-              createdByName,
-              createdAt: Date.now(),
-            })
-          : Promise.resolve(),
-        hasAmount2
-          ? bankTransferRepository.create({
-              shopId,
-              transferredAt: batch2At,
-              amount: amount2,
-              businessDayKey,
-              note: trimmedNote ? `${trimmedNote} (23:00-04:00)` : "รอบ 23:00-04:00",
-              createdBy,
-              createdByName,
-              createdAt: Date.now(),
-            })
-          : Promise.resolve(),
-      ]);
-      setAmount1Text("");
-      setAmount2Text("");
-      setNote("");
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  return (
-    <TableRow className="bg-muted/30">
-      <TableCell>
-        <DateField value={businessDayKey} onChange={setBusinessDayKey} className="h-9 w-36" />
-      </TableCell>
-      <TableCell>
-        <Input
-          type="number"
-          inputMode="decimal"
-          min={0}
-          value={amount1Text}
-          onChange={(e) => setAmount1Text(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && handleAdd()}
-          placeholder="ยอด 16:00-23:00"
-          className="h-9 min-w-24 text-right"
-        />
-      </TableCell>
-      <TableCell>
-        <Input
-          type="number"
-          inputMode="decimal"
-          min={0}
-          value={amount2Text}
-          onChange={(e) => setAmount2Text(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && handleAdd()}
-          placeholder="ยอด 23:00-04:00"
-          className="h-9 min-w-24 text-right"
-        />
-      </TableCell>
-      <TableCell>
-        <Input
-          value={note}
-          onChange={(e) => setNote(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && handleAdd()}
-          placeholder="หมายเหตุ (ไม่บังคับ)"
-          className="h-9"
-        />
-      </TableCell>
-      <TableCell>
-        <Button size="sm" onClick={handleAdd} disabled={!canSave || saving}>
-          +
-        </Button>
-      </TableCell>
-    </TableRow>
-  );
-}
-
-
-/**
- * One row of the เงินโอนเข้าบัญชี table — a plain read row by default, or (after "แก้ไข") lets
- * correcting the business day, this one batch's amount, or the note; "ลบ" removes a mistaken or
- * duplicate entry entirely. Each logged transfer is always exactly one settlement batch, so
- * editing only ever touches one amount, not two — same `isBatch1` classification used for display.
- */
-function TransferRow({ transfer, currency }: { transfer: BankTransfer; currency: string }) {
-  // Batch 1 (16:00-23:00) is transferred on the business-day label date itself; batch 2
-  // (23:00-04:00) the next calendar day — see `TransferQuickAddRow`'s batch-timestamp comment.
-  const isBatch1 = bangkokDateKey(transfer.transferredAt) === transfer.businessDayKey;
-
-  const [editing, setEditing] = useState(false);
-  const [businessDayKey, setBusinessDayKey] = useState(transfer.businessDayKey);
-  const [amountText, setAmountText] = useState(String(transfer.amount));
-  const [note, setNote] = useState(transfer.note);
-  const [saving, setSaving] = useState(false);
-
-  function startEdit() {
-    setBusinessDayKey(transfer.businessDayKey);
-    setAmountText(String(transfer.amount));
-    setNote(transfer.note);
-    setEditing(true);
-  }
-
-  const amount = Number(amountText);
-  const canSave = Boolean(businessDayKey) && Number.isFinite(amount) && amount > 0;
-
-  async function handleSave() {
-    if (!canSave || saving) return;
-    setSaving(true);
-    try {
-      // Editing the business day alone doesn't move `transferredAt` (which real-world date the
-      // transfer landed on) — only which shift it's credited against, same as the quick-add row
-      // logging it there in the first place.
-      await bankTransferRepository.update(transfer.id, { businessDayKey, amount, note: note.trim() });
-      setEditing(false);
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  async function handleDelete() {
-    if (!window.confirm(`ลบรายการโอน ${formatCurrency(transfer.amount, currency)} (${formatKey(transfer.businessDayKey)})?`)) return;
-    await bankTransferRepository.remove(transfer.id);
-  }
-
-  if (editing) {
-    return (
-      <TableRow className="bg-muted/20">
-        <TableCell>
-          <DateField value={businessDayKey} onChange={setBusinessDayKey} className="h-9 w-36" />
-        </TableCell>
-        <TableCell colSpan={2}>
-          <div className="flex items-center justify-end gap-2">
-            <span className="text-xs text-muted-foreground">{isBatch1 ? "16:00-23:00" : "23:00-04:00"}</span>
-            <Input
-              type="number"
-              inputMode="decimal"
-              min={0}
-              value={amountText}
-              onChange={(e) => setAmountText(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && handleSave()}
-              className="h-9 w-28 text-right"
-            />
-          </div>
-        </TableCell>
-        <TableCell>
-          <Input value={note} onChange={(e) => setNote(e.target.value)} onKeyDown={(e) => e.key === "Enter" && handleSave()} className="h-9" />
-        </TableCell>
-        <TableCell>
-          <div className="flex justify-end gap-1">
-            <Button size="sm" onClick={handleSave} disabled={!canSave || saving}>
-              บันทึก
-            </Button>
-            <Button size="sm" variant="ghost" onClick={() => setEditing(false)}>
-              ยกเลิก
-            </Button>
-          </div>
-        </TableCell>
-      </TableRow>
-    );
-  }
-
-  return (
-    <TableRow>
-      <TableCell>{formatKey(transfer.businessDayKey)}</TableCell>
-      <TableCell className="text-right">{isBatch1 ? formatCurrency(transfer.amount, currency) : "-"}</TableCell>
-      <TableCell className="text-right">{isBatch1 ? "-" : formatCurrency(transfer.amount, currency)}</TableCell>
-      <TableCell className="text-muted-foreground">{transfer.note || "-"}</TableCell>
-      <TableCell>
-        <div className="flex justify-end gap-1">
-          <Button size="sm" variant="ghost" onClick={startEdit}>
-            แก้ไข
-          </Button>
-          <Button size="sm" variant="ghost" className="text-destructive" onClick={handleDelete}>
-            ลบ
-          </Button>
-        </div>
-      </TableCell>
-    </TableRow>
-  );
-}
-
-/**
- * ยอดเริ่มต้นประจำวัน — the numbers this app has no way to derive on its own: the cash float placed
- * in the drawer before the shift, and how much cash is actually sitting in the drawer at close.
- * Shown inside the day-detail dialog since it only makes sense next to that day's already-known
- * `cashSales`. Fields are auto-saved on blur — there's no single "submit" moment since any one of
- * them might get filled in hours before the others.
- *
- * Deliberate ordering, chosen after "เงินสดที่โยกออก" being subtracted *inside* the expected-close
- * figure caused real confusion (a user typed -1000 for "money leaving", expecting a minus sign,
- * when the field already only ever subtracts): "เงินสดรวมปลายกะ" is the plain physical count at
- * the end of the shift, taken *before* any cash is set aside — the discrepancy check
- * (`ควรมี`/`ผลต่าง`) compares against that raw total, with `เงินสดที่โยกออกเก็บ` never entering it.
- * `โยกออกเก็บ` only ever matters for the separate, clearly-labeled "ยอดคงเหลือสำหรับเริ่มวันใหม่"
- * figure — the one actual number to copy into tomorrow's "เงินสดเริ่มต้น (ทอน)". Always entered and
- * treated as a plain positive magnitude (never typed as negative — a stray "-" is normalized away
- * on blur) since there's nothing here it could logically make more of.
- *
- * `cashExpenses` (รายจ่ายที่จ่ายด้วยเงินสด, from the accounting page's own รายจ่าย table) is
- * subtracted inside "เงินสดที่ควรมี" itself, unlike `cashMovedOut` — paying a supplier out of the
- * drawer really does reduce what should be left at close, so without this every cash-paid รายจ่าย
- * read as an equally-sized cash shortage.
- */
-function DailyFloatSection({
-  shopId,
-  businessDayKey,
-  float,
-  cashSales,
-  cashExpenses,
-  currency,
-  updatedBy,
-  updatedByName,
-}: {
-  shopId: string;
-  businessDayKey: string;
-  float: DailyFloat | null;
-  cashSales: number;
-  // รายจ่ายที่จ่ายด้วยเงินสดของวันนี้ (จากตาราง "รายจ่าย" — เฉพาะแถวที่ "จ่ายด้วย" เป็นเงินสด) — เงินก้อน
-  // นี้ออกจากลิ้นชักจริงระหว่างกะ เหมือนขายเงินสดที่เข้ามา แค่ตรงข้ามทิศทาง จึงต้องหักออกจาก "ควรมี"
-  // ไม่งั้นจะดูเหมือนเงินขาดทั้งที่จ่ายค่าของไปแล้ว.
-  cashExpenses: number;
-  currency: string;
-  updatedBy: string;
-  updatedByName: string;
-}) {
-  const [startingCashText, setStartingCashText] = useState(float?.startingCash != null ? String(float.startingCash) : "");
-  const [cashMovedOutText, setCashMovedOutText] = useState(float?.cashMovedOut != null ? String(float.cashMovedOut) : "");
-  const [adjustmentText, setAdjustmentText] = useState(float?.cashTransferAdjustment != null ? String(float.cashTransferAdjustment) : "");
-  const [closingCashText, setClosingCashText] = useState(float?.closingCashCounted != null ? String(float.closingCashCounted) : "");
-  const [saving, setSaving] = useState(false);
-  const [saveError, setSaveError] = useState<string | null>(null);
-
-  // Re-seed local text state whenever the day changes or another device's write comes in —
-  // otherwise switching from one day's dialog to another (or a live update from a co-worker)
-  // would keep showing stale text still sitting in these inputs.
-  // Re-seeding local edit buffers from a prop change (a new day, or a live Firestore update from
-  // another device), not deriving fresh state — same reasoning as the page's other
-  // setLoading(true)-in-effect, which is why each line below needs the same disable.
-  useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setStartingCashText(float?.startingCash != null ? String(float.startingCash) : "");
-    setCashMovedOutText(float?.cashMovedOut != null ? String(float.cashMovedOut) : "");
-    setAdjustmentText(float?.cashTransferAdjustment != null ? String(float.cashTransferAdjustment) : "");
-    setClosingCashText(float?.closingCashCounted != null ? String(float.closingCashCounted) : "");
-  }, [businessDayKey, float?.startingCash, float?.cashMovedOut, float?.cashTransferAdjustment, float?.closingCashCounted]);
-
-  function parseOrNull(text: string): number | null {
-    const trimmed = text.trim();
-    if (trimmed === "") return null;
-    const n = Number(trimmed);
-    return Number.isFinite(n) ? n : null;
-  }
-
-  // "เงินสดที่โยกออกเก็บ" is always a plain magnitude — there's no meaningful "negative amount
-  // moved out" — so a stray minus sign (someone thinking of it as "money leaving, so negative")
-  // is normalized away here rather than silently flipping the sign of every calculation that
-  // uses it, which is what caused the confusing +1,360 "เงินเกิน" reading this replaces.
-  function parseNonNegativeOrNull(text: string): number | null {
-    const n = parseOrNull(text);
-    return n != null ? Math.abs(n) : null;
-  }
-
-  async function save(
-    patch: Partial<
-      Pick<DailyFloat, "startingCash" | "cashMovedOut" | "cashTransferAdjustment" | "closingCashCounted" | "closingCashCountedAt">
-    >
-  ) {
-    setSaving(true);
-    setSaveError(null);
-    try {
-      await dailyFloatRepository.upsert(shopId, businessDayKey, { ...patch, updatedBy, updatedByName, updatedAt: Date.now() });
-    } catch (err) {
-      // Without this, a failed write (most commonly: `firestore.rules` for the new
-      // `dailyFloats` collection hasn't been deployed yet — permission-denied) reads as "I typed
-      // a number, closed the dialog, and it silently vanished" with nothing on screen to explain
-      // why. Surface it loudly instead — same reasoning as `/admin/reports`' `loadError`.
-      console.error(`[dailyFloats] upsert(${businessDayKey}) failed — is firestore.rules deployed? See "firebase deploy --only firestore:rules".`, err);
-      setSaveError("บันทึกไม่สำเร็จ — ลองใหม่อีกครั้ง");
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  const startingCash = parseOrNull(startingCashText);
-  const cashMovedOut = parseOrNull(cashMovedOutText);
-  const closingCash = parseOrNull(closingCashText);
-
-  // เงินสดที่ควรมี (ก่อนโยกออก) + ผลต่างเงินสด — shared with the main reconciliation table's
-  // "ส่วนต่างรวม (เงินสด+โอน)" column (`lib/pos/dailyFloat.ts`'s `checkCashFloat`), so this dialog
-  // and that column can never quietly disagree with each other. Deliberately never subtracts
-  // `cashMovedOut` — compared against the *raw* end-of-shift count (see `closingCash`'s field
-  // comment), so moving cash out mid-shift never looks like a shortage here. `cashSales` itself
-  // already has `cashTransferAdjustment` baked in (see `reconciliationRows`), so a misclassified
-  // bill corrects this figure automatically without a second calculation here. DOES subtract
-  // `cashExpenses` though — unlike setting cash aside, paying a supplier out of the drawer really
-  // does reduce what should physically be left, and skipping this made every cash-paid รายจ่าย
-  // look exactly like a shortage of the same size (item: เงินขาด ฿490 ตรงกับถั่วงอก ฿90 + แก๊ส ฿400
-  // พอดี).
-  const { expectedCashBeforeMoveOut, cashDifference } = checkCashFloat(startingCash, cashSales, cashExpenses, closingCash);
-  // ยอดคงเหลือสำหรับเริ่มวันใหม่ — the one number this whole card exists to produce: what's
-  // actually left in the drawer after setting cash aside, ready to copy straight into tomorrow's
-  // "เงินสดเริ่มต้น (ทอน)". A blank "โยกออก" reads as 0 moved out (the common case), not "unknown".
-  const carryForwardCash = closingCash != null ? closingCash - (cashMovedOut ?? 0) : null;
-
-  return (
-    <div className="rounded-md border border-border p-3">
-      <h3 className="mb-2 text-sm font-semibold">ยอดเริ่มต้นประจำวัน</h3>
-      <div className="grid gap-3 sm:grid-cols-4">
-        <div>
-          <Label className="mb-1 block text-xs text-muted-foreground">เงินสดเริ่มต้น (ทอน)</Label>
-          <Input
-            type="number"
-            inputMode="decimal"
-            min={0}
-            value={startingCashText}
-            onChange={(e) => setStartingCashText(e.target.value)}
-            onBlur={() => save({ startingCash: parseOrNull(startingCashText) })}
-            onKeyDown={(e) => e.key === "Enter" && (e.currentTarget as HTMLInputElement).blur()}
-            placeholder="0.00"
-            className="h-9 text-right"
-          />
-        </div>
-        <div>
-          <Label className="mb-1 block text-xs text-muted-foreground">เงินสดรวมปลายกะ (ก่อนโยกออก)</Label>
-          <Input
-            type="number"
-            inputMode="decimal"
-            min={0}
-            value={closingCashText}
-            onChange={(e) => setClosingCashText(e.target.value)}
-            onBlur={() => {
-              const counted = parseOrNull(closingCashText);
-              save({ closingCashCounted: counted, closingCashCountedAt: counted != null ? Date.now() : null });
-            }}
-            onKeyDown={(e) => e.key === "Enter" && (e.currentTarget as HTMLInputElement).blur()}
-            placeholder="0.00"
-            className="h-9 text-right"
-          />
-          <p className="mt-1 text-[11px] leading-tight text-muted-foreground">นับทั้งหมดในลิ้นชักตอนปิดกะ ก่อนแบ่งเก็บ</p>
-        </div>
-        <div>
-          <Label className="mb-1 block text-xs text-muted-foreground">เงินสดที่โยกออกเก็บ</Label>
-          <Input
-            type="number"
-            inputMode="decimal"
-            min={0}
-            value={cashMovedOutText}
-            onChange={(e) => setCashMovedOutText(e.target.value)}
-            onBlur={() => {
-              const normalized = parseNonNegativeOrNull(cashMovedOutText);
-              setCashMovedOutText(normalized != null ? String(normalized) : "");
-              save({ cashMovedOut: normalized });
-            }}
-            onKeyDown={(e) => e.key === "Enter" && (e.currentTarget as HTMLInputElement).blur()}
-            placeholder="0.00"
-            className="h-9 text-right"
-          />
-          <p className="mt-1 text-[11px] leading-tight text-muted-foreground">ใส่เป็นจำนวนบวกเสมอ (ไม่ต้องใส่ -)</p>
-        </div>
-        <div>
-          <Label className="mb-1 block text-xs text-muted-foreground">ยอดปรับ (สลับเงินสด/โอน)</Label>
-          <Input
-            type="number"
-            inputMode="decimal"
-            value={adjustmentText}
-            onChange={(e) => setAdjustmentText(e.target.value)}
-            onBlur={() => save({ cashTransferAdjustment: parseOrNull(adjustmentText) })}
-            onKeyDown={(e) => e.key === "Enter" && (e.currentTarget as HTMLInputElement).blur()}
-            placeholder="0.00"
-            className="h-9 text-right"
-          />
-          <p className="mt-1 text-[11px] leading-tight text-muted-foreground">
-            + = บันทึกเป็นเงินสดผิด ที่จริงเป็นโอน · - = บันทึกเป็นโอนผิด ที่จริงเป็นเงินสด
-          </p>
-        </div>
-      </div>
-      <div className="mt-3 grid gap-1 text-sm text-muted-foreground sm:grid-cols-2">
-        <p className="sm:col-span-2">
-          เงินสดที่ควรมี (ก่อนโยกออก):{" "}
-          <span className="font-medium text-foreground">
-            {expectedCashBeforeMoveOut != null ? formatCurrency(expectedCashBeforeMoveOut, currency) : "-"}
-          </span>
-          {startingCash != null
-            ? ` (เริ่มต้น ${formatCurrency(startingCash, currency)} + ขายเงินสด ${formatCurrency(cashSales, currency)}${
-                cashExpenses ? ` - รายจ่ายเงินสด ${formatCurrency(cashExpenses, currency)}` : ""
-              })`
-            : ""}
-        </p>
-        <p className="sm:col-span-2">
-          ผลต่างเงินสด (รวมปลายกะ - ที่ควรมี):{" "}
-          <span
-            className={cn(
-              "font-medium",
-              cashDifference == null ? "text-foreground" : cashDifference < 0 ? "text-destructive" : cashDifference > 0 ? "text-emerald-600" : "text-foreground"
-            )}
-          >
-            {cashDifference != null
-              ? `${cashDifference > 0 ? "+" : ""}${formatCurrency(cashDifference, currency)}${
-                  cashDifference < 0 ? " (เงินขาด)" : cashDifference > 0 ? " (เงินเกิน)" : " (ตรง)"
-                }`
-              : "-"}
-          </span>
-        </p>
-        <p className="sm:col-span-2 mt-1 border-t border-border pt-2 text-sm">
-          <span className="text-foreground">ยอดคงเหลือสำหรับเริ่มวันใหม่:</span>{" "}
-          <span className="font-semibold text-foreground">{carryForwardCash != null ? formatCurrency(carryForwardCash, currency) : "-"}</span>
-          {closingCash != null
-            ? ` (รวมปลายกะ ${formatCurrency(closingCash, currency)}${
-                cashMovedOut ? ` - โยกออก ${formatCurrency(cashMovedOut, currency)}` : ""
-              })`
-            : ""}
-          <span className="block text-xs">เอาตัวเลขนี้ไปกรอกเป็น &quot;เงินสดเริ่มต้น (ทอน)&quot; ของวันทำการถัดไป</span>
-        </p>
-      </div>
-      {saving ? <p className="mt-1 text-xs text-muted-foreground">กำลังบันทึก...</p> : null}
-      {saveError ? <p className="mt-1 text-xs text-destructive">{saveError}</p> : null}
-    </div>
   );
 }
