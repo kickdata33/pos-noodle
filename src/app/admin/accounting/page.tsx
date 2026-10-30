@@ -1020,7 +1020,11 @@ function LedgerDetailPanel({
         <CalcRow k="เงินสดที่ควรเหลือตอนนี้" v={row.cashRemainingNow != null ? formatCurrency(row.cashRemainingNow, currency) : "-"} />
         <CalcRow
           k="ส่วนต่างจากการนับ"
-          v={row.cashDifference != null ? `${row.cashDifference > 0 ? "+" : ""}${formatCurrency(row.cashDifference, currency)}` : "-"}
+          v={
+            row.cashDifference != null
+              ? `${row.cashDifference < 0 ? "ขาด " : row.cashDifference > 0 ? "เกิน " : "ตรง "}${formatCurrency(Math.abs(row.cashDifference), currency)}`
+              : "-"
+          }
           tone={row.cashDifference ?? 0}
         />
         <div className="mt-2 flex items-center justify-between border-t border-border pt-2 text-sm">
