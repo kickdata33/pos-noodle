@@ -28,6 +28,7 @@ import {
   type DateRange,
   type ReportPreset,
 } from "@/lib/pos/dateRange";
+import { checkCashFloat, combinedDifference, type CashFloatCheck } from "@/lib/pos/dailyFloat";
 import { dailyProfitLossRows, totalProfitLoss } from "@/lib/pos/dailyProfitLoss";
 import { reconciliationRows } from "@/lib/pos/reconciliation";
 import { computeMissingRecurringExpenses, recurringExpenseDayKey } from "@/lib/pos/recurringExpenses";
@@ -300,6 +301,38 @@ export default function AccountingPage() {
     [orders, paymentMethods, transfers, expenses, range.startKey, range.endKey, fromHour, cashTransferAdjustments]
   );
 
+  // ผลต่างเงินสดต่อวัน (สูตรเดียวกับที่กล่องรายละเอียดวันใช้ — `checkCashFloat`) ดึงมาคำนวณระดับ
+  // ทั้งช่วงที่นี่ด้วย เพื่อป้อนคอลัมน์ "ส่วนต่างรวม (เงินสด+โอน)" ของตารางด้านบน (item: "ยอดเงินเกิน/
+  // ขาด ของทั้งเงินสดและเงินโอน ให้เอามา +- กันหาส่วนต่างที่ขาด/เกินจริง") แทนที่จะเห็นได้แค่ทีละวันตอน
+  // เปิดกล่องรายละเอียดเท่านั้น.
+  const cashChecksByDay = useMemo(() => {
+    const floatsByDay = new Map(floats.map((f) => [f.businessDayKey, f]));
+    const map = new Map<string, CashFloatCheck>();
+    for (const r of rows) {
+      const float = floatsByDay.get(r.dateKey) ?? null;
+      map.set(
+        r.dateKey,
+        checkCashFloat(float?.startingCash ?? null, r.cashSales, cashExpensesByDay[r.dateKey] ?? 0, float?.closingCashCounted ?? null)
+      );
+    }
+    return map;
+  }, [floats, rows, cashExpensesByDay]);
+
+  // รวมผลต่างเงินสด + ผลต่างโอน เป็นตัวเดียว ต่อแถว — `null` (ไม่ใช่ 0) ของวันที่ยังไม่ได้นับเงินสด
+  // เลย ไม่ให้ "ยังไม่ได้เช็ค" ไปปนกับ "เช็คแล้วไม่ขาดไม่เกิน" โดยไม่ตั้งใจ.
+  const rowsWithCombined = useMemo(
+    () =>
+      rows.map((r) => ({
+        ...r,
+        combined: combinedDifference(cashChecksByDay.get(r.dateKey)?.cashDifference ?? null, r.overTransferred, r.pendingTransfer),
+      })),
+    [rows, cashChecksByDay]
+  );
+  const combinedTotal = useMemo(() => {
+    const known = rowsWithCombined.filter((r) => r.combined != null);
+    return { sum: round2(known.reduce((sum, r) => sum + (r.combined ?? 0), 0)), countKnown: known.length, countTotal: rowsWithCombined.length };
+  }, [rowsWithCombined]);
+
   // "กำไร/ขาดทุนสุทธิรายวัน" — plain calendar day by default, combining POS sales, รายได้
   // Delivery and ค่าใช้จ่ายรวม so a day's actual money picture doesn't require mentally adding up
   // three separate pages — see `lib/pos/dailyProfitLoss.ts`'s file comment for why this is
@@ -508,11 +541,17 @@ export default function AccountingPage() {
                 <TableHead className="text-right" title="เงินสด + ที่โอนเข้าบัญชีจริงแล้ว + อื่นๆ − รายจ่าย — ต่างจาก &quot;สุทธิ&quot; ตรงที่ไม่เหมาว่า QR ที่ยังรอโอนเข้ามาแล้ว">
                   สุทธิ (รับจริง)
                 </TableHead>
+                <TableHead
+                  className="text-right"
+                  title="ผลต่างเงินสด (จากกล่องรายละเอียดวัน) + ผลต่างโอนเกิน/รอโอน รวมเป็นตัวเดียว — ขีด (-) แปลว่ายังไม่ได้นับเงินสดวันนั้น"
+                >
+                  ส่วนต่างรวม (เงินสด+โอน)
+                </TableHead>
                 <TableHead>สถานะ</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
-              {rows.map((r) => (
+              {rowsWithCombined.map((r) => (
                 <TableRow key={r.dateKey} className="cursor-pointer hover:bg-accent/50" onClick={() => setSelectedDay(r.dateKey)}>
                   <TableCell className="font-medium">{formatKey(r.dateKey)}</TableCell>
                   <TableCell className="text-right font-medium">{formatCurrency(r.totalSales, currency)}</TableCell>
@@ -550,6 +589,15 @@ export default function AccountingPage() {
                   <TableCell className={cn("whitespace-nowrap text-right font-medium", netClassName(r.netReceived))}>
                     {formatCurrency(r.netReceived, currency)}
                   </TableCell>
+                  <TableCell className="whitespace-nowrap text-right">
+                    {r.combined != null ? (
+                      <span className={cn("font-medium", netClassName(r.combined))}>{formatCurrency(r.combined, currency)}</span>
+                    ) : (
+                      <span className="text-muted-foreground" title="ยังไม่ได้กรอกเงินสดรวมปลายกะในกล่องรายละเอียดวันนี้ เลยยังสรุปส่วนต่างรวมไม่ได้">
+                        -
+                      </span>
+                    )}
+                  </TableCell>
                   <TableCell>
                     <Badge variant={r.settled ? "success" : "default"}>{r.settled ? "ครบ" : "รอ"}</Badge>
                   </TableCell>
@@ -557,7 +605,7 @@ export default function AccountingPage() {
               ))}
               {rows.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={10} className="text-center text-muted-foreground">
+                  <TableCell colSpan={11} className="text-center text-muted-foreground">
                     ไม่มีข้อมูลในช่วงนี้
                   </TableCell>
                 </TableRow>
@@ -580,6 +628,15 @@ export default function AccountingPage() {
               </span>{" "}
               — ถ้าใกล้ 0 หรือใกล้เคียงยอดรอโอนของวันล่าสุดวันเดียว ถือว่าปกติ (แค่รอรอบโอนของ K SHOP) แต่ถ้าค้างเยอะกว่านั้นหรือมีวันเก่าที่ขึ้น
               &quot;ครบ&quot; แล้วแต่ยังโอนเกิน ควรเช็คย้อนหลัง
+            </p>
+            <p>
+              <span className="font-medium text-foreground">ส่วนต่างรวมจริง (เงินสด+โอน) ทั้งช่วงนี้:{" "}
+                <span className={netClassName(combinedTotal.sum)}>{formatCurrency(combinedTotal.sum, currency)}</span>
+              </span>{" "}
+              — เอาผลต่างเงินสด (จากกล่องรายละเอียดวัน) บวกกับผลต่างโอนเกิน/รอโอน ของแต่ละวันรวมกัน ติดลบคือขาดจริง บวกคือเกินจริง{" "}
+              {combinedTotal.countKnown < combinedTotal.countTotal
+                ? `(นับเงินสดแล้ว ${combinedTotal.countKnown} จาก ${combinedTotal.countTotal} วัน — วันที่เหลือยังไม่ได้กรอกเงินสดรวมปลายกะ เลยไม่รวมอยู่ในยอดนี้)`
+                : `(นับเงินสดครบทุกวันในช่วงนี้แล้ว)`}
             </p>
           </div>
         </CardContent>
@@ -1037,6 +1094,10 @@ function netClassName(net: number): string {
   if (net < 0) return "text-destructive";
   if (net > 0) return "text-blue-600 dark:text-blue-400";
   return "";
+}
+
+function round2(n: number): number {
+  return Math.round(n * 100) / 100;
 }
 
 /**
@@ -1779,21 +1840,18 @@ function DailyFloatSection({
   const cashMovedOut = parseOrNull(cashMovedOutText);
   const closingCash = parseOrNull(closingCashText);
 
-  // เงินสดที่ควรมี (ก่อนโยกออก) — a check-figure only, never fed back into `reconciliationRows`'s
-  // own `cashSales` (that number always comes from actual paid orders, untouched by this).
-  // Deliberately never subtracts `cashMovedOut` — this is compared against the *raw* end-of-shift
-  // count (see `closingCash`'s field comment), so moving cash out mid-shift never looks like a
-  // shortage here. `cashSales` itself already has `cashTransferAdjustment` baked in (see
-  // `reconciliationRows`), so a misclassified bill corrects this figure automatically without a
-  // second calculation here. DOES subtract `cashExpenses` though — unlike setting cash aside,
-  // paying a supplier out of the drawer really does reduce what should physically be left, and
-  // skipping this made every cash-paid รายจ่าย look exactly like a shortage of the same size
-  // (item: เงินขาด ฿490 ตรงกับถั่วงอก ฿90 + แก๊ส ฿400 พอดี).
-  const expectedCashBeforeMoveOut = startingCash != null ? startingCash + cashSales - cashExpenses : null;
-  // นับจริง (ก่อนโยกออก) - ที่ควรมี — positive means เงินเกิน, negative means เงินขาด. Only shown
-  // once both sides of the comparison exist; a missing starting-cash entry makes "ควรมี" undefined,
-  // and there's nothing meaningful to diff against yet.
-  const cashDifference = closingCash != null && expectedCashBeforeMoveOut != null ? closingCash - expectedCashBeforeMoveOut : null;
+  // เงินสดที่ควรมี (ก่อนโยกออก) + ผลต่างเงินสด — shared with the main reconciliation table's
+  // "ส่วนต่างรวม (เงินสด+โอน)" column (`lib/pos/dailyFloat.ts`'s `checkCashFloat`), so this dialog
+  // and that column can never quietly disagree with each other. Deliberately never subtracts
+  // `cashMovedOut` — compared against the *raw* end-of-shift count (see `closingCash`'s field
+  // comment), so moving cash out mid-shift never looks like a shortage here. `cashSales` itself
+  // already has `cashTransferAdjustment` baked in (see `reconciliationRows`), so a misclassified
+  // bill corrects this figure automatically without a second calculation here. DOES subtract
+  // `cashExpenses` though — unlike setting cash aside, paying a supplier out of the drawer really
+  // does reduce what should physically be left, and skipping this made every cash-paid รายจ่าย
+  // look exactly like a shortage of the same size (item: เงินขาด ฿490 ตรงกับถั่วงอก ฿90 + แก๊ส ฿400
+  // พอดี).
+  const { expectedCashBeforeMoveOut, cashDifference } = checkCashFloat(startingCash, cashSales, cashExpenses, closingCash);
   // ยอดคงเหลือสำหรับเริ่มวันใหม่ — the one number this whole card exists to produce: what's
   // actually left in the drawer after setting cash aside, ready to copy straight into tomorrow's
   // "เงินสดเริ่มต้น (ทอน)". A blank "โยกออก" reads as 0 moved out (the common case), not "unknown".
