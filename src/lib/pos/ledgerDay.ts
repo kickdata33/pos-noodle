@@ -26,13 +26,30 @@ export interface LedgerDayRow extends ReconciliationRow {
   salesTotal: number;
   /** netReceived + deliveryRevenue — "เข้าบัญชีจริง" as shown in the single table. */
   receivedTotal: number;
+  /** salesTotal - expenses — the day's plain accounting profit/loss ("กำไร/ขาดทุน"), the table's
+   * headline number (v2 redesign, item: "เอายอดขายแต่ละช่องมารวมกัน และเอาไป - กับ รายจ่าย เหลือสุทธิ
+   * เท่าไหร่ กำไรเท่าไหร่ ขาดทุนเท่าไหร่ในวันนั้นๆ"). Deliberately independent of the cash-count check
+   * below — a day can run a loss and still count cash exactly right, or vice versa; conflating the
+   * two under one "ส่วนต่างรวม" figure was the source of the v1 confusion this redesign fixes. Unlike
+   * `combined`, this is never `null` — it only needs POS-recorded sales and logged expenses, neither
+   * of which requires a physical cash count to exist. */
+  netProfit: number;
   startingCash: number | null;
   cashMovedOut: number;
   /** ปลายกะที่นับได้จริง, AFTER cashMovedOut was already set aside — see `DailyFloat.closingCashCounted`'s comment. */
   closingCashCounted: number | null;
   expectedCashBeforeMoveOut: number | null;
+  /** expectedCashBeforeMoveOut - cashMovedOut — how much cash *should* physically be in the drawer
+   * right now, folding in today's cash sales/expenses and whatever's already been moved out to
+   * storage ("เงินสดเริ่มต้น โยกออกเข้าเก็บ คงเหลือสุทธิ รวมกับยอดขายปัจจุบันด้วยสำหรับเงินสด"). This is the
+   * calculated/expected figure, shown in the main row; it is NOT compared against the physical count
+   * here — that comparison is `cashDifference`, a separate secondary check. `null` whenever
+   * `expectedCashBeforeMoveOut` is (i.e. `startingCash` hasn't been entered yet). */
+  cashRemainingNow: number | null;
   cashDifference: number | null;
-  /** ส่วนต่างรวม (เงินสด+โอน) — `null` (not 0) until the day's cash has actually been counted. */
+  /** ส่วนต่างรวม (เงินสด+โอน) — `null` (not 0) until the day's cash has actually been counted. Secondary
+   * reconciliation check only (catches a miscount or a staff member tapping the wrong payment
+   * button) — not to be read as profit/loss; see `netProfit`. */
   combined: number | null;
 }
 
@@ -71,15 +88,19 @@ export function ledgerDayRows(
       cashMovedOut
     );
     const combined = combinedDifference(cashDifference, r.overTransferred, r.pendingTransfer);
+    const salesTotal = round2(r.totalSales + deliveryRevenue);
+    const cashRemainingNow = expectedCashBeforeMoveOut != null ? round2(expectedCashBeforeMoveOut - cashMovedOut) : null;
     return {
       ...r,
       deliveryRevenue,
-      salesTotal: round2(r.totalSales + deliveryRevenue),
+      salesTotal,
       receivedTotal: round2(r.netReceived + deliveryRevenue),
+      netProfit: round2(salesTotal - r.expenses),
       startingCash: float?.startingCash ?? null,
       cashMovedOut,
       closingCashCounted: float?.closingCashCounted ?? null,
       expectedCashBeforeMoveOut,
+      cashRemainingNow,
       cashDifference,
       combined,
     };
@@ -94,6 +115,9 @@ export interface LedgerRangeTotals {
   transferred: number;
   pendingTransfer: number;
   overTransferred: number;
+  /** Sum of every day's `netProfit` — the range's headline กำไร/ขาดทุน. Always a plain sum (never
+   * excludes a day), since `netProfit` is never `null`. */
+  netProfit: number;
   /** Sum of every day's `combined` that's actually known (cash counted that day) — days still
    * `null` are left out entirely, never treated as 0, same philosophy as `combinedDifference`. */
   combined: number;
@@ -114,8 +138,9 @@ export function ledgerRangeTotals(rows: readonly LedgerDayRow[]): LedgerRangeTot
       transferred: round2(acc.transferred + r.transferred),
       pendingTransfer: round2(acc.pendingTransfer + r.pendingTransfer),
       overTransferred: round2(acc.overTransferred + r.overTransferred),
+      netProfit: round2(acc.netProfit + r.netProfit),
     }),
-    { salesTotal: 0, receivedTotal: 0, deliveryRevenue: 0, expenses: 0, transferred: 0, pendingTransfer: 0, overTransferred: 0 }
+    { salesTotal: 0, receivedTotal: 0, deliveryRevenue: 0, expenses: 0, transferred: 0, pendingTransfer: 0, overTransferred: 0, netProfit: 0 }
   );
   return {
     ...sums,

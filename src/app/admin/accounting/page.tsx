@@ -60,14 +60,22 @@ const PRESETS: { value: ReportPreset; label: string }[] = [
 ];
 
 /**
- * บัญชีรายรับ-รายจ่าย — 1 แถว = 1 วันทำการ, ยอดสุทธิ (รวม Delivery) + ส่วนต่างรวม (เงินสด+โอน) อยู่ใน
- * แถวเดียวกันเลย, กดแถวเพื่อดูรายละเอียด (รายจ่ายแยกรายการ, เงินโอนแยกรอบ, บิลวันนี้) แทนที่จะต้องเปิด
- * ป๊อปอัปแยกหรือเลื่อนไปดูอีกตาราง — redesigned from the previous multi-table layout (item: "ช่วยออกแบบ
- * หน้ากรอกข้อมูลเพื่อให้ทำบัญชี ง่ายดูได้จากตารางเดียว ... อยากให้ delivery รวมไปด้วยจะได้แบบ ดูแค่ตาราง
- * เดียว ยอดสุทธิไปเลย หักขาด หักเกิน ระบุชัดเจน ใช้ทั้งมือถือทั้งคอม"), reviewed first as an HTML mockup
- * before being built for real here. See `lib/pos/ledgerDay.ts`'s file comment for how Delivery gets
- * folded in, and `lib/pos/dailyFloat.ts`'s file comment for the "นับเงินสดปลายกะ" field's corrected
- * (post-move-out) semantics.
+ * บัญชีรายรับ-รายจ่าย — 1 แถว = 1 วันทำการ, กำไร/ขาดทุน (ยอดขายทุกช่องทาง รวม Delivery หักรายจ่ายทั้งหมด)
+ * เป็นตัวเลขหลักของแถว, กดแถวเพื่อดูรายละเอียด (รายจ่ายแยกรายการ, เงินโอนแยกรอบ, บิลวันนี้, และ "ตรวจนับ
+ * เงินสด" ซึ่งเป็นการเช็คแยกต่างหากว่านับเงินสดปลายกะตรงกับที่ระบบคาดไหม) แทนที่จะต้องเปิดป๊อปอัปแยกหรือ
+ * เลื่อนไปดูอีกตาราง.
+ *
+ * v1 ของตารางนี้ใช้ "ส่วนต่างรวม" (ผลต่างเงินสด+โอน) เป็นตัวเลขหลัก ซึ่งทำให้วันที่ร้านขาดทุนจริง (รายจ่าย
+ * มากกว่ายอดขาย) แต่บังเอิญนับเงินสดได้เกินพอดี กลับโชว์เป็น "เกิน" สีบวกอยู่ดี อ่านแล้วเข้าใจผิดว่าร้าน
+ * กำไร — v2 (ปัจจุบัน) แยกสองเรื่องนี้ออกจากกันชัดเจน: "กำไร/ขาดทุน" (`LedgerDayRow.netProfit`, สี
+ * เขียว/แดง) เป็นตัวเลขบัญชีล้วนๆ จากยอดขายหักรายจ่าย ส่วน "ตรวจนับเงินสด" (`cashDifference`/`combined`,
+ * สีน้ำเงิน/แดง — คนละโทนสีโดยตั้งใจ) ย้ายไปเป็นรายละเอียดย่อยที่กดดูได้ พร้อมไอคอน ⚠ เตือนข้าง สถานะ
+ * เวลามีส่วนต่างจากการนับ ทั้งสองดีไซน์ reviewed เป็น HTML mockup ก่อนเขียนจริงทั้งคู่ (item: "ช่วยออกแบบ
+ * หน้ากรอกข้อมูลเพื่อให้ทำบัญชี ง่ายดูได้จากตารางเดียว ... อยากให้ delivery รวมไปด้วย" ตามด้วย "เอายอดขาย
+ * แต่ละช่องมารวมกัน และเอาไป - กับ รายจ่าย เหลือสุทธิเท่าไหร่ กำไรเท่าไหร่ ขาดทุนเท่าไหร่ในวันนั้นๆ"). See
+ * `lib/pos/ledgerDay.ts`'s file comment for how Delivery gets folded in and how `netProfit` /
+ * `cashRemainingNow` are derived, and `lib/pos/dailyFloat.ts`'s file comment for the "นับเงินสด
+ * ปลายกะ" field's corrected (post-move-out) semantics.
  *
  * รายจ่ายประจำ (recurring expense templates) is the one piece left as its own card below — it's
  * config, not a per-day figure, so it never belonged inside a per-business-day row.
@@ -240,11 +248,6 @@ export default function AccountingPage() {
     [reconciliation, floats, expenses, deliveryPayouts]
   );
   const totals = useMemo(() => ledgerRangeTotals(ledgerRows), [ledgerRows]);
-  // เกิน−ขาด รวมทั้งช่วง — if this is roughly 0, or roughly equal to just the most recent day(s)'
-  // own pendingTransfer (the last business day's late-night portion genuinely hasn't settled
-  // yet), everything's fine: it's only the K SHOP cutoff timing. A gap bigger than that is worth
-  // chasing down.
-  const netTransferGap = round2(totals.overTransferred - totals.pendingTransfer);
   const avgExpensePerDay = ledgerRows.length > 0 ? totals.expenses / ledgerRows.length : 0;
 
   // Marks a day's outstanding QR-not-yet-transferred amount as settled without requiring the
@@ -283,7 +286,7 @@ export default function AccountingPage() {
     <ModuleGate module="accounting">
       <AdminSection
         title="บัญชีรายรับ-รายจ่าย"
-        description="1 แถว = 1 วันทำการ — ยอดขาย เงินเข้าบัญชีจริง รายจ่าย และส่วนต่างรวม (รวม Delivery) ดูได้ในตารางเดียว กดแถวเพื่อดูรายละเอียด"
+        description="1 แถว = 1 วันทำการ — ยอดขายแยกช่องทาง รายจ่าย และกำไร/ขาดทุน (รวม Delivery) ดูได้ในตารางเดียว กดแถวเพื่อดูรายละเอียด/ตรวจนับเงินสด"
       >
         <div className="mb-4 flex flex-wrap items-end gap-2">
           {PRESETS.map((p) => (
@@ -324,15 +327,17 @@ export default function AccountingPage() {
           <SummaryTile label="ยอดขายรวม (รวม Delivery)" value={formatCurrency(totals.salesTotal, currency)} />
           <SummaryTile label="รายจ่ายรวม" value={formatCurrency(totals.expenses, currency)} sub={`เฉลี่ย ${formatCurrency(avgExpensePerDay, currency)}/วัน`} />
           <SummaryTile
-            label="ผลต่างโอนเกิน−รอโอน"
-            value={formatCurrency(netTransferGap, currency)}
-            tone={netTransferGap < 0 ? "neg" : netTransferGap > 0 ? "pos" : "flat"}
+            label="กำไร/ขาดทุนรวมทั้งช่วง"
+            value={formatCurrency(totals.netProfit, currency)}
+            tone={totals.netProfit < 0 ? "neg" : totals.netProfit > 0 ? "pos" : "flat"}
+            palette="profit"
+            highlight
           />
           <SummaryTile
-            label={`ส่วนต่างรวมจริง (เงินสด+โอน)${totals.combinedKnownDays < totals.totalDays ? ` · นับแล้ว ${totals.combinedKnownDays}/${totals.totalDays} วัน` : ""}`}
+            label={`ส่วนต่างจากการนับเงินสด+โอน รวม (ไม่ใช่กำไรขาดทุน)${totals.combinedKnownDays < totals.totalDays ? ` · นับแล้ว ${totals.combinedKnownDays}/${totals.totalDays} วัน` : ""}`}
             value={formatCurrency(totals.combined, currency)}
             tone={totals.combined < 0 ? "neg" : totals.combined > 0 ? "pos" : "flat"}
-            highlight
+            secondary
           />
         </div>
 
@@ -470,17 +475,32 @@ function SummaryTile({
   sub,
   tone = "flat",
   highlight = false,
+  secondary = false,
+  palette = "cash",
 }: {
   label: string;
   value: string;
   sub?: string;
   tone?: "neg" | "pos" | "flat";
   highlight?: boolean;
+  /** A smaller, dashed-border tile for a secondary/supporting figure — used for the cash-count
+   * check tile so it never reads with the same weight as the กำไร/ขาดทุน headline tile. */
+  secondary?: boolean;
+  /** "profit" uses green for a positive value instead of the default blue, so a reader never
+   * mistakes a cash-count surplus ("pos", blue) for actual profit ("profit", green). */
+  palette?: "cash" | "profit";
 }) {
+  const toneValue = tone === "neg" ? -1 : tone === "pos" ? 1 : 0;
   return (
-    <div className={cn("rounded-lg border border-border p-3", highlight && "border-primary sm:col-span-2")}>
-      <p className="text-xs text-muted-foreground">{label}</p>
-      <p className={cn("mt-0.5 font-semibold", highlight ? "text-lg" : "text-base", netClassName(tone === "neg" ? -1 : tone === "pos" ? 1 : 0))}>
+    <div
+      className={cn(
+        "rounded-lg border p-3",
+        highlight ? "border-primary sm:col-span-2" : "border-border",
+        secondary && "border-dashed sm:col-span-2"
+      )}
+    >
+      <p className="text-xs leading-snug text-muted-foreground">{label}</p>
+      <p className={cn("mt-0.5 font-semibold", highlight ? "text-lg" : secondary ? "text-sm" : "text-base", palette === "profit" ? profitClassName(toneValue) : netClassName(toneValue))}>
         {value}
       </p>
       {sub ? <p className="text-xs text-muted-foreground">{sub}</p> : null}
@@ -514,15 +534,20 @@ function todayKey(): string {
   return bangkokDateKey(Date.now());
 }
 
-/** Color-codes a net figure so it reads unambiguously without relying on spotting a lone "-". */
+/** Color-codes a cash-count/transfer difference (ขาด=red, เกิน=blue) so it reads unambiguously
+ * without relying on spotting a lone "-". Used only for the secondary "ตรวจนับเงินสด" check. */
 function netClassName(net: number): string {
   if (net < 0) return "text-destructive";
   if (net > 0) return "text-blue-600 dark:text-blue-400";
   return "";
 }
 
-function round2(n: number): number {
-  return Math.round(n * 100) / 100;
+/** Color-codes a กำไร/ขาดทุน figure (ขาดทุน=red, กำไร=green) — a deliberately different palette
+ * from `netClassName` so a reader never confuses actual profit/loss with the cash-count check. */
+function profitClassName(net: number): string {
+  if (net < 0) return "text-destructive";
+  if (net > 0) return "text-emerald-600 dark:text-emerald-400";
+  return "";
 }
 
 // ================================================================================================
@@ -633,10 +658,12 @@ function LedgerTable(props: LedgerListProps) {
           <TableHead />
           <TableHead>วันทำการ</TableHead>
           <TableHead className="text-right">ยอดขาย</TableHead>
-          <TableHead className="text-right">เข้าบัญชีจริง</TableHead>
+          <TableHead className="text-right" title="เงินสดที่ควรเหลือในลิ้นชักตอนนี้ (หลังหักรายจ่ายเงินสดและเงินที่โยกออกไปเก็บแล้ว)">
+            เงินสดคงเหลือ
+          </TableHead>
           <TableHead className="text-right">รายจ่าย</TableHead>
-          <TableHead className="text-right" title="ผลต่างเงินสด + ผลต่างโอนเกิน/รอโอน รวมเป็นตัวเดียว">
-            ส่วนต่างรวม
+          <TableHead className="text-right" title="ยอดขายทุกช่องทาง หักรายจ่ายทั้งหมด — ไม่เกี่ยวกับผลการนับเงินสด">
+            กำไร/ขาดทุน
           </TableHead>
           <TableHead>สถานะ</TableHead>
         </TableRow>
@@ -684,17 +711,20 @@ function LedgerTableRow({
           <span className={cn("inline-block transition-transform", isExpanded && "rotate-90")}>▶</span>
         </TableCell>
         <TableCell className="font-medium">{formatKey(row.dateKey)}</TableCell>
-        <TableCell className="text-right font-medium">{formatCurrency(row.salesTotal, currency)}</TableCell>
         <TableCell className="text-right">
-          {formatCurrency(row.receivedTotal, currency)}
-          <FlowBadge row={row} />
+          <div className="font-medium">{formatCurrency(row.salesTotal, currency)}</div>
+          <SalesBreakdown row={row} currency={currency} />
+        </TableCell>
+        <TableCell className="text-right">
+          <div>{row.cashRemainingNow != null ? formatCurrency(row.cashRemainingNow, currency) : "–"}</div>
+          <p className="text-xs text-muted-foreground">ควรมีในลิ้นชัก</p>
         </TableCell>
         <TableCell className="text-right">{formatCurrency(row.expenses, currency)}</TableCell>
         <TableCell className="text-right">
-          <CombinedCell row={row} currency={currency} />
+          <ProfitCell row={row} currency={currency} />
         </TableCell>
         <TableCell>
-          <StatusBadge row={row} />
+          <StatusBadge row={row} currency={currency} />
         </TableCell>
       </TableRow>
       {isExpanded ? (
@@ -760,61 +790,21 @@ function LedgerCardItem({
       <CardContent className="p-3">
         <div className="mb-2 flex items-center justify-between">
           <span className="font-medium">{formatKey(row.dateKey)}</span>
-          <StatusBadge row={row} />
+          <StatusBadge row={row} currency={currency} />
         </div>
         <div className="mb-2 rounded-md bg-muted/40 p-2 text-center">
-          <CombinedCell row={row} currency={currency} big />
-          <p className="text-xs text-muted-foreground">ส่วนต่างรวม (เงินสด+โอน)</p>
+          <ProfitCell row={row} currency={currency} big />
+          <p className="text-xs text-muted-foreground">กำไร/ขาดทุนวันนี้ (ยอดขาย − รายจ่าย)</p>
         </div>
+        <p className="mb-2 text-xs text-muted-foreground">
+          <SalesBreakdown row={row} currency={currency} />
+        </p>
         <div className="mb-2 grid grid-cols-2 gap-2 text-sm">
-          <StatPair label="ยอดขาย" value={formatCurrency(row.salesTotal, currency)} />
-          <StatPair label="เข้าบัญชีจริง" value={formatCurrency(row.receivedTotal, currency)} extra={<FlowBadge row={row} />} />
-          <StatPair label="รายจ่าย" value={formatCurrency(row.expenses, currency)} />
-          <StatPair label="นับปลายกะ" value={row.closingCashCounted != null ? formatCurrency(row.closingCashCounted, currency) : "ยังไม่นับ"} />
-        </div>
-        <div className="mb-2 grid grid-cols-3 gap-2">
-          <div>
-            <Label className="mb-1 block text-xs text-muted-foreground">เงินสดเริ่มต้น</Label>
-            <Input
-              type="number"
-              inputMode="decimal"
-              value={fields.startingCashText}
-              onChange={(e) => fields.setStartingCashText(e.target.value)}
-              onBlur={fields.saveStartingCash}
-              onKeyDown={blurOnEnter}
-              placeholder="–"
-              className="h-9 text-right"
-            />
-          </div>
-          <div>
-            <Label className="mb-1 block text-xs text-muted-foreground">โยกออก</Label>
-            <Input
-              type="number"
-              inputMode="decimal"
-              min={0}
-              value={fields.cashMovedOutText}
-              onChange={(e) => fields.setCashMovedOutText(e.target.value)}
-              onBlur={fields.saveCashMovedOut}
-              onKeyDown={blurOnEnter}
-              className="h-9 text-right"
-            />
-          </div>
-          <div>
-            <Label className="mb-1 block text-xs text-muted-foreground">นับปลายกะ</Label>
-            <Input
-              type="number"
-              inputMode="decimal"
-              value={fields.closingCashText}
-              onChange={(e) => fields.setClosingCashText(e.target.value)}
-              onBlur={fields.saveClosingCash}
-              onKeyDown={blurOnEnter}
-              placeholder="ยังไม่นับ"
-              className="h-9 text-right"
-            />
-          </div>
+          <StatPair label="รายจ่ายรวม" value={formatCurrency(row.expenses, currency)} />
+          <StatPair label="เงินสดควรมีในลิ้นชัก" value={row.cashRemainingNow != null ? formatCurrency(row.cashRemainingNow, currency) : "–"} />
         </div>
         <Button variant="outline" size="sm" className="w-full" onClick={() => onToggle(row.dateKey)}>
-          {isExpanded ? "ซ่อนรายละเอียด ▲" : "ดูรายละเอียด / แก้ไข ▼"}
+          {isExpanded ? "ซ่อนรายละเอียด ▲" : "ดูรายละเอียด / ตรวจนับเงินสด ▼"}
         </Button>
         {isExpanded ? (
           <div className="mt-3 -mx-3 -mb-3 border-t border-border bg-muted/30 p-3">
@@ -852,37 +842,59 @@ function StatPair({ label, value, extra }: { label: string; value: string; extra
 }
 
 // ================================================================================================
-// Shared small bits (combined cell, flow badge, status badge)
+// Shared small bits (sales breakdown, profit cell, status badge + cash-check warning)
 // ================================================================================================
 
 function isTodayRow(dateKey: string, fromHour: number): boolean {
   return dateKey === bangkokDateKeyWithCutoff(Date.now(), fromHour);
 }
 
-function CombinedCell({ row, currency, big = false }: { row: LedgerDayRow; currency: string; big?: boolean }) {
-  if (row.combined == null) {
-    return (
-      <span className="text-muted-foreground" title="ยังไม่ได้กรอกเงินสดนับปลายกะวันนี้ เลยยังสรุปส่วนต่างรวมไม่ได้">
-        -
-      </span>
-    );
-  }
-  const label = row.combined < 0 ? "ขาด" : row.combined > 0 ? "เกิน" : "ตรง";
+/** "เงินสด ฿x · QR ฿y · Delivery ฿z" — lets the ยอดขาย cell show the per-channel split at a glance
+ * without needing its own columns (that's what made the v1 desktop table too wide for the page's
+ * shared max-w-4xl container). */
+function SalesBreakdown({ row, currency }: { row: LedgerDayRow; currency: string }) {
   return (
-    <span className={cn("font-semibold", netClassName(row.combined), big && "text-xl")}>
-      {formatCurrency(Math.abs(row.combined), currency)} {label}
+    <p className="text-xs text-muted-foreground">
+      เงินสด {formatCurrency(row.cashSales, currency)} · QR {formatCurrency(row.qrSales, currency)}
+      {row.deliveryRevenue ? <> · Delivery {formatCurrency(row.deliveryRevenue, currency)}</> : null}
+    </p>
+  );
+}
+
+/** The table's headline figure — ยอดขายทุกช่องทาง หักรายจ่ายทั้งหมด, deliberately independent of the
+ * cash-count check (see `LedgerDayRow.netProfit`'s comment). */
+function ProfitCell({ row, currency, big = false }: { row: LedgerDayRow; currency: string; big?: boolean }) {
+  const label = row.netProfit < 0 ? "ขาดทุน" : row.netProfit > 0 ? "กำไร" : "เท่าทุน";
+  return (
+    <span className={cn("font-semibold", profitClassName(row.netProfit), big && "text-xl")}>
+      {formatCurrency(Math.abs(row.netProfit), currency)} {label}
     </span>
   );
 }
 
-function FlowBadge({ row }: { row: LedgerDayRow }) {
-  if (row.pendingTransfer > 0) return <span className="ml-1 text-xs text-amber-600 dark:text-amber-400">รอโอน</span>;
-  if (row.overTransferred > 0) return <span className="ml-1 text-xs text-blue-600 dark:text-blue-400">เกิน</span>;
-  return null;
+function StatusBadge({ row, currency }: { row: LedgerDayRow; currency: string }) {
+  return (
+    <span className="inline-flex items-center gap-1">
+      <Badge variant={row.settled ? "success" : "default"}>{row.settled ? "ครบ" : "รอ"}</Badge>
+      <CashCheckWarning row={row} currency={currency} />
+    </span>
+  );
 }
 
-function StatusBadge({ row }: { row: LedgerDayRow }) {
-  return <Badge variant={row.settled ? "success" : "default"}>{row.settled ? "ครบ" : "รอ"}</Badge>;
+/** A small ⚠ next to สถานะ when the physical cash count came out off from what the system expects
+ * — the one signal from the old "ส่วนต่างรวม" column kept visible without expanding the row, now
+ * that the count check itself lives in the detail panel instead of the headline. */
+function CashCheckWarning({ row, currency }: { row: LedgerDayRow; currency: string }) {
+  if (row.cashDifference == null || row.cashDifference === 0) return null;
+  const label = row.cashDifference > 0 ? "เกิน" : "ขาด";
+  return (
+    <span
+      className="cursor-help text-amber-600 dark:text-amber-400"
+      title={`นับเงินสดปลายกะ${label} ${formatCurrency(Math.abs(row.cashDifference), currency)} จากที่ระบบคาด — ดูรายละเอียด`}
+    >
+      ⚠
+    </span>
+  );
 }
 
 // ================================================================================================
@@ -935,7 +947,20 @@ function LedgerDetailPanel({
   return (
     <div className="grid gap-5 p-4 sm:grid-cols-3">
       <div>
-        <h4 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">สรุปการคำนวณ</h4>
+        <h4 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">สรุปกำไร-ขาดทุน</h4>
+        <CalcRow k="ยอดขายรวม (เงินสด+QR+Delivery)" v={formatCurrency(row.salesTotal, currency)} />
+        <CalcRow k="รายจ่ายรวม" v={formatCurrency(row.expenses, currency)} />
+        <CalcRow
+          k={row.netProfit < 0 ? "ขาดทุน" : row.netProfit > 0 ? "กำไร" : "เท่าทุน"}
+          v={formatCurrency(Math.abs(row.netProfit), currency)}
+          tone={row.netProfit}
+          palette="profit"
+        />
+
+        <h4 className="mb-2 mt-5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">ตรวจนับเงินสด</h4>
+        <p className="mb-2 text-[11px] leading-snug text-muted-foreground">
+          เช็คว่าเงินสดที่นับได้จริงตรงกับที่ระบบคำนวณไหม (จับกรณีนับผิด หรือพนักงานกดรับเงินผิดช่องทาง) — ไม่ใช่กำไรขาดทุนของร้าน
+        </p>
         <div className="mb-3 grid grid-cols-3 gap-2">
           <div>
             <Label className="mb-1 block text-xs text-muted-foreground">เงินสดเริ่มต้น</Label>
@@ -992,13 +1017,12 @@ function LedgerDetailPanel({
           />
           <p className="mt-1 text-[11px] leading-tight text-muted-foreground">+ = บันทึกเป็นเงินสดผิด ที่จริงเป็นโอน · - = บันทึกเป็นโอนผิด ที่จริงเป็นเงินสด</p>
         </div>
-        <CalcRow k="เงินสดที่ควรมี (ก่อนโยกออก)" v={row.expectedCashBeforeMoveOut != null ? formatCurrency(row.expectedCashBeforeMoveOut, currency) : "-"} />
+        <CalcRow k="เงินสดที่ควรเหลือตอนนี้" v={row.cashRemainingNow != null ? formatCurrency(row.cashRemainingNow, currency) : "-"} />
         <CalcRow
-          k="ผลต่างเงินสด"
+          k="ส่วนต่างจากการนับ"
           v={row.cashDifference != null ? `${row.cashDifference > 0 ? "+" : ""}${formatCurrency(row.cashDifference, currency)}` : "-"}
           tone={row.cashDifference ?? 0}
         />
-        <CalcRow k="ยอดขาย Delivery วันนี้" v={formatCurrency(row.deliveryRevenue, currency)} />
         <div className="mt-2 flex items-center justify-between border-t border-border pt-2 text-sm">
           <span>รอโอน / เกิน</span>
           {row.pendingTransfer > 0 ? (
@@ -1078,11 +1102,12 @@ function LedgerDetailPanel({
   );
 }
 
-function CalcRow({ k, v, tone }: { k: string; v: string; tone?: number }) {
+function CalcRow({ k, v, tone, palette = "cash" }: { k: string; v: string; tone?: number; palette?: "cash" | "profit" }) {
+  const toneClass = tone == null ? undefined : palette === "profit" ? profitClassName(tone) : netClassName(tone);
   return (
     <div className="flex justify-between py-0.5 text-sm">
       <span className="text-muted-foreground">{k}</span>
-      <span className={cn("font-medium", tone != null ? netClassName(tone) : undefined)}>{v}</span>
+      <span className={cn("font-medium", toneClass)}>{v}</span>
     </div>
   );
 }
