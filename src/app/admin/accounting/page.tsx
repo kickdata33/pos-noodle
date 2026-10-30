@@ -632,14 +632,9 @@ function LedgerTable(props: LedgerListProps) {
         <TableRow>
           <TableHead />
           <TableHead>วันทำการ</TableHead>
-          <TableHead className="text-right">เงินสดเริ่มต้น</TableHead>
           <TableHead className="text-right">ยอดขาย</TableHead>
           <TableHead className="text-right">เข้าบัญชีจริง</TableHead>
           <TableHead className="text-right">รายจ่าย</TableHead>
-          <TableHead className="text-right">โยกออก</TableHead>
-          <TableHead className="text-right" title="นับหลังหยิบเงินออกไปเก็บแล้ว">
-            นับปลายกะ
-          </TableHead>
           <TableHead className="text-right" title="ผลต่างเงินสด + ผลต่างโอนเกิน/รอโอน รวมเป็นตัวเดียว">
             ส่วนต่างรวม
           </TableHead>
@@ -652,7 +647,7 @@ function LedgerTable(props: LedgerListProps) {
         ))}
         {rows.length === 0 ? (
           <TableRow>
-            <TableCell colSpan={10} className="text-center text-muted-foreground">
+            <TableCell colSpan={7} className="text-center text-muted-foreground">
               ไม่มีข้อมูลในช่วงนี้
             </TableCell>
           </TableRow>
@@ -689,48 +684,12 @@ function LedgerTableRow({
           <span className={cn("inline-block transition-transform", isExpanded && "rotate-90")}>▶</span>
         </TableCell>
         <TableCell className="font-medium">{formatKey(row.dateKey)}</TableCell>
-        <TableCell className="text-right" onClick={(e) => e.stopPropagation()}>
-          <Input
-            type="number"
-            inputMode="decimal"
-            value={fields.startingCashText}
-            onChange={(e) => fields.setStartingCashText(e.target.value)}
-            onBlur={fields.saveStartingCash}
-            onKeyDown={blurOnEnter}
-            placeholder="–"
-            className="h-9 w-24 text-right"
-          />
-        </TableCell>
         <TableCell className="text-right font-medium">{formatCurrency(row.salesTotal, currency)}</TableCell>
         <TableCell className="text-right">
           {formatCurrency(row.receivedTotal, currency)}
           <FlowBadge row={row} />
         </TableCell>
         <TableCell className="text-right">{formatCurrency(row.expenses, currency)}</TableCell>
-        <TableCell className="text-right" onClick={(e) => e.stopPropagation()}>
-          <Input
-            type="number"
-            inputMode="decimal"
-            min={0}
-            value={fields.cashMovedOutText}
-            onChange={(e) => fields.setCashMovedOutText(e.target.value)}
-            onBlur={fields.saveCashMovedOut}
-            onKeyDown={blurOnEnter}
-            className="h-9 w-20 text-right"
-          />
-        </TableCell>
-        <TableCell className="text-right" onClick={(e) => e.stopPropagation()}>
-          <Input
-            type="number"
-            inputMode="decimal"
-            value={fields.closingCashText}
-            onChange={(e) => fields.setClosingCashText(e.target.value)}
-            onBlur={fields.saveClosingCash}
-            onKeyDown={blurOnEnter}
-            placeholder="ยังไม่นับ"
-            className="h-9 w-24 text-right"
-          />
-        </TableCell>
         <TableCell className="text-right">
           <CombinedCell row={row} currency={currency} />
         </TableCell>
@@ -740,7 +699,7 @@ function LedgerTableRow({
       </TableRow>
       {isExpanded ? (
         <TableRow>
-          <TableCell colSpan={10} className="bg-muted/30 p-0">
+          <TableCell colSpan={7} className="bg-muted/30 p-0">
             <LedgerDetailPanel
               row={row}
               fields={fields}
@@ -977,6 +936,49 @@ function LedgerDetailPanel({
     <div className="grid gap-5 p-4 sm:grid-cols-3">
       <div>
         <h4 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">สรุปการคำนวณ</h4>
+        <div className="mb-3 grid grid-cols-3 gap-2">
+          <div>
+            <Label className="mb-1 block text-xs text-muted-foreground">เงินสดเริ่มต้น</Label>
+            <Input
+              type="number"
+              inputMode="decimal"
+              value={fields.startingCashText}
+              onChange={(e) => fields.setStartingCashText(e.target.value)}
+              onBlur={fields.saveStartingCash}
+              onKeyDown={blurOnEnter}
+              placeholder="–"
+              className="h-9 text-right"
+            />
+          </div>
+          <div>
+            <Label className="mb-1 block text-xs text-muted-foreground">โยกออก</Label>
+            <Input
+              type="number"
+              inputMode="decimal"
+              min={0}
+              value={fields.cashMovedOutText}
+              onChange={(e) => fields.setCashMovedOutText(e.target.value)}
+              onBlur={fields.saveCashMovedOut}
+              onKeyDown={blurOnEnter}
+              className="h-9 text-right"
+            />
+          </div>
+          <div>
+            <Label className="mb-1 block text-xs text-muted-foreground" title="นับหลังหยิบเงินออกไปเก็บแล้ว">
+              นับปลายกะ
+            </Label>
+            <Input
+              type="number"
+              inputMode="decimal"
+              value={fields.closingCashText}
+              onChange={(e) => fields.setClosingCashText(e.target.value)}
+              onBlur={fields.saveClosingCash}
+              onKeyDown={blurOnEnter}
+              placeholder="ยังไม่นับ"
+              className="h-9 text-right"
+            />
+          </div>
+        </div>
         <div className="mb-3">
           <Label className="mb-1 block text-xs text-muted-foreground">ยอดปรับ (สลับเงินสด/โอน)</Label>
           <Input
