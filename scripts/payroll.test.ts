@@ -68,6 +68,38 @@ test("computeAccrual: closedDateKeys defaults to empty — omitting it behaves e
   assert.equal(result.accruedWage, 1800);
 });
 
+test("computeAccrual: payOnClosedDays=true pays a closed day exactly like any other non-absent day", () => {
+  const result = computeAccrual(
+    "2026-09-15",
+    "2026-09-21",
+    300,
+    new Set(),
+    new Set(["2026-09-16"]),
+    true
+  );
+  assert.equal(result.daysWorked, 7); // the closed day counts too, unlike the default-false case above
+  assert.equal(result.accruedWage, 2100);
+});
+
+test("computeAccrual: payOnClosedDays=true still excludes a day that's both closed and marked absent", () => {
+  const result = computeAccrual(
+    "2026-09-15",
+    "2026-09-21",
+    300,
+    new Set(["2026-09-16"]),
+    new Set(["2026-09-16"]),
+    true
+  );
+  assert.equal(result.daysWorked, 6); // absence always wins, regardless of the pay-on-closed-days switch
+  assert.equal(result.accruedWage, 1800);
+});
+
+test("computeAccrual: payOnClosedDays defaults to false — omitting it behaves exactly as before", () => {
+  const result = computeAccrual("2026-09-15", "2026-09-21", 300, new Set(), new Set(["2026-09-16"]));
+  assert.equal(result.daysWorked, 6);
+  assert.equal(result.accruedWage, 1800);
+});
+
 test("computeAvailableAdvance: full accrued amount is available when nothing's been taken yet", () => {
   assert.equal(computeAvailableAdvance(1500, 0), 1500);
 });
@@ -99,6 +131,13 @@ test("computeSettlementPreview: a shop-closed day inside the settled period is e
   const preview = computeSettlementPreview("2026-09-15", "2026-09-21", 300, new Set(), 0, new Set(["2026-09-16"]));
   assert.equal(preview.daysWorked, 6);
   assert.equal(preview.accruedWage, 1800);
+});
+
+test("computeSettlementPreview: payOnClosedDays=true includes the closed day in the settlement too", () => {
+  const preview = computeSettlementPreview("2026-09-15", "2026-09-21", 300, new Set(), 500, new Set(["2026-09-16"]), true);
+  assert.equal(preview.daysWorked, 7);
+  assert.equal(preview.accruedWage, 2100);
+  assert.equal(preview.netPaid, 1600);
 });
 
 test("suggestedSettlementEnd: on the 16th, suggests the 15th of the same month", () => {

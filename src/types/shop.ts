@@ -85,6 +85,17 @@ export interface ShopSettings extends WithId {
    */
   closedDaysOfMonth?: number[];
   /**
+   * Whether an enrolled employee still earns their daily wage on a day `isShopClosedDay` says is
+   * closed (item: "ตั้งให้จ่ายหรือไม่จ่ายได้" — redesign of the "วันหยุดร้าน" card). One shop-wide
+   * default, not per-date: it applies the same way to every closed day, recurring or special,
+   * same as the shop owner's confirmed answer ("ตั้งค่าเดียว ใช้กับทุกวันหยุด") when a per-date
+   * version was offered as an alternative. `undefined` (every shop before this field existed, and
+   * any shop that hasn't customized it) reads as `false` — a closed day never pays, the same
+   * behavior the app always had — so nothing needed a migration when this shipped. Read by
+   * `computeAccrual`/`computeSettlementPreview` (`lib/pos/payroll.ts`).
+   */
+  payOnClosedDays?: boolean;
+  /**
    * Which optional Admin modules this shop has turned on, beyond the universal POS core that
    * every shop always gets (reports, orders, categories, products, modifiers, tables, channels,
    * payment methods, staff, settings). `accounting`/`cashSafe`/`delivery`/`payroll` were all

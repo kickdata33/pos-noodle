@@ -1,4 +1,4 @@
-import { dateKeysBetween } from "./dateRange";
+import { addDaysToKey, dateKeysBetween } from "./dateRange";
 import type { ShopClosedDate } from "@/types";
 
 /**
@@ -11,15 +11,33 @@ import type { ShopClosedDate } from "@/types";
  * Pure — no Firestore, no `Date.now()` — same split as the rest of `lib/pos`, unit-tested
  * directly (`scripts/shopCalendar.test.ts`).
  */
+
+/** The four ways a given `dateKey` can resolve, told apart so the settings page's calendar can
+ * style each one differently (item: "เปลี่ยนเป็นปฏิทินเลือกวันที่จริง" — the "วันหยุดร้าน" redesign
+ * that replaced the old day-of-month 1-31 button grid). The recurring `closedDaysOfMonth` rule
+ * itself was deliberately left untouched by that redesign — it keeps applying automatically to
+ * every month going forward exactly as before; the calendar is just a friendlier surface for
+ * reading it and layering per-date exceptions on top, not a replacement for it. */
+export type ShopClosedStatus = "recurring" | "override-closed" | "override-open" | "open";
+
+export function resolveClosedStatus(
+  dateKey: string,
+  closedDaysOfMonth: readonly number[],
+  overridesByDateKey: ReadonlyMap<string, boolean>
+): ShopClosedStatus {
+  const override = overridesByDateKey.get(dateKey);
+  if (override !== undefined) return override ? "override-closed" : "override-open";
+  const day = Number(dateKey.split("-")[2]);
+  return closedDaysOfMonth.includes(day) ? "recurring" : "open";
+}
+
 export function isShopClosedDay(
   dateKey: string,
   closedDaysOfMonth: readonly number[],
   overridesByDateKey: ReadonlyMap<string, boolean>
 ): boolean {
-  const override = overridesByDateKey.get(dateKey);
-  if (override !== undefined) return override;
-  const day = Number(dateKey.split("-")[2]);
-  return closedDaysOfMonth.includes(day);
+  const status = resolveClosedStatus(dateKey, closedDaysOfMonth, overridesByDateKey);
+  return status === "recurring" || status === "override-closed";
 }
 
 /** Every closed `dateKey` between `startKey` and `endKey` inclusive — a small convenience for
@@ -41,4 +59,23 @@ export function closedDateKeysInRange(
  * caller builds the map the same way. */
 export function toOverrideMap(overrides: readonly ShopClosedDate[]): Map<string, boolean> {
   return new Map(overrides.map((o) => [o.dateKey, o.closed]));
+}
+
+/** Every "YYYY-MM-DD" date key in `monthKey` ("YYYY-MM"), in order — the full calendar month,
+ * not clipped to today, since the owner may well be looking ahead (or back) when managing closed
+ * days. Powers the "วันหยุดร้าน" card's calendar grid. */
+export function dateKeysInMonth(monthKey: string): string[] {
+  const [year, month] = monthKey.split("-").map(Number);
+  const daysInMonth = new Date(Date.UTC(year, month, 0)).getUTCDate();
+  const startKey = `${monthKey}-01`;
+  return dateKeysBetween(startKey, addDaysToKey(startKey, daysInMonth - 1));
+}
+
+/** 0 (Sunday) .. 6 (Saturday) for a plain "YYYY-MM-DD" key — reads the key's own y/m/d directly
+ * as a calendar date with no timezone conversion involved (same trick the payroll page's
+ * `formatKey` already uses for display). Used to pad a calendar grid's leading blank cells so the
+ * 1st lands under the correct weekday column. */
+export function weekdayOfDateKey(dateKey: string): number {
+  const [y, m, d] = dateKey.split("-").map(Number);
+  return new Date(Date.UTC(y, m - 1, d)).getUTCDay();
 }

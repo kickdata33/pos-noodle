@@ -12,7 +12,10 @@ import { addDaysToKey, dateKeysBetween } from "./dateRange";
  *   shop itself was closed that day (item: "กำหนดวันหยุดร้านได้"): a closed day never counts as
  *   worked for anyone, resolved once per period via `lib/pos/shopCalendar.ts`'s
  *   `closedDateKeysInRange` and passed in as `closedDateKeys` below, same shape as
- *   `absentDateKeys` but shop-wide instead of per-employee.
+ *   `absentDateKeys` but shop-wide instead of per-employee — *unless* `payOnClosedDays`
+ *   (`ShopSettings.payOnClosedDays`, item: "ตั้งให้จ่ายหรือไม่จ่ายได้") is on, in which case a closed
+ *   day is paid exactly like any other non-absent day (a paid day off). One shop-wide switch, not
+ *   per-date — the shop owner's confirmed answer when a per-date version was offered instead.
  * - An advance (เบิก) can never exceed what's already been earned and not yet advanced
  *   ("เบิกได้ไม่เกินยอดที่ค้างจ่าย") — `computeAvailableAdvance` is what the UI checks before
  *   allowing one to be saved.
@@ -45,18 +48,21 @@ export interface AccrualResult {
  * zero for an empty/inverted range (e.g. a brand new employee whose period hasn't started yet)
  * rather than throwing, since the accounting page needs to render *something* for a
  * period-of-zero-days. `closedDateKeys` defaults to empty so every existing call site (and every
- * shop that hasn't set up closed days) behaves exactly as before this existed.
+ * shop that hasn't set up closed days) behaves exactly as before this existed. `payOnClosedDays`
+ * defaults to `false` for the same reason — a closed day stays unpaid unless the shop has
+ * explicitly turned that on.
  */
 export function computeAccrual(
   periodStart: string,
   periodEnd: string,
   dailyWage: number,
   absentDateKeys: ReadonlySet<string>,
-  closedDateKeys: ReadonlySet<string> = new Set()
+  closedDateKeys: ReadonlySet<string> = new Set(),
+  payOnClosedDays: boolean = false
 ): AccrualResult {
   if (periodStart > periodEnd) return { daysWorked: 0, accruedWage: 0 };
   const daysWorked = dateKeysBetween(periodStart, periodEnd).filter(
-    (k) => !absentDateKeys.has(k) && !closedDateKeys.has(k)
+    (k) => !absentDateKeys.has(k) && (payOnClosedDays || !closedDateKeys.has(k))
   ).length;
   return { daysWorked, accruedWage: daysWorked * dailyWage };
 }
@@ -89,9 +95,17 @@ export function computeSettlementPreview(
   dailyWage: number,
   absentDateKeys: ReadonlySet<string>,
   totalAdvances: number,
-  closedDateKeys: ReadonlySet<string> = new Set()
+  closedDateKeys: ReadonlySet<string> = new Set(),
+  payOnClosedDays: boolean = false
 ): SettlementPreview {
-  const { daysWorked, accruedWage } = computeAccrual(periodStart, periodEnd, dailyWage, absentDateKeys, closedDateKeys);
+  const { daysWorked, accruedWage } = computeAccrual(
+    periodStart,
+    periodEnd,
+    dailyWage,
+    absentDateKeys,
+    closedDateKeys,
+    payOnClosedDays
+  );
   return { daysWorked, accruedWage, totalAdvances, netPaid: accruedWage - totalAdvances };
 }
 
