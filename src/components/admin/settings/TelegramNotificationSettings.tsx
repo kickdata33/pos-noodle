@@ -9,6 +9,9 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Switch } from "@/components/ui/switch";
 
 const HOURS = Array.from({ length: 24 }, (_, h) => h);
+// 0 (จันทร์) .. 6 (อาทิตย์) — same numbering as `lib/pos/dateRange.ts`'s `bangkokWeekday`, which is
+// what `weeklySummaryDayOfWeek` is compared against server-side.
+const WEEKDAYS = ["จันทร์", "อังคาร", "พุธ", "พฤหัสบดี", "ศุกร์", "เสาร์", "อาทิตย์"];
 
 /**
  * Self-contained (own fetch/save, not part of `ShopSettings`) because the bot token lives in the
@@ -28,6 +31,8 @@ export function TelegramNotificationSettings() {
   const [notifyCancelled, setNotifyCancelled] = useState(true);
   const [notifyDailySummary, setNotifyDailySummary] = useState(true);
   const [dailySummaryHour, setDailySummaryHour] = useState(4);
+  const [notifyWeeklySummary, setNotifyWeeklySummary] = useState(false);
+  const [weeklySummaryDayOfWeek, setWeeklySummaryDayOfWeek] = useState(0);
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
   const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
@@ -45,6 +50,8 @@ export function TelegramNotificationSettings() {
           notifyCancelled: boolean;
           notifyDailySummary: boolean;
           dailySummaryHour: number;
+          notifyWeeklySummary: boolean;
+          weeklySummaryDayOfWeek: number;
         }) => {
           setEnabled(data.enabled);
           setChatId(data.telegramChatId);
@@ -54,6 +61,8 @@ export function TelegramNotificationSettings() {
           setNotifyCancelled(data.notifyCancelled);
           setNotifyDailySummary(data.notifyDailySummary);
           setDailySummaryHour(data.dailySummaryHour);
+          setNotifyWeeklySummary(data.notifyWeeklySummary);
+          setWeeklySummaryDayOfWeek(data.weeklySummaryDayOfWeek);
           setLoading(false);
         }
       );
@@ -75,6 +84,8 @@ export function TelegramNotificationSettings() {
           notifyCancelled,
           notifyDailySummary,
           dailySummaryHour,
+          notifyWeeklySummary,
+          weeklySummaryDayOfWeek,
         }),
       });
       if (tokenInput) {
@@ -110,7 +121,7 @@ export function TelegramNotificationSettings() {
       <div className="mb-3 flex items-center justify-between">
         <div>
           <p className="font-medium">แจ้งเตือนผ่าน Telegram</p>
-          <p className="text-sm text-muted-foreground">บิลชำระเงินแล้ว บิลรอตรวจสอบ บิลยกเลิก และสรุปยอดรายวัน (เลือกเวลาได้)</p>
+          <p className="text-sm text-muted-foreground">บิลชำระเงินแล้ว บิลรอตรวจสอบ บิลยกเลิก สรุปยอดรายวัน และสรุปยอดรายสัปดาห์</p>
         </div>
         <Switch checked={enabled} onCheckedChange={setEnabled} />
       </div>
@@ -194,6 +205,34 @@ export function TelegramNotificationSettings() {
                   ถ้าต้องการเปลี่ยนเวลาส่งจริง ต้องแจ้งให้แก้ไขระบบเพิ่มด้วย
                 </p>
               ) : null}
+            </div>
+          ) : null}
+          <div className="flex items-center justify-between">
+            <span className="text-sm">สรุปยอดรายสัปดาห์ (ยอดขาย/รายจ่าย/กำไร-ขาดทุน + สินค้าขายดี 5 อันดับ)</span>
+            <Switch checked={notifyWeeklySummary} onCheckedChange={setNotifyWeeklySummary} />
+          </div>
+          {notifyWeeklySummary ? (
+            <div className="pl-4">
+              <div className="flex items-center justify-between">
+                <Label htmlFor="tg-weekly-day" className="text-sm text-muted-foreground">
+                  ส่งทุกวัน
+                </Label>
+                <Select value={String(weeklySummaryDayOfWeek)} onValueChange={(v) => setWeeklySummaryDayOfWeek(Number(v))}>
+                  <SelectTrigger id="tg-weekly-day" className="w-32">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {WEEKDAYS.map((label, i) => (
+                      <SelectItem key={i} value={String(i)}>
+                        {label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <p className="mt-1 text-xs text-muted-foreground">
+                เวลา 06:00 น. เหมือนสรุปรายวัน สรุปยอด 7 วันที่ผ่านมา (ไม่ใช่สัปดาห์ปฏิทิน) นับถึงวันก่อนหน้าวันที่ส่ง
+              </p>
             </div>
           ) : null}
         </div>

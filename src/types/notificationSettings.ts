@@ -42,4 +42,30 @@ export interface NotificationSettings {
    * nothing needs backfilling here.
    */
   lastDailySummaryDateKey?: string;
+  /**
+   * Turn on the weekly summary (item: "เพิ่มสรุปรายสัปดาห์ ลงใน telegram เพิ่มเติมด้วย") — ยอดขาย/
+   * รายรับ/รายจ่าย/กำไร-ขาดทุน over the trailing 7 business days, plus that week's top-5 best
+   * sellers. Unlike `notifyPaid`/`notifyPending`/`notifyCancelled`/`notifyDailySummary` above,
+   * `undefined` here means **off** — this is a brand-new feature with no shop ever relying on it
+   * firing, so (unlike those four, which had to stay backward-compatible with a live "fires
+   * unconditionally" behavior) there's no reason to opt every existing shop in by default.
+   */
+  notifyWeeklySummary?: boolean;
+  /**
+   * Day of week to send the weekly summary, 0 (Monday) .. 6 (Sunday) — same numbering as
+   * `lib/pos/dateRange.ts`'s `bangkokWeekday`. `undefined` means 0 (Monday), the shop owner's
+   * confirmed default ("สรุปยอด 7 วันที่ผ่านมา (จันทร์ก่อนหน้าถึงอาทิตย์นี้) ส่งเช้าวันจันทร์เวลา 06:00").
+   * Unlike `dailySummaryHour`, this actually works for *any* value the owner picks — the cron
+   * that reads it fires once every calendar day, so "is today my chosen weekday" is a reliable
+   * check regardless of which day is chosen; only the time-of-day is pinned (piggybacks on the
+   * one daily cron fire — see `weeklySummaryCron.ts`'s file comment for why).
+   */
+  weeklySummaryDayOfWeek?: number;
+  /**
+   * The Bangkok-local "YYYY-MM-DD" business day the weekly summary's 7-day window last ended on
+   * (set right after sending) — stops a second cron run on the same calendar day (a retry, a
+   * manual curl) from sending the same week twice. Same dedupe shape as
+   * `lastDailySummaryDateKey`, just keyed by week instead of day.
+   */
+  lastWeeklySummaryWeekKey?: string;
 }

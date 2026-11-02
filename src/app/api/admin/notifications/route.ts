@@ -33,6 +33,9 @@ export async function GET() {
     notifyCancelled: settings?.notifyCancelled ?? true,
     notifyDailySummary: settings?.notifyDailySummary ?? true,
     dailySummaryHour: settings?.dailySummaryHour ?? 4,
+    // `?? false` — opt-in, unlike the switches above; see NotificationSettings.notifyWeeklySummary's comment.
+    notifyWeeklySummary: settings?.notifyWeeklySummary ?? false,
+    weeklySummaryDayOfWeek: settings?.weeklySummaryDayOfWeek ?? 0,
   });
 }
 
@@ -51,6 +54,8 @@ export async function POST(request: NextRequest) {
     notifyCancelled?: boolean;
     notifyDailySummary?: boolean;
     dailySummaryHour?: number;
+    notifyWeeklySummary?: boolean;
+    weeklySummaryDayOfWeek?: number;
   };
 
   const db = getAdminDb();
@@ -68,6 +73,11 @@ export async function POST(request: NextRequest) {
       Number.isInteger(body.dailySummaryHour) && body.dailySummaryHour! >= 0 && body.dailySummaryHour! <= 23
         ? body.dailySummaryHour
         : 4,
+    notifyWeeklySummary: Boolean(body.notifyWeeklySummary),
+    weeklySummaryDayOfWeek:
+      Number.isInteger(body.weeklySummaryDayOfWeek) && body.weeklySummaryDayOfWeek! >= 0 && body.weeklySummaryDayOfWeek! <= 6
+        ? body.weeklySummaryDayOfWeek
+        : 0,
   };
   // Only overwrite the token when a new non-empty value was actually submitted — see the
   // function comment above.

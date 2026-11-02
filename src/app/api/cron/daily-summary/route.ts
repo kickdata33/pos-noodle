@@ -4,6 +4,7 @@ import { NextResponse, type NextRequest } from "next/server";
 
 import { getAdminDb } from "@/lib/firebase/admin";
 import { runDailySummaryCron } from "@/lib/notifications/dailySummaryCron";
+import { runWeeklySummaryCron } from "@/lib/notifications/weeklySummaryCron";
 
 /**
  * Fires once a day at whatever single UTC time `vercel.json`'s cron entry says (Vercel's Hobby
@@ -21,6 +22,15 @@ import { runDailySummaryCron } from "@/lib/notifications/dailySummaryCron";
  * tomorrow's fire — `?force=1` skips the "is this my hour" check but not the "already sent
  * today" dedupe, so it's safe to run any time and can never double-send:
  *   curl -H "Authorization: Bearer $CRON_SECRET" "https://<domain>/api/cron/daily-summary?force=1"
+ *
+ * Also runs `runWeeklySummaryCron` on this same fire, despite the route's name — deliberately,
+ * not an oversight. See that function's file comment for the full reasoning: this shop's Vercel
+ * plan caps both the frequency *and* the number of cron jobs a project can register, this project
+ * already uses both of its slots, and a 3rd `vercel.json` entry risks the exact same silent-
+ * failure shape that already bit the hour-matching logic above. Piggybacking the weekly summary
+ * on this one proven-reliable daily fire sidesteps that risk entirely — it independently checks
+ * its own "is today my chosen weekday" and "already sent this week" conditions; the same `force`
+ * flag bypasses its weekday check the same way `force` bypasses the daily summary's hour check.
  */
 function constantTimeEquals(a: string, b: string): boolean {
   const bufA = Buffer.from(a);
@@ -39,6 +49,10 @@ export async function GET(request: NextRequest) {
   }
 
   const force = request.nextUrl.searchParams.get("force") === "1";
-  const result = await runDailySummaryCron(getAdminDb(), { force });
-  return NextResponse.json(result);
+  const db = getAdminDb();
+  const [daily, weekly] = await Promise.all([
+    runDailySummaryCron(db, { force }),
+    runWeeklySummaryCron(db, { force }),
+  ]);
+  return NextResponse.json({ daily, weekly });
 }
