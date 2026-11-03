@@ -27,3 +27,4 @@ export * from "./shopClosedDate";
 export * from "./cashSafeCount";
 export * from "./cashSafeWithdrawal";
 export * from "./investment";
+export * from "./printJob";

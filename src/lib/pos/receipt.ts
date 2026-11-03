@@ -33,7 +33,11 @@ function formatModifierLine(name: string, priceDelta: number, currency: string):
  * reprint from Order History). Pure and synchronous — no network, no `Date.now()` beyond what's
  * already snapshotted on `order` — so this is fully unit-testable without a real printer.
  */
-export function buildOrderReceipt(order: Order, settings: ShopSettings): Receipt {
+export function buildOrderReceipt(
+  order: Order,
+  settings: ShopSettings,
+  options: { title?: string; includeTime?: boolean } = {}
+): Receipt {
   const currency = settings.currency;
   const lines: ReceiptLine[] = [];
 
@@ -42,11 +46,14 @@ export function buildOrderReceipt(order: Order, settings: ShopSettings): Receipt
   if (settings.phone.trim()) lines.push({ text: `โทร. ${settings.phone.trim()}`, align: "center" });
   if (settings.taxId.trim()) lines.push({ text: `เลขประจำตัวผู้เสียภาษี ${settings.taxId.trim()}`, align: "center" });
   lines.push({ text: SEPARATOR, align: "center" });
+  if (options.title) lines.push({ text: options.title, align: "center", bold: true });
 
   lines.push({ text: `เลขที่ออเดอร์ ${order.orderNumber}` });
   lines.push({ text: order.tableName ? `โต๊ะ ${order.tableName}` : order.channelName });
   if (order.customerLabel) lines.push({ text: order.customerLabel });
-  lines.push({ text: formatTime(order.paidAt ?? order.createdAt) });
+  // A Print Station prints its own local time instead (see `types/printJob.ts`), so check bills
+  // pass `includeTime: false`; every existing caller keeps the default.
+  if (options.includeTime !== false) lines.push({ text: formatTime(order.paidAt ?? order.createdAt) });
   lines.push({ text: SEPARATOR, align: "center" });
 
   for (const item of order.items) {

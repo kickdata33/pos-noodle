@@ -1,0 +1,107 @@
+import { collection, doc, writeBatch } from "firebase/firestore";
+
+import { db } from "@/lib/firebase/client";
+import { COLLECTIONS } from "@/lib/firebase/collections";
+import { checkBillJobFields, computeKitchenSend, kitchenJobFields } from "@/lib/pos/printTickets";
+import type { Order, OrderItem, PrintJob, ShopSettings } from "@/types";
+
+/**
+ * Client-side glue between the POS screens and the `printJobs` queue. Each function writes the
+ * order change and the new job in ONE batch, so "kitchen already knows about these items" and
+ * "a ticket for these items exists" can never disagree — otherwise a failed job write would
+ * silently drop food, or a failed order write would print the same food twice next time.
+ *
+ * Every function is a no-op (returns `false`) when its switch in `ShopSettings.printStation` is
+ * off — callers just call it, they never need to check settings themselves.
+ */
+
+function newJobRef() {
+  return doc(collection(db, COLLECTIONS.printJobs));
+}
+
+/**
+ * Sends whatever the kitchen hasn't seen yet on this (already saved) order. Returns the updated
+ * items so the caller can put them in its local state, or `null` if nothing was sent.
+ */
+export async function sendOrderToKitchen(
+  order: Order,
+  settings: ShopSettings | null,
+  createdBy: string
+): Promise<{ items: OrderItem[]; kitchenTicketCount: number } | null> {
+  if (!settings?.printStation?.kitchenEnabled) return null;
+  const send = computeKitchenSend(order.items);
+  if (!send) return null;
+  const round = (order.kitchenTicketCount ?? 0) + 1;
+  const now = Date.now();
+  const job: Omit<PrintJob, "id"> = {
+    ...kitchenJobFields(order, send, round),
+    shopId: order.shopId,
+    createdBy,
+    createdAt: now,
+  };
+  const batch = writeBatch(db);
+  batch.update(doc(db, COLLECTIONS.orders, order.id), {
+    items: send.updatedItems,
+    kitchenTicketCount: round,
+    updatedAt: now,
+  });
+  batch.set(newJobRef(), job);
+  await batch.commit();
+  return { items: send.updatedItems, kitchenTicketCount: round };
+}
+
+/**
+ * A line the kitchen already received was deleted from the order (or the whole order was
+ * cancelled) — tell the kitchen to stop. `removed` must be the items as they were *before*
+ * removal; only the part already sent (`kitchenSentQty`) is printed. The order document itself
+ * is written by the caller's normal remove/cancel path, so this only adds the job.
+ */
+export async function sendKitchenCancellation(
+  order: Order,
+  removed: OrderItem[],
+  settings: ShopSettings | null,
+  createdBy: string
+): Promise<boolean> {
+  if (!settings?.printStation?.kitchenEnabled) return false;
+  const cancelled = removed
+    .filter((i) => (i.kitchenSentQty ?? 0) > 0)
+    .map((item) => ({ item, quantity: item.kitchenSentQty ?? 0 }));
+  if (cancelled.length === 0) return false;
+  const job: Omit<PrintJob, "id"> = {
+    ...kitchenJobFields(order, { added: [], cancelled }, order.kitchenTicketCount ?? 0),
+    shopId: order.shopId,
+    createdBy,
+    createdAt: Date.now(),
+  };
+  const batch = writeBatch(db);
+  batch.set(newJobRef(), job);
+  await batch.commit();
+  return true;
+}
+
+/**
+ * Queues a check bill. With `onlyIfChanged`, skips printing when a bill for this exact total was
+ * already printed (staff closing and reopening "คิดเงิน" shouldn't waste paper); the explicit
+ * "พิมพ์บิลอีกครั้ง" button passes `false`.
+ */
+export async function printCheckBill(
+  order: Order,
+  settings: ShopSettings | null,
+  createdBy: string,
+  onlyIfChanged: boolean
+): Promise<boolean> {
+  if (!settings?.printStation?.checkBillEnabled) return false;
+  if (onlyIfChanged && order.checkBillPrintedTotal === order.total) return false;
+  const now = Date.now();
+  const job: Omit<PrintJob, "id"> = {
+    ...checkBillJobFields(order, settings),
+    shopId: order.shopId,
+    createdBy,
+    createdAt: now,
+  };
+  const batch = writeBatch(db);
+  batch.update(doc(db, COLLECTIONS.orders, order.id), { checkBillPrintedTotal: order.total });
+  batch.set(newJobRef(), job);
+  await batch.commit();
+  return true;
+}

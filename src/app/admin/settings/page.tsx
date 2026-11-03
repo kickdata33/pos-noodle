@@ -50,6 +50,7 @@ export default function SettingsPage() {
               paymentQrImageUrl: s.paymentQrImageUrl ?? null,
               pickupIdentificationMode: s.pickupIdentificationMode ?? "queue",
               receiptPrinterIp: s.receiptPrinterIp ?? null,
+              printStation: s.printStation ?? { kitchenEnabled: false, checkBillEnabled: false },
             }
           : s
       );
@@ -243,6 +244,53 @@ export default function SettingsPage() {
               {testPrintResult.message}
             </p>
           ) : null}
+        </div>
+
+        <div className="grid gap-3 rounded-lg border border-border p-4">
+          <div>
+            <p className="font-medium">สถานีพิมพ์ (คอมในร้าน)</p>
+            <p className="text-sm text-muted-foreground">
+              ใช้ได้กับเครื่องพิมพ์ทุกรุ่นที่ต่อกับคอม Windows เปิดหน้า{" "}
+              <a href="/pos/print-station" target="_blank" rel="noreferrer" className="underline">
+                สถานีพิมพ์
+              </a>{" "}
+              ค้างไว้ในคอม เลือกครัวหรือแคชเชียร์ แล้วงานพิมพ์จะออกเอง
+            </p>
+          </div>
+          <div className="flex items-center justify-between gap-4">
+            <div>
+              <p className="font-medium">พิมพ์ใบสั่งเข้าครัว</p>
+              <p className="text-sm text-muted-foreground">
+                ออกเครื่องครัวเมื่อกด ส่งครัว, กลับหน้าแรก หรือ คิดเงิน และเมื่อลูกค้าสั่งเองผ่าน QR พิมพ์เฉพาะรายการใหม่
+              </p>
+            </div>
+            <Switch
+              checked={settings.printStation?.kitchenEnabled ?? false}
+              onCheckedChange={(v) =>
+                update("printStation", {
+                  kitchenEnabled: v,
+                  checkBillEnabled: settings.printStation?.checkBillEnabled ?? false,
+                })
+              }
+            />
+          </div>
+          <div className="flex items-center justify-between gap-4">
+            <div>
+              <p className="font-medium">พิมพ์ใบแจ้งค่าอาหารที่แคชเชียร์</p>
+              <p className="text-sm text-muted-foreground">
+                ออกเมื่อกด คิดเงิน พร้อม QR พร้อมเพย์ที่ใส่ยอดไว้แล้ว (ต้องกรอก PromptPay ID ด้านล่าง ถ้าไม่กรอกจะพิมพ์ไม่มี QR)
+              </p>
+            </div>
+            <Switch
+              checked={settings.printStation?.checkBillEnabled ?? false}
+              onCheckedChange={(v) =>
+                update("printStation", {
+                  kitchenEnabled: settings.printStation?.kitchenEnabled ?? false,
+                  checkBillEnabled: v,
+                })
+              }
+            />
+          </div>
         </div>
 
         <div className="grid gap-2">

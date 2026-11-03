@@ -15,6 +15,10 @@ export const COLLECTIONS = {
   /** Server-only: failed-PIN throttling counters. Denied to every client. */
   pinAttempts: "pinAttempts",
   orders: "orders",
+  /** Queued kitchen tickets / check bills for the shop's Print Station window(s) — see
+   * `types/printJob.ts`. Shop members create and read their own shop's jobs; the station (a
+   * signed-in staff/admin session on the shop's PC) claims and marks them printed. */
+  printJobs: "printJobs",
   /** One doc per shop — the daily-sequence counter behind `generateOrderNumber` (lib/pos). */
   orderCounters: "orderCounters",
   payments: "payments",

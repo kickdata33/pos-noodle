@@ -8,6 +8,7 @@ import { notifyShop } from "@/lib/notifications/notifyShop";
 import { resolveCustomerOrder, type CustomerSelection } from "@/lib/pos/customerOrder";
 import { generateOrderNumberAdmin } from "@/lib/pos/orderNumberAdmin";
 import { computeOrderTotals } from "@/lib/pos/pricing";
+import { kitchenJobFields } from "@/lib/pos/printTickets";
 import { generatePromptPayPayload } from "@/lib/pos/promptpay";
 import { generateQueueNumberAdmin } from "@/lib/pos/queueNumberAdmin";
 import { resolveShopIdFromHost } from "@/lib/shop/shopLookupAdmin";
@@ -111,7 +112,14 @@ export async function POST(request: NextRequest) {
     customerLabel = `คิว ${queueNumber}`;
   }
 
-  const newItems: OrderItem[] = resolvedItems.map((item) => ({ ...item, id: randomUUID() }));
+  // Kitchen printing on → the ticket is queued together with the order (same batch) and the
+  // lines are marked as already sent — see the identical comment in the dine-in QR route.
+  const kitchenPrintingOn = settings.printStation?.kitchenEnabled === true;
+  const newItems: OrderItem[] = resolvedItems.map((item) => ({
+    ...item,
+    id: randomUUID(),
+    ...(kitchenPrintingOn ? { kitchenSentQty: item.quantity } : {}),
+  }));
   const totals = computeOrderTotals(newItems, settings);
   const now = Date.now();
   const orderNumber = await generateOrderNumberAdmin(db, shopId);
@@ -142,10 +150,22 @@ export async function POST(request: NextRequest) {
     pendingReview: true,
     customerLabel,
     pickupPaymentIntent: paymentIntent,
+    ...(kitchenPrintingOn ? { kitchenTicketCount: 1 } : {}),
   };
 
   const orderRef = db.collection(COLLECTIONS.orders).doc();
-  await orderRef.set(orderData);
+  const batch = db.batch();
+  batch.set(orderRef, orderData);
+  if (kitchenPrintingOn) {
+    const send = { added: newItems.map((item) => ({ item, quantity: item.quantity })), cancelled: [] };
+    batch.set(db.collection(COLLECTIONS.printJobs).doc(), {
+      ...kitchenJobFields({ ...orderData, id: orderRef.id }, send, 1),
+      shopId,
+      createdBy: "customer-pickup-qr",
+      createdAt: now,
+    });
+  }
+  await batch.commit();
 
   // Fire-and-forget — see `notifyShop`'s comment.
   void notifyShop(db, shopId, `🔔 บิลใหม่รอตรวจสอบ\nสั่งกลับบ้าน · ${customerLabel}`, "pending");

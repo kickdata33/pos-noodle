@@ -30,6 +30,8 @@ interface Props {
     cashReceived: number | null;
     changeDue: number | null;
   }) => void;
+  /** Present only when check-bill printing is on — shows a "พิมพ์บิลอีกครั้ง" button. */
+  onReprintCheckBill?: () => void;
 }
 
 /**
@@ -47,6 +49,7 @@ export function CheckoutDialog({
   paymentMethods,
   saving,
   onConfirm,
+  onReprintCheckBill,
 }: Props) {
   const groupedItems = groupItemsByProduct(items);
   // เงินสด/QR are the overwhelming majority of orders (item request: "เลือก เงินสด หรือ QR
@@ -199,6 +202,11 @@ export function CheckoutDialog({
         ) : null}
 
         <DialogFooter>
+          {onReprintCheckBill ? (
+            <Button variant="ghost" onClick={onReprintCheckBill} disabled={saving} className="sm:mr-auto">
+              พิมพ์บิลอีกครั้ง
+            </Button>
+          ) : null}
           <Button variant="outline" onClick={() => onOpenChange(false)} disabled={saving}>
             ยกเลิก
           </Button>

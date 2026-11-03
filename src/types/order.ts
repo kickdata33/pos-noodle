@@ -54,6 +54,14 @@ export interface OrderItem extends WithId {
    * time rather than treat a missing value as "now" or "unknown but recent".
    */
   addedAt?: number;
+  /**
+   * How many of this line's `quantity` have already gone out on a kitchen ticket
+   * (`lib/pos/printTickets.ts`'s `computeKitchenSend`). The next ticket prints only the
+   * difference — so a table's second round never reprints the first, and lowering a quantity
+   * after it was sent prints a "ยกเลิก" line for the drop. Absent on every item from before this
+   * feature and on every item not sent yet — read as 0.
+   */
+  kitchenSentQty?: number;
 }
 
 /**
@@ -124,6 +132,12 @@ export interface Order extends WithId {
    * other transfer; this only drives a "รอตรวจสอบยอดโอน" nudge on the POS side so it isn't missed.
    */
   customerClaimedTransfer?: boolean;
+  /** How many kitchen tickets this order has produced so far — printed as "รอบที่ N" so the
+   * kitchen can tell a second round from a reprint. Absent = 0. */
+  kitchenTicketCount?: number;
+  /** The total last printed on a check bill — "คิดเงิน" auto-prints only when the total has
+   * changed since, so reopening the checkout dialog doesn't waste paper. Absent = never printed. */
+  checkBillPrintedTotal?: number;
 }
 
 /** A completed payment against an order — kept even if the order later gets refunded/voided. */

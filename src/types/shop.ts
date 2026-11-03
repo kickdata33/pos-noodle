@@ -96,6 +96,20 @@ export interface ShopSettings extends WithId {
    */
   payOnClosedDays?: boolean;
   /**
+   * Print Station printing (`/pos/print-station` open in Chrome on the shop's PC, see
+   * `PrintStationScreen`) — works with any printer that has a Windows driver, unlike
+   * `receiptPrinterIp` above which needs an Epson ePOS-Print network printer. Two independent
+   * switches because a shop may want kitchen tickets but not printed bills, or vice versa.
+   * `undefined` (every shop before this field existed) means both off — nothing starts printing
+   * on its own after a deploy.
+   */
+  printStation?: {
+    /** Print a kitchen ticket of newly added items when staff sends the order to the kitchen. */
+    kitchenEnabled: boolean;
+    /** Print a check bill (with a PromptPay QR for the exact amount) when staff taps "คิดเงิน". */
+    checkBillEnabled: boolean;
+  };
+  /**
    * Which optional Admin modules this shop has turned on, beyond the universal POS core that
    * every shop always gets (reports, orders, categories, products, modifiers, tables, channels,
    * payment methods, staff, settings). `accounting`/`cashSafe`/`delivery`/`payroll` were all

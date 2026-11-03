@@ -163,6 +163,9 @@ export function PosHome() {
         <Link href="/pos/alert-voice" className="text-sm text-muted-foreground underline">
           เสียงแจ้งเตือน
         </Link>
+        <Link href="/pos/print-station" className="text-sm text-muted-foreground underline">
+          สถานีพิมพ์
+        </Link>
       </div>
 
       <TableQrDialog table={qrTable} onOpenChange={(open) => !open && setQrTable(null)} />

@@ -9,6 +9,7 @@ import { resolveCustomerOrder, type CustomerSelection } from "@/lib/pos/customer
 import { CUSTOMER_ORDER_MIN_INTERVAL_MS, isThrottled } from "@/lib/pos/customerThrottle";
 import { generateOrderNumberAdmin } from "@/lib/pos/orderNumberAdmin";
 import { computeOrderTotals } from "@/lib/pos/pricing";
+import { kitchenJobFields } from "@/lib/pos/printTickets";
 import type {
   ModifierGroup,
   ModifierOption,
@@ -93,7 +94,18 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
 
   // `newSinceReview` marks these as unseen so `OrderScreen` can highlight exactly these lines
   // (not the whole order) once staff opens it — see the field's comment in `types/order.ts`.
-  const newItems: OrderItem[] = resolvedItems.map((item) => ({ ...item, id: randomUUID(), newSinceReview: true }));
+  // With kitchen printing on, a customer's own order goes straight to the kitchen printer — no
+  // waiting for staff to open it — so these lines are marked as already sent in the same
+  // transaction that queues their ticket (see `OrderItem.kitchenSentQty`).
+  const kitchenPrintingOn = settings.printStation?.kitchenEnabled === true;
+  const newItems: OrderItem[] = resolvedItems.map((item) => ({
+    ...item,
+    id: randomUUID(),
+    newSinceReview: true,
+    ...(kitchenPrintingOn ? { kitchenSentQty: item.quantity } : {}),
+  }));
+  const kitchenSend = { added: newItems.map((item) => ({ item, quantity: item.quantity })), cancelled: [] };
+  const printJobsRef = db.collection(COLLECTIONS.printJobs);
 
   const throttleRef = db.collection(COLLECTIONS.customerOrderThrottle).doc(tableId);
   const ordersRef = db.collection(COLLECTIONS.orders);
@@ -130,7 +142,22 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
         const totals = computeOrderTotals(mergedItems, settings, order.discount);
         // Flags this table for the badge + alert sound on the POS home screen (`PosHome`) until
         // a staff member actually opens the order — see `Order.pendingReview`'s comment.
-        tx.update(orderDoc.ref, { items: mergedItems, ...totals, updatedAt: now, pendingReview: true });
+        const round = (order.kitchenTicketCount ?? 0) + 1;
+        tx.update(orderDoc.ref, {
+          items: mergedItems,
+          ...totals,
+          updatedAt: now,
+          pendingReview: true,
+          ...(kitchenPrintingOn ? { kitchenTicketCount: round } : {}),
+        });
+        if (kitchenPrintingOn) {
+          tx.set(printJobsRef.doc(), {
+            ...kitchenJobFields({ ...order, id: orderDoc.id }, kitchenSend, round),
+            shopId: table.shopId,
+            createdBy: "customer-qr",
+            createdAt: now,
+          });
+        }
         tx.set(throttleRef, { lastSubmittedAt: now });
         return orderDoc.id;
       }
@@ -163,8 +190,17 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
         updatedAt: now,
         paidAt: null,
         pendingReview: true,
+        ...(kitchenPrintingOn ? { kitchenTicketCount: 1 } : {}),
       };
       tx.set(newOrderRef, orderData);
+      if (kitchenPrintingOn) {
+        tx.set(printJobsRef.doc(), {
+          ...kitchenJobFields({ ...orderData, id: newOrderRef.id }, kitchenSend, 1),
+          shopId: table.shopId,
+          createdBy: "customer-qr",
+          createdAt: now,
+        });
+      }
       tx.set(throttleRef, { lastSubmittedAt: now });
       return newOrderRef.id;
     });

@@ -262,6 +262,24 @@ service cloud.firestore {
       allow delete: if false;
     }
 
+    // Print Station queue (types/printJob.ts). Any active member of the shop may queue a ticket
+    // (POS staff) and claim/mark it printed (the station window is itself a signed-in staff or
+    // admin session on the shop's PC). A new job must start out pending and unclaimed, and an
+    // update can only move status/claim/result fields — never rewrite what the ticket says.
+    // Customer QR orders queue their kitchen tickets through the Admin SDK, outside these rules.
+    match /printJobs/{jobId} {
+      allow read: if isActiveUser() && ownsExisting();
+      allow create: if isActiveUser() && ownsIncoming()
+        && request.resource.data.status == 'pending'
+        && request.resource.data.claimedBy == null
+        && request.resource.data.station in ['kitchen', 'cashier'];
+      allow update: if isActiveUser() && ownsExisting() && ownsIncoming()
+        && request.resource.data.diff(resource.data).affectedKeys()
+             .hasOnly(['status', 'claimedBy', 'error', 'printedAt'])
+        && request.resource.data.status in ['pending', 'printing', 'printed', 'failed'];
+      allow delete: if false;
+    }
+
     // --- Order counters: one doc per shop, holds the daily order-number sequence. Same trust
     //     level as orders/payments — any active user already runs the whole order lifecycle for
     //     their own shop, but never another shop's counter. ---

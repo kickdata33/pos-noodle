@@ -22,6 +22,8 @@ import {
   resolveModifiersFromSelections,
 } from "@/lib/pos/pricing";
 import { generateOrderNumber } from "@/lib/pos/orderNumber";
+import { printCheckBill, sendKitchenCancellation, sendOrderToKitchen } from "@/lib/pos/printQueue";
+import { countUnsentToKitchen } from "@/lib/pos/printTickets";
 import { buildOrderReceipt } from "@/lib/pos/receipt";
 import { auditLogRepository } from "@/repositories/auditLogRepository";
 import { orderRepository } from "@/repositories/orderRepository";
@@ -117,6 +119,8 @@ export function OrderScreen({ orderId, initialTableId, initialChannelId }: Props
   // Latches true while `ensureSaved` has an in-flight order creation — see that function's
   // comment for why this is a plain boolean rather than the pending Promise itself.
   const creatingRef = useRef(false);
+  // Latches true while `sendToKitchen` is writing a ticket — same plain-boolean pattern.
+  const sendingToKitchenRef = useRef(false);
   const [activeCategoryId, setActiveCategoryId] = useState<string | null>(null);
   const [pickerProduct, setPickerProduct] = useState<Product | null>(null);
   const [removeTarget, setRemoveTarget] = useState<OrderItem | null>(null);
@@ -131,6 +135,9 @@ export function OrderScreen({ orderId, initialTableId, initialChannelId }: Props
   useEffect(() => orderRepository.subscribeOpenForShop(shopId, setOpenOrders), [shopId]);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Printing problems are shown, never thrown — the sale and the order must keep working even
+  // when the queue write fails (offline, rules not deployed yet).
+  const [printError, setPrintError] = useState<string | null>(null);
   // Brief "บันทึกแล้ว" flash after every successful auto-save (item request: no manual save step,
   // but staff should still see confirmation that a change actually reached the server). No
   // ref-tracked timer handle to clear/replace on rapid repeats — deliberately simple, since
@@ -393,6 +400,11 @@ export function OrderScreen({ orderId, initialTableId, initialChannelId }: Props
     if (!current || !removeTarget || !current.id) return;
     const target = removeTarget;
     await applyItems(current.items.filter((i) => i.id !== target.id));
+    if (appUser) {
+      sendKitchenCancellation({ ...current, id: current.id }, [target], catalogSettings, appUser.id).catch(() =>
+        setPrintError("ส่งใบยกเลิกเข้าครัวไม่สำเร็จ แจ้งครัวด้วยตัวเอง")
+      );
+    }
     await auditLogRepository.create({
       shopId,
       action: "ORDER_ITEM_REMOVED",
@@ -431,6 +443,12 @@ export function OrderScreen({ orderId, initialTableId, initialChannelId }: Props
       createdAt: updatedAt,
     });
     notifyOrderEvent("cancelled", current);
+    if (appUser) {
+      // Awaited (unlike remove's) since we navigate away right after — but failures are swallowed.
+      await sendKitchenCancellation({ ...current, id: current.id }, current.items, catalogSettings, appUser.id).catch(
+        () => false
+      );
+    }
     if (current.tableId) closeTableSession(current.tableId);
     router.push("/pos");
   }
@@ -519,6 +537,74 @@ export function OrderScreen({ orderId, initialTableId, initialChannelId }: Props
       return id;
     } finally {
       creatingRef.current = false;
+    }
+  }
+
+  const kitchenPrintingOn = Boolean(catalogSettings?.printStation?.kitchenEnabled);
+
+  /**
+   * Prints a kitchen ticket for everything on this order the kitchen hasn't received yet (see
+   * `computeKitchenSend`). There's no "บันทึกออเดอร์" step to hang this on (every tap saves
+   * itself), so it runs from the explicit "ส่งครัว" button and automatically on the way out —
+   * "กลับหน้าแรก" and "คิดเงิน" — so staff who forget the button still get food to the kitchen.
+   * Never throws.
+   */
+  async function sendToKitchen(): Promise<void> {
+    if (!kitchenPrintingOn || !appUser) return;
+    // A double tap (or "ส่งครัว" then "คิดเงิน" in quick succession) must not compute the same
+    // unsent items twice and print them on two tickets — wait for the in-flight send instead.
+    while (sendingToKitchenRef.current) {
+      await new Promise((resolve) => setTimeout(resolve, 30));
+    }
+    const current = orderRef.current;
+    if (!current || countUnsentToKitchen(current.items) === 0) return;
+    sendingToKitchenRef.current = true;
+    try {
+      const id = await ensureSaved();
+      const latest = orderRef.current ?? current;
+      const result = await sendOrderToKitchen({ ...latest, id }, catalogSettings, appUser.id);
+      if (result && orderRef.current) {
+        orderRef.current = { ...orderRef.current, items: result.items, kitchenTicketCount: result.kitchenTicketCount };
+        setOrder(orderRef.current);
+      }
+      setPrintError(null);
+    } catch {
+      setPrintError("ส่งใบสั่งเข้าครัวไม่สำเร็จ ลองกด ส่งครัว อีกครั้ง");
+    } finally {
+      sendingToKitchenRef.current = false;
+    }
+  }
+
+  async function handleBackToHome() {
+    await sendToKitchen();
+    router.push("/pos");
+  }
+
+  /** "คิดเงิน": anything still unsent goes to the kitchen first (takeaway orders are often paid
+   * right after ordering), then the check bill prints at the cashier, then the dialog opens.
+   * The dialog opens even if printing failed. */
+  async function handleOpenCheckout() {
+    await sendToKitchen();
+    const current = orderRef.current;
+    if (current && appUser && catalogSettings?.printStation?.checkBillEnabled) {
+      try {
+        const id = await ensureSaved();
+        const latest = orderRef.current ?? current;
+        await printCheckBill({ ...latest, id }, catalogSettings, appUser.id, true);
+      } catch {
+        setPrintError("พิมพ์ใบแจ้งค่าอาหารไม่สำเร็จ");
+      }
+    }
+    setCheckoutOpen(true);
+  }
+
+  async function handleReprintCheckBill() {
+    const current = orderRef.current;
+    if (!current?.id || !appUser) return;
+    try {
+      await printCheckBill({ ...current, id: current.id }, catalogSettings, appUser.id, false);
+    } catch {
+      setPrintError("พิมพ์ใบแจ้งค่าอาหารไม่สำเร็จ");
     }
   }
 
@@ -795,13 +881,19 @@ export function OrderScreen({ orderId, initialTableId, initialChannelId }: Props
             </div>
           </div>
           {error ? <p className="mb-2 text-sm text-destructive">{error}</p> : null}
+          {printError ? <p className="mb-2 text-sm text-destructive">{printError}</p> : null}
+          {kitchenPrintingOn && countUnsentToKitchen(order.items) > 0 ? (
+            <Button variant="secondary" className="mb-2 w-full" onClick={sendToKitchen} disabled={saving}>
+              ส่งครัว ({countUnsentToKitchen(order.items)} ที่)
+            </Button>
+          ) : null}
           <div className="grid grid-cols-2 gap-2">
             {/* No manual "บันทึกออเดอร์" step — every menu tap saves itself (see `applyItems`).
                 This button is just navigation, available whether or not anything's been added yet. */}
-            <Button variant="outline" onClick={() => router.push("/pos")}>
+            <Button variant="outline" onClick={handleBackToHome}>
               กลับหน้าแรก
             </Button>
-            <Button onClick={() => setCheckoutOpen(true)} disabled={saving || order.items.length === 0}>
+            <Button onClick={handleOpenCheckout} disabled={saving || order.items.length === 0}>
               คิดเงิน
             </Button>
           </div>
@@ -896,6 +988,7 @@ export function OrderScreen({ orderId, initialTableId, initialChannelId }: Props
         paymentMethods={paymentMethods.filter((m) => m.active)}
         saving={saving}
         onConfirm={handleConfirmPayment}
+        onReprintCheckBill={catalogSettings?.printStation?.checkBillEnabled && order.id ? handleReprintCheckBill : undefined}
       />
     </div>
   );
