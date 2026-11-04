@@ -21,6 +21,7 @@ import {
   resolveChannelPrice,
   resolveModifiersFromSelections,
 } from "@/lib/pos/pricing";
+import { increaseItemQuantity } from "@/lib/pos/kitchenAlerts";
 import { generateOrderNumber } from "@/lib/pos/orderNumber";
 import { printCheckBill, sendKitchenCancellation, sendOrderToKitchen } from "@/lib/pos/printQueue";
 import { countUnsentToKitchen } from "@/lib/pos/printTickets";
@@ -363,11 +364,9 @@ export function OrderScreen({ orderId, initialTableId, initialChannelId }: Props
       requestRemove(item);
       return;
     }
-    const newItems = current.items.map((i) =>
-      i.id === item.id
-        ? { ...i, quantity: newQty, lineTotal: computeLineTotal(i.unitPrice, i.modifiers, newQty) }
-        : i
-    );
+    // A line the kitchen already marked "ทำแล้ว" gets its extra portions as a separate fresh line
+    // (see `increaseItemQuantity`) — otherwise the kitchen screen would never show them.
+    const newItems = increaseItemQuantity(current.items, item, delta, crypto.randomUUID(), Date.now(), computeLineTotal);
     applyItems(newItems);
   }
 

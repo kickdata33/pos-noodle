@@ -1,5 +1,6 @@
 "use client";
 
+import { usePathname } from "next/navigation";
 import { useEffect, useRef } from "react";
 
 import { playOrderAlertSound } from "@/lib/pos/notificationSound";
@@ -21,6 +22,14 @@ import { usePosCatalog } from "./PosCatalogContext";
 export function PosOrderAlertListener() {
   const { shopId } = usePosCatalog();
   const seenPendingIdsRef = useRef<Set<string> | null>(null);
+  // The kitchen screen runs its own, broader alert (any new item, not just QR orders awaiting
+  // review) — skipping here keeps a kitchen tablet from chiming twice for one customer order.
+  const pathname = usePathname();
+  const onKitchenScreen = pathname?.startsWith("/pos/kitchen") ?? false;
+  const onKitchenScreenRef = useRef(onKitchenScreen);
+  useEffect(() => {
+    onKitchenScreenRef.current = onKitchenScreen;
+  }, [onKitchenScreen]);
 
   useEffect(
     () =>
@@ -28,7 +37,7 @@ export function PosOrderAlertListener() {
         const pendingIds = new Set(orders.filter((o) => o.pendingReview).map((o) => o.id));
         if (seenPendingIdsRef.current !== null) {
           const isNewlyPending = [...pendingIds].some((id) => !seenPendingIdsRef.current!.has(id));
-          if (isNewlyPending) playOrderAlertSound();
+          if (isNewlyPending && !onKitchenScreenRef.current) playOrderAlertSound();
         }
         seenPendingIdsRef.current = pendingIds;
       }),

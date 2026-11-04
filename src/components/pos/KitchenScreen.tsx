@@ -1,10 +1,12 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { PosBackLink } from "@/components/pos/PosBackLink";
 import { usePosCatalog } from "@/components/pos/PosCatalogContext";
 import { formatTime } from "@/lib/format";
+import { detectNewKitchenItems, isNewKitchenItem } from "@/lib/pos/kitchenAlerts";
+import { playOrderAlertSound } from "@/lib/pos/notificationSound";
 import { orderRepository } from "@/repositories/orderRepository";
 import type { Order, OrderItem } from "@/types";
 
@@ -23,7 +25,28 @@ export function KitchenScreen() {
   const { shopId } = usePosCatalog();
   const [openOrders, setOpenOrders] = useState<Order[]>([]);
 
-  useEffect(() => orderRepository.subscribeOpenForShop(shopId, setOpenOrders), [shopId]);
+  // Item ids already on screen — anything unprepared that isn't in here is new food to cook, so
+  // the tablet chimes (for staff-keyed orders too, not only customer QR orders — the layout-wide
+  // `PosOrderAlertListener` skips this screen so it never chimes twice).
+  const seenItemIdsRef = useRef<Set<string> | null>(null);
+  // Drives the "ใหม่" badge expiry; refreshed on every snapshot and every 30 seconds.
+  const [now, setNow] = useState(0);
+
+  useEffect(
+    () =>
+      orderRepository.subscribeOpenForShop(shopId, (orders) => {
+        const { seen, hasNew } = detectNewKitchenItems(seenItemIdsRef.current, orders);
+        seenItemIdsRef.current = seen;
+        if (hasNew) playOrderAlertSound();
+        setOpenOrders(orders);
+        setNow(Date.now());
+      }),
+    [shopId]
+  );
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), 30_000);
+    return () => clearInterval(timer);
+  }, []);
 
   const kitchenOrders = openOrders
     .filter((o) => o.items.some((item) => !item.prepared))
@@ -46,7 +69,15 @@ export function KitchenScreen() {
 
       <div className="grid gap-4">
         {kitchenOrders.map((order) => (
-          <div key={order.id} className="rounded-lg border border-border bg-card p-4">
+          <div
+            key={order.id}
+            className={
+              "rounded-lg border bg-card p-4 " +
+              (order.items.some((item) => isNewKitchenItem(item, now))
+                ? "border-primary ring-2 ring-primary"
+                : "border-border")
+            }
+          >
             <div className="mb-3 flex items-center justify-between">
               <span className="text-lg font-semibold">
                 {order.tableName ?? order.customerLabel ?? order.channelName} · {order.orderNumber}
@@ -68,8 +99,18 @@ export function KitchenScreen() {
                   }
                 >
                   <span className="flex-1">
-                    <span className={"text-lg font-semibold " + (item.prepared ? "line-through opacity-70" : "")}>
-                      {item.quantity}× {item.productName}
+                    <span className="flex flex-wrap items-center gap-2">
+                      <span className={"text-lg font-semibold " + (item.prepared ? "line-through opacity-70" : "")}>
+                        {item.quantity}× {item.productName}
+                      </span>
+                      {isNewKitchenItem(item, now) ? (
+                        <span className="rounded-md bg-primary px-2 py-0.5 text-sm font-bold text-primary-foreground">
+                          ใหม่
+                        </span>
+                      ) : null}
+                      {item.addedAt ? (
+                        <span className="text-sm text-muted-foreground">สั่ง {formatTime(item.addedAt)}</span>
+                      ) : null}
                     </span>
                     {item.modifiers.length > 0 ? (
                       <span className="block text-sm text-muted-foreground">
