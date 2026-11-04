@@ -62,3 +62,13 @@ export function buildCountSummaryText(
   if (lowAfter.length > 0) parts.push(buildLowStockText(lowAfter));
   return parts.join("\n\n");
 }
+
+/** What voiding a bill puts back: the opposite of its own `sale` movements, per product. */
+export function quantitiesToReturn(saleMovements: Pick<StockMovement, "productId" | "delta" | "type">[]): Map<string, number> {
+  const back = new Map<string, number>();
+  for (const m of saleMovements) {
+    if (m.type !== "sale") continue;
+    back.set(m.productId, (back.get(m.productId) ?? 0) - m.delta);
+  }
+  return back;
+}

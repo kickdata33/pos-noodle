@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 
 import { AdminSection } from "@/components/admin/AdminSection";
+import { CancelOrderDialog } from "@/components/pos/CancelOrderDialog";
 import { DateField } from "@/components/admin/DateField";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -18,9 +19,11 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { formatCurrency } from "@/lib/format";
 import { useAuth } from "@/hooks/useAuth";
 import { bangkokDateKey } from "@/lib/pos/dateRange";
+import { voidPaidOrderAndRestoreStock } from "@/lib/pos/stockService";
+import { auditLogRepository } from "@/repositories/auditLogRepository";
 import { orderRepository } from "@/repositories/orderRepository";
 import { shopRepository } from "@/repositories/shopRepository";
-import type { Order, OrderStatus } from "@/types";
+import type { AuditReason, Order, OrderStatus } from "@/types";
 
 const STATUS_LABEL: Record<OrderStatus, string> = {
   OPEN: "เปิดอยู่",
@@ -55,6 +58,8 @@ export default function AdminOrdersPage() {
   const [orders, setOrders] = useState<Order[]>([]);
   const [currency, setCurrency] = useState("THB");
   const [selected, setSelected] = useState<Order | null>(null);
+  const [voidOpen, setVoidOpen] = useState(false);
+  const [voidMessage, setVoidMessage] = useState<{ ok: boolean; text: string } | null>(null);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<OrderStatus | "all">("all");
   const [dateFilter, setDateFilter] = useState<string>(() => bangkokDateKey(Date.now()));
@@ -69,6 +74,52 @@ export default function AdminOrdersPage() {
       if (s) setCurrency(s.currency);
     });
   }, [shopId]);
+
+  /**
+   * Void a paid bill (Admin only — this page): bill → VOID (drops out of sales reports, which
+   * only count PAID), its piece-sold items go back into stock, an audit entry records who and
+   * why, and Telegram gets the usual cancelled-bill message.
+   */
+  async function confirmVoid(reason: AuditReason, note: string) {
+    const target = selected;
+    if (!target || !appUser) return;
+    setVoidMessage(null);
+    try {
+      const result = await voidPaidOrderAndRestoreStock(target, appUser);
+      if (result === "notPaid") {
+        setVoidMessage({ ok: false, text: "บิลนี้ไม่ได้อยู่ในสถานะชำระแล้ว (อาจถูกยกเลิกไปแล้ว)" });
+        return;
+      }
+      const now = Date.now();
+      await auditLogRepository.create({
+        shopId: target.shopId,
+        action: "ORDER_VOID",
+        orderId: target.id,
+        description: `ยกเลิกบิลที่ชำระแล้ว ${target.orderNumber} ยอด ${formatCurrency(target.total, currency)} (คืนสต๊อกแล้ว)`,
+        reason,
+        reasonNote: reason === "อื่น ๆ" ? note : null,
+        performedBy: appUser.id,
+        performedByName: appUser.name,
+        createdAt: now,
+      });
+      void fetch("/api/notify/order-event", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          event: "cancelled",
+          orderNumber: target.orderNumber,
+          channelName: target.channelName,
+          tableName: target.tableName,
+        }),
+      }).catch(() => undefined);
+      const updated: Order = { ...target, status: "VOID", voidedAt: now, voidedByName: appUser.name, updatedAt: now };
+      setOrders((list) => list.map((o) => (o.id === target.id ? updated : o)));
+      setSelected(updated);
+      setVoidMessage({ ok: true, text: "ยกเลิกบิลแล้ว และคืนสต๊อกเรียบร้อย" });
+    } catch {
+      setVoidMessage({ ok: false, text: "ยกเลิกบิลไม่สำเร็จ ลองอีกครั้ง" });
+    }
+  }
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -155,7 +206,15 @@ export default function AdminOrdersPage() {
         </TableBody>
       </Table>
 
-      <Dialog open={selected !== null} onOpenChange={(open) => !open && setSelected(null)}>
+      <Dialog
+        open={selected !== null}
+        onOpenChange={(open) => {
+          if (!open) {
+            setSelected(null);
+            setVoidMessage(null);
+          }
+        }}
+      >
         <DialogContent>
           <DialogHeader>
             <DialogTitle>
@@ -224,11 +283,36 @@ export default function AdminOrdersPage() {
                 {selected.paidAt ? (
                   <p className="text-muted-foreground">ชำระเมื่อ {new Date(selected.paidAt).toLocaleString("th-TH")}</p>
                 ) : null}
+                {selected.voidedAt ? (
+                  <p className="text-destructive">
+                    ยกเลิกบิลเมื่อ {new Date(selected.voidedAt).toLocaleString("th-TH")} โดย {selected.voidedByName}
+                  </p>
+                ) : null}
+                {voidMessage ? (
+                  <p className={voidMessage.ok ? "text-success" : "text-destructive"}>{voidMessage.text}</p>
+                ) : null}
+                {selected.status === "PAID" ? (
+                  <Button variant="outline" className="mt-2 w-full text-destructive" onClick={() => setVoidOpen(true)}>
+                    ยกเลิกบิลนี้ (คืนสต๊อก)
+                  </Button>
+                ) : null}
               </div>
             ) : null}
           </div>
         </DialogContent>
       </Dialog>
+
+      {selected ? (
+        <CancelOrderDialog
+          open={voidOpen}
+          onOpenChange={setVoidOpen}
+          orderNumber={selected.orderNumber}
+          onConfirm={confirmVoid}
+          title={`ยกเลิกบิลที่ชำระแล้ว ${selected.orderNumber} — เลือกเหตุผล`}
+          description="บิลจะไม่ถูกนับในยอดขาย และสินค้าที่นับสต๊อกจะคืนเข้าสต๊อกอัตโนมัติ ถ้าลูกค้าจ่ายเงินแล้ว ต้องคืนเงินเอง"
+          confirmLabel="ยืนยันยกเลิกบิล"
+        />
+      ) : null}
     </AdminSection>
   );
 }

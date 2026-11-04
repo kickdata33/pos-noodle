@@ -135,6 +135,10 @@ export interface Order extends WithId {
   /** How many kitchen tickets this order has produced so far — printed as "รอบที่ N" so the
    * kitchen can tell a second round from a reprint. Absent = 0. */
   kitchenTicketCount?: number;
+  /** Set when a PAID bill is voided (Admin → รายการบิล); stock taken at checkout was returned in
+   * the same transaction. */
+  voidedAt?: EpochMillis;
+  voidedByName?: string;
   /** The total last printed on a check bill — "คิดเงิน" auto-prints only when the total has
    * changed since, so reopening the checkout dialog doesn't waste paper. Absent = never printed. */
   checkBillPrintedTotal?: number;

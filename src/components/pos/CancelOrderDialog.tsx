@@ -20,6 +20,10 @@ interface Props {
   onOpenChange: (open: boolean) => void;
   orderNumber: string;
   onConfirm: (reason: AuditReason, note: string) => void;
+  /** Overrides for reusing this dialog to void an already-paid bill (Admin → รายการบิล). */
+  title?: string;
+  description?: string;
+  confirmLabel?: string;
 }
 
 /**
@@ -35,7 +39,7 @@ interface Props {
  * never saved has nothing to cancel, staff just navigate away (see `OrderScreen`'s cancel button
  * guard).
  */
-export function CancelOrderDialog({ open, onOpenChange, orderNumber, onConfirm }: Props) {
+export function CancelOrderDialog({ open, onOpenChange, orderNumber, onConfirm, title, description, confirmLabel }: Props) {
   const [reason, setReason] = useState<AuditReason | null>(null);
   const [note, setNote] = useState("");
 
@@ -51,12 +55,12 @@ export function CancelOrderDialog({ open, onOpenChange, orderNumber, onConfirm }
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>ยกเลิกออเดอร์ {orderNumber} — เลือกเหตุผล</DialogTitle>
+          <DialogTitle>{title ?? `ยกเลิกออเดอร์ ${orderNumber} — เลือกเหตุผล`}</DialogTitle>
         </DialogHeader>
 
         <div className="grid gap-2">
           <p className="text-sm text-muted-foreground">
-            ออเดอร์นี้จะถูกยกเลิกทั้งหมด และโต๊ะ/ช่องทางนี้จะว่างทันที — ทำแล้วกู้คืนไม่ได้
+            {description ?? "ออเดอร์นี้จะถูกยกเลิกทั้งหมด และโต๊ะ/ช่องทางนี้จะว่างทันที — ทำแล้วกู้คืนไม่ได้"}
           </p>
           {REASONS.map((r) => (
             <button
@@ -90,7 +94,7 @@ export function CancelOrderDialog({ open, onOpenChange, orderNumber, onConfirm }
             onClick={handleConfirm}
             disabled={!reason || (reason === "อื่น ๆ" && note.trim() === "")}
           >
-            ยืนยันยกเลิกออเดอร์
+            {confirmLabel ?? "ยืนยันยกเลิกออเดอร์"}
           </Button>
         </DialogFooter>
       </DialogContent>

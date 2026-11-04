@@ -21,6 +21,7 @@ const TYPE_LABEL: Record<StockMovementType, string> = {
   sale: "ขาย",
   receive: "รับเข้า",
   count: "นับ",
+  void: "คืน (ยกเลิกบิล)",
 };
 
 function formatDateTime(ms: number): string {
@@ -222,6 +223,7 @@ export default function AdminInventoryPage() {
                   <SelectItem value="count">นับ</SelectItem>
                   <SelectItem value="receive">รับเข้า</SelectItem>
                   <SelectItem value="sale">ขาย</SelectItem>
+                  <SelectItem value="void">คืน (ยกเลิกบิล)</SelectItem>
                 </SelectContent>
               </Select>
               <Select value={productFilter} onValueChange={setProductFilter}>

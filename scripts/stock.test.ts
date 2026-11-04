@@ -8,6 +8,7 @@ import {
   formatDelta,
   isLowStock,
   parseStockInput,
+  quantitiesToReturn,
   saleQuantitiesByProduct,
 } from "../src/lib/pos/stock";
 
@@ -65,4 +66,16 @@ test("count summary lists mismatches, tallies matches, appends low items", () =>
 test("count summary when everything matched", () => {
   const text = buildCountSummaryText([{ productName: "น้ำดื่ม", delta: 0, qtyAfter: 10, createdByName: "แอน" }], []);
   assert.ok(text.includes("ตรงทุกรายการ"));
+});
+
+test("voiding returns exactly what the bill's sales took, per product", () => {
+  const back = quantitiesToReturn([
+    { productId: "water", delta: -2, type: "sale" },
+    { productId: "coke", delta: -1, type: "sale" },
+    { productId: "water", delta: -1, type: "sale" },
+    { productId: "water", delta: 5, type: "receive" },
+  ]);
+  assert.equal(back.get("water"), 3);
+  assert.equal(back.get("coke"), 1);
+  assert.equal(back.size, 2);
 });

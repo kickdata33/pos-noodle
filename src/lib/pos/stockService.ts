@@ -1,8 +1,8 @@
-import { collection, doc, runTransaction, type Transaction } from "firebase/firestore";
+import { collection, doc, getDocs, query, runTransaction, where, type Transaction } from "firebase/firestore";
 
 import { db } from "@/lib/firebase/client";
 import { COLLECTIONS } from "@/lib/firebase/collections";
-import { crossedLowThreshold, saleQuantitiesByProduct } from "@/lib/pos/stock";
+import { crossedLowThreshold, quantitiesToReturn, saleQuantitiesByProduct } from "@/lib/pos/stock";
 import type { AppUser, Order, StockLevel, StockMovement } from "@/types";
 
 /**
@@ -184,5 +184,66 @@ export async function startTrackingProduct(
       createdByName: actor.name,
       createdAt: now,
     });
+  });
+}
+
+/**
+ * Voids a PAID bill and puts its piece-sold items back on the shelf, in one transaction
+ * (item: "ถ้ายกเลิก ให้สต๊อกคืนอัตโนมัติ"). Returns exactly what this order's checkout took —
+ * read from its own `sale` movements, not recomputed from the items — so a product that was
+ * tracked/untracked since, or edited, still comes back by the right amount. The PAID check
+ * inside the transaction makes it safe against a double click or two admins at once: the second
+ * attempt finds the bill already VOID and changes nothing.
+ *
+ * (Cancelling an OPEN order needs none of this — stock is only taken at checkout.)
+ */
+export async function voidPaidOrderAndRestoreStock(
+  order: Pick<Order, "id" | "shopId">,
+  actor: Actor
+): Promise<"voided" | "notPaid"> {
+  const saleSnap = await getDocs(
+    query(
+      collection(db, COLLECTIONS.stockMovements),
+      where("shopId", "==", order.shopId),
+      where("orderId", "==", order.id),
+      where("type", "==", "sale")
+    )
+  );
+  const returned = quantitiesToReturn(saleSnap.docs.map((d) => d.data() as Omit<StockMovement, "id">));
+
+  return runTransaction(db, async (tx) => {
+    const orderRef = doc(db, COLLECTIONS.orders, order.id);
+    const productIds = [...returned.keys()];
+    const [orderSnap, ...levelSnaps] = await Promise.all([
+      tx.get(orderRef),
+      ...productIds.map((id) => tx.get(levelRef(id))),
+    ]);
+    if (!orderSnap.exists() || orderSnap.data().status !== "PAID") return "notPaid";
+    const now = Date.now();
+    tx.update(orderRef, { status: "VOID", voidedAt: now, voidedByName: actor.name, updatedAt: now });
+    levelSnaps.forEach((snap, i) => {
+      // Product no longer tracked — nothing to put back; the history still shows the sale.
+      if (!snap.exists()) return;
+      const level = snap.data() as Omit<StockLevel, "id">;
+      const qty = returned.get(productIds[i])!;
+      if (qty <= 0) return;
+      tx.update(snap.ref, { qty: level.qty + qty, updatedAt: now });
+      writeMovement(tx, {
+        shopId: order.shopId,
+        productId: productIds[i],
+        productName: level.productName,
+        type: "void",
+        delta: qty,
+        qtyBefore: level.qty,
+        qtyAfter: level.qty + qty,
+        orderId: order.id,
+        countId: null,
+        note: "",
+        createdBy: actor.id,
+        createdByName: actor.name,
+        createdAt: now,
+      });
+    });
+    return "voided";
   });
 }
