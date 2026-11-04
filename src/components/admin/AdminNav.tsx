@@ -28,6 +28,7 @@ const NAV_ITEMS: NavItem[] = [
   { href: "/admin/payroll", label: "เงินเดือนพนักงาน", moduleKey: "payroll" },
   { href: "/admin/investment", label: "สรุปการลงทุน" },
   { href: "/admin/orders", label: "รายการบิล" },
+  { href: "/admin/inventory", label: "สต๊อกสินค้า" },
   { href: "/admin/categories", label: "หมวดหมู่" },
   { href: "/admin/products", label: "เมนู" },
   { href: "/admin/modifiers", label: "Modifier" },

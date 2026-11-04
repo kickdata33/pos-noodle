@@ -25,6 +25,7 @@ import { increaseItemQuantity } from "@/lib/pos/kitchenAlerts";
 import { generateOrderNumber } from "@/lib/pos/orderNumber";
 import { printCheckBill, sendKitchenCancellation, sendOrderToKitchen } from "@/lib/pos/printQueue";
 import { countUnsentToKitchen } from "@/lib/pos/printTickets";
+import { deductStockForPaidOrder } from "@/lib/pos/stockService";
 import { buildOrderReceipt } from "@/lib/pos/receipt";
 import { auditLogRepository } from "@/repositories/auditLogRepository";
 import { orderRepository } from "@/repositories/orderRepository";
@@ -640,6 +641,11 @@ export function OrderScreen({ orderId, initialTableId, initialChannelId }: Props
         createdBy: appUser!.id,
         createdAt: paidAt,
       });
+      // Piece-sold items (water, snacks, bottled drinks) come off the shelf count now — not
+      // awaited: a stock write problem must never hold up or undo a completed sale.
+      deductStockForPaidOrder({ id, shopId, items: orderRef.current?.items ?? order.items }, appUser!).catch((err) =>
+        console.error("deductStockForPaidOrder failed", err)
+      );
       notifyOrderEvent("paid", { ...order, total: totals.total, paymentMethodName: payment.paymentMethodName });
       if (order.tableId) closeTableSession(order.tableId);
       // Auto-print the receipt once checkout succeeds — fire-and-forget, deliberately not

@@ -7,7 +7,7 @@ import type { NotificationSettings } from "@/types";
 
 import { sendTelegramMessage } from "./telegram";
 
-export type NotifyCategory = "paid" | "pending" | "cancelled" | "dailySummary" | "weeklySummary";
+export type NotifyCategory = "paid" | "pending" | "cancelled" | "dailySummary" | "weeklySummary" | "stock";
 
 const CATEGORY_FIELD: Record<NotifyCategory, keyof Omit<NotificationSettings, "id">> = {
   paid: "notifyPaid",
@@ -15,6 +15,7 @@ const CATEGORY_FIELD: Record<NotifyCategory, keyof Omit<NotificationSettings, "i
   cancelled: "notifyCancelled",
   dailySummary: "notifyDailySummary",
   weeklySummary: "notifyWeeklySummary",
+  stock: "notifyStock",
 };
 
 /**

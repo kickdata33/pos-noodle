@@ -19,6 +19,10 @@ export const COLLECTIONS = {
    * `types/printJob.ts`. Shop members create and read their own shop's jobs; the station (a
    * signed-in staff/admin session on the shop's PC) claims and marks them printed. */
   printJobs: "printJobs",
+  /** Per-product on-hand counts for piece-sold items (doc id = productId) and their append-only
+   * change log — see `types/stock.ts`. */
+  stockLevels: "stockLevels",
+  stockMovements: "stockMovements",
   /** One doc per shop — the daily-sequence counter behind `generateOrderNumber` (lib/pos). */
   orderCounters: "orderCounters",
   payments: "payments",

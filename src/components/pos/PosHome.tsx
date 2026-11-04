@@ -6,8 +6,10 @@ import { useEffect, useState } from "react";
 import { TableQrDialog } from "@/components/shared/TableQrDialog";
 import { Badge } from "@/components/ui/badge";
 import { formatCurrency } from "@/lib/format";
+import { isLowStock } from "@/lib/pos/stock";
 import { orderRepository } from "@/repositories/orderRepository";
-import type { Order, Table as PosTable } from "@/types";
+import { stockLevelRepository } from "@/repositories/stockRepository";
+import type { Order, StockLevel, Table as PosTable } from "@/types";
 
 import { usePosCatalog } from "./PosCatalogContext";
 
@@ -31,6 +33,10 @@ export function PosHome() {
   // `pos/layout.tsx` so it fires on every `/pos/*` screen, not only this one — this subscription
   // is just for the table grid's own live list.
   useEffect(() => orderRepository.subscribeOpenForShop(shopId, setOpenOrders), [shopId]);
+  // "ใกล้หมด" strip above the tables — staff see it every time they come back to this screen.
+  const [stockLevels, setStockLevels] = useState<StockLevel[]>([]);
+  useEffect(() => stockLevelRepository.subscribeForShop(shopId, setStockLevels), [shopId]);
+  const lowStock = stockLevels.filter(isLowStock);
 
   const activeTables = tables.filter((t) => t.active);
   const otherChannels = channels.filter((c) => c.active && !c.requiresTable);
@@ -39,6 +45,15 @@ export function PosHome() {
 
   return (
     <main className="mx-auto max-w-4xl p-4 sm:p-6">
+      {lowStock.length > 0 ? (
+        <Link
+          href="/pos/inventory"
+          className="mb-4 block rounded-lg border border-destructive bg-destructive/10 px-4 py-3 text-sm"
+        >
+          <span className="font-semibold text-destructive">ของใกล้หมด: </span>
+          {lowStock.map((l) => `${l.productName} (${l.qty})`).join(", ")}
+        </Link>
+      ) : null}
       <section>
         <h1 className="mb-3 text-lg font-semibold">โต๊ะ</h1>
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
@@ -150,7 +165,7 @@ export function PosHome() {
         </section>
       ) : null}
 
-      <div className="mt-6 flex gap-4">
+      <div className="mt-6 flex flex-wrap gap-x-4 gap-y-2">
         <Link href="/pos/kitchen" className="text-sm text-muted-foreground underline">
           หน้าจอครัว
         </Link>
@@ -159,6 +174,9 @@ export function PosHome() {
         </Link>
         <Link href="/pos/stock" className="text-sm text-muted-foreground underline">
           ของหมด
+        </Link>
+        <Link href="/pos/inventory" className="text-sm text-muted-foreground underline">
+          สต๊อก
         </Link>
         <Link href="/pos/alert-voice" className="text-sm text-muted-foreground underline">
           เสียงแจ้งเตือน

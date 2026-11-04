@@ -30,6 +30,7 @@ export function TelegramNotificationSettings() {
   const [notifyPending, setNotifyPending] = useState(true);
   const [notifyCancelled, setNotifyCancelled] = useState(true);
   const [notifyDailySummary, setNotifyDailySummary] = useState(true);
+  const [notifyStock, setNotifyStock] = useState(true);
   const [dailySummaryHour, setDailySummaryHour] = useState(4);
   const [notifyWeeklySummary, setNotifyWeeklySummary] = useState(false);
   const [weeklySummaryDayOfWeek, setWeeklySummaryDayOfWeek] = useState(0);
@@ -49,6 +50,7 @@ export function TelegramNotificationSettings() {
           notifyPending: boolean;
           notifyCancelled: boolean;
           notifyDailySummary: boolean;
+          notifyStock: boolean;
           dailySummaryHour: number;
           notifyWeeklySummary: boolean;
           weeklySummaryDayOfWeek: number;
@@ -60,6 +62,7 @@ export function TelegramNotificationSettings() {
           setNotifyPending(data.notifyPending);
           setNotifyCancelled(data.notifyCancelled);
           setNotifyDailySummary(data.notifyDailySummary);
+          setNotifyStock(data.notifyStock);
           setDailySummaryHour(data.dailySummaryHour);
           setNotifyWeeklySummary(data.notifyWeeklySummary);
           setWeeklySummaryDayOfWeek(data.weeklySummaryDayOfWeek);
@@ -83,6 +86,7 @@ export function TelegramNotificationSettings() {
           notifyPending,
           notifyCancelled,
           notifyDailySummary,
+          notifyStock,
           dailySummaryHour,
           notifyWeeklySummary,
           weeklySummaryDayOfWeek,
@@ -169,6 +173,10 @@ export function TelegramNotificationSettings() {
           <div className="flex items-center justify-between">
             <span className="text-sm">บิลยกเลิก</span>
             <Switch checked={notifyCancelled} onCheckedChange={setNotifyCancelled} />
+          </div>
+          <div className="flex items-center justify-between">
+            <span className="text-sm">สต๊อก (ของใกล้หมด, สรุปผลนับตอนปิดร้าน)</span>
+            <Switch checked={notifyStock} onCheckedChange={setNotifyStock} />
           </div>
           <div className="flex items-center justify-between">
             <span className="text-sm">สรุปยอดรายวัน (สินค้าขายดี 10 อันดับ)</span>

@@ -267,6 +267,27 @@ service cloud.firestore {
     // admin session on the shop's PC). A new job must start out pending and unclaimed, and an
     // update can only move status/claim/result fields — never rewrite what the ticket says.
     // Customer QR orders queue their kitchen tickets through the Admin SDK, outside these rules.
+    // Stock for piece-sold items (types/stock.ts). Doc id = productId. `get` is allowed on a
+    // doc that doesn't exist yet because checkout probes every sold product inside its
+    // transaction to find out which ones are tracked — a missing doc reveals nothing.
+    // Staff (sales, deliveries, closing counts) may only change the quantity; which products are
+    // tracked and their low-stock thresholds are Admin-only.
+    match /stockLevels/{productId} {
+      allow get: if isActiveUser() && (resource == null || ownsExisting());
+      allow list: if isActiveUser() && ownsExisting();
+      allow create: if isAdmin() && ownsIncoming() && request.resource.data.productId == productId;
+      allow update: if isActiveUser() && ownsExisting() && ownsIncoming()
+        && (isAdmin() || request.resource.data.diff(resource.data).affectedKeys().hasOnly(['qty', 'updatedAt']));
+      allow delete: if isAdmin() && ownsExisting();
+    }
+
+    // Append-only stock history — nobody edits or deletes the record of what happened.
+    match /stockMovements/{movementId} {
+      allow read: if isActiveUser() && ownsExisting();
+      allow create: if isActiveUser() && ownsIncoming() && request.resource.data.createdBy == request.auth.uid;
+      allow update, delete: if false;
+    }
+
     match /printJobs/{jobId} {
       allow read: if isActiveUser() && ownsExisting();
       allow create: if isActiveUser() && ownsIncoming()

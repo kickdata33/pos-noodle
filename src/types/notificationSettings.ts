@@ -27,6 +27,9 @@ export interface NotificationSettings {
   notifyPending?: boolean;
   notifyCancelled?: boolean;
   notifyDailySummary?: boolean;
+  /** Low-stock alerts and closing-count summaries (`types/stock.ts`). `undefined` = on, same as
+   * the switches above. */
+  notifyStock?: boolean;
   /**
    * Hour of day (0-23, Bangkok local time) to send the daily summary — requested
    * ("สามารถเลือกเวลาสรุปบิลรายวันได้") after it shipped hardcoded to 04:00. `undefined` means

@@ -32,6 +32,7 @@ export async function GET() {
     notifyPending: settings?.notifyPending ?? true,
     notifyCancelled: settings?.notifyCancelled ?? true,
     notifyDailySummary: settings?.notifyDailySummary ?? true,
+    notifyStock: settings?.notifyStock ?? true,
     dailySummaryHour: settings?.dailySummaryHour ?? 4,
     // `?? false` — opt-in, unlike the switches above; see NotificationSettings.notifyWeeklySummary's comment.
     notifyWeeklySummary: settings?.notifyWeeklySummary ?? false,
@@ -53,6 +54,7 @@ export async function POST(request: NextRequest) {
     notifyPending?: boolean;
     notifyCancelled?: boolean;
     notifyDailySummary?: boolean;
+    notifyStock?: boolean;
     dailySummaryHour?: number;
     notifyWeeklySummary?: boolean;
     weeklySummaryDayOfWeek?: number;
@@ -69,6 +71,7 @@ export async function POST(request: NextRequest) {
     notifyPending: Boolean(body.notifyPending),
     notifyCancelled: Boolean(body.notifyCancelled),
     notifyDailySummary: Boolean(body.notifyDailySummary),
+    notifyStock: Boolean(body.notifyStock),
     dailySummaryHour:
       Number.isInteger(body.dailySummaryHour) && body.dailySummaryHour! >= 0 && body.dailySummaryHour! <= 23
         ? body.dailySummaryHour
