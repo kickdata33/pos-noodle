@@ -15,6 +15,7 @@ import { formatCurrency, formatTime } from "@/lib/format";
 import { useAuth } from "@/hooks/useAuth";
 import { printReceiptViaEpos } from "@/lib/pos/eposPrint";
 import {
+  bundleDealsForLine,
   computeLineTotal,
   computeOrderTotals,
   groupItemsByProduct,
@@ -237,7 +238,7 @@ export function OrderScreen({ orderId, initialTableId, initialChannelId }: Props
   }, [orderId, appUser, shopId, channels, tables, initialTableId, initialChannelId, order]);
 
   const totals = useMemo(
-    () => (order ? computeOrderTotals(order.items, settings, order.discount) : null),
+    () => (order ? computeOrderTotals(order.items, settings) : null),
     [order, settings]
   );
 
@@ -286,7 +287,7 @@ export function OrderScreen({ orderId, initialTableId, initialChannelId }: Props
   async function applyItems(newItems: OrderItem[]) {
     const current = orderRef.current;
     if (!current) return;
-    const newTotals = computeOrderTotals(newItems, settings, current.discount);
+    const newTotals = computeOrderTotals(newItems, settings);
     const updatedAt = Date.now();
     const updatedDraft: DraftOrder = { ...current, items: newItems, ...newTotals, updatedAt };
     orderRef.current = updatedDraft;
@@ -354,6 +355,7 @@ export function OrderScreen({ orderId, initialTableId, initialChannelId }: Props
       note,
       lineTotal,
       addedAt: Date.now(),
+      ...bundleDealsForLine(product, unitPrice),
     };
     applyItems([...current.items, item]);
   }
@@ -869,6 +871,12 @@ export function OrderScreen({ orderId, initialTableId, initialChannelId }: Props
               <span>ยอดรวม</span>
               <span>{formatCurrency(totals.subtotal, settings.currency)}</span>
             </div>
+            {totals.promoDiscount > 0 ? (
+              <div className="flex justify-between font-medium text-success">
+                <span>ส่วนลดโปรโมชั่น</span>
+                <span>-{formatCurrency(totals.promoDiscount, settings.currency)}</span>
+              </div>
+            ) : null}
             {totals.serviceCharge > 0 ? (
               <div className="flex justify-between text-muted-foreground">
                 <span>ค่าบริการ</span>

@@ -48,7 +48,8 @@ export async function GET(request: NextRequest) {
 
   return NextResponse.json({
     categories: byId<Category>(categoriesSnap),
-    products: byId<Product>(productsSnap),
+    // Staff-only items (`Product.staffOnly`) never leave the server for a customer screen.
+    products: byId<Product>(productsSnap).filter((p) => !p.staffOnly),
     modifierGroups: byId<ModifierGroup>(groupsSnap),
     modifierOptions: byId<ModifierOption>(optionsSnap),
     currency: settings?.currency ?? "THB",

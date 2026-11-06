@@ -1,5 +1,11 @@
 import type { ModifierGroup, ModifierOption, OrderItem, OrderItemModifier, Product, SalesChannel } from "@/types";
-import { computeLineTotal, distributeTieredPriceDeltas, resolveChannelPrice, resolveTieredGroupPrice } from "./pricing";
+import {
+  bundleDealsForLine,
+  computeLineTotal,
+  distributeTieredPriceDeltas,
+  resolveChannelPrice,
+  resolveTieredGroupPrice,
+} from "./pricing";
 import { resolveItemName } from "./itemName";
 
 /**
@@ -43,7 +49,9 @@ export function resolveCustomerOrderItem(
   selection: CustomerSelection,
   catalog: CustomerOrderCatalog
 ): ResolveResult {
-  const product = catalog.products.find((p) => p.id === selection.productId && p.active);
+  // `staffOnly` items are refused here as well as hidden from the customer menu — the menu
+  // filter alone wouldn't stop a hand-built request ordering one.
+  const product = catalog.products.find((p) => p.id === selection.productId && p.active && !p.staffOnly);
   if (!product) return { ok: false, error: "ไม่พบสินค้านี้ในเมนู" };
 
   if (!Number.isInteger(selection.quantity) || selection.quantity < 1 || selection.quantity > MAX_QUANTITY_PER_LINE) {
@@ -114,6 +122,7 @@ export function resolveCustomerOrderItem(
       modifiers,
       note,
       lineTotal,
+      ...bundleDealsForLine(product, unitPrice),
       addedAt: Date.now(),
     },
   };

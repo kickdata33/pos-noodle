@@ -1,4 +1,5 @@
 import type { EpochMillis, WithId } from "./common";
+import type { BundleDeal } from "./catalog";
 
 export type OrderStatus = "OPEN" | "PAID" | "CANCELLED" | "VOID";
 export type OrderPaymentStatus = "UNPAID" | "PAID";
@@ -62,6 +63,9 @@ export interface OrderItem extends WithId {
    * feature and on every item not sent yet — read as 0.
    */
   kitchenSentQty?: number;
+  /** `Product.bundleDeals` as they were when this line was added (only on lines added at the
+   * product's normal price — channel markups don't get shop promotions). */
+  bundleDeals?: BundleDeal[];
 }
 
 /**
@@ -135,6 +139,9 @@ export interface Order extends WithId {
   /** How many kitchen tickets this order has produced so far — printed as "รอบที่ N" so the
    * kitchen can tell a second round from a reprint. Absent = 0. */
   kitchenTicketCount?: number;
+  /** The part of `discount` that came from quantity deals (`computePromotionDiscount`) — shown
+   * as "ส่วนลดโปรโมชั่น". Absent on orders from before promotions existed. */
+  promoDiscount?: number;
   /** Set when a PAID bill is voided (Admin → รายการบิล); stock taken at checkout was returned in
    * the same transaction. */
   voidedAt?: EpochMillis;

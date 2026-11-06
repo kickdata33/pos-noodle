@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { Fragment, useEffect, useState } from "react";
 
 import { AdminSection } from "@/components/admin/AdminSection";
 import { SortButtons } from "@/components/admin/SortButtons";
@@ -26,7 +26,7 @@ import { categoryRepository } from "@/repositories/categoryRepository";
 import { channelRepository } from "@/repositories/channelRepository";
 import { modifierGroupRepository, modifierOptionRepository } from "@/repositories/modifierRepository";
 import { productRepository } from "@/repositories/productRepository";
-import type { Category, ModifierGroup, ModifierOption, Product, ProductQuickPreset, SalesChannel } from "@/types";
+import type { BundleDeal, Category, ModifierGroup, ModifierOption, Product, ProductQuickPreset, SalesChannel } from "@/types";
 import { QuickPresetEditor } from "./QuickPresetEditor";
 
 interface FormState {
@@ -38,6 +38,10 @@ interface FormState {
   imageUrl: string;
   /** `Product.menuNameBase` — blank means "don't build the line name from options". */
   menuNameBase: string;
+  /** `Product.staffOnly` — hidden from customer QR menus. */
+  staffOnly: boolean;
+  /** `Product.bundleDeals` as text inputs; rows left fully blank are dropped on save. */
+  deals: { qty: string; price: string }[];
   modifierGroupIds: string[];
   /** One string per channel id — blank means "no override, use the channel's automatic markup
    * (or plain price)". Kept as strings in form state the same way `price` is, converted to
@@ -53,6 +57,8 @@ const EMPTY_FORM: FormState = {
   price: "",
   imageUrl: "",
   menuNameBase: "",
+  staffOnly: false,
+  deals: [],
   modifierGroupIds: [],
   channelPrices: {},
   presets: [],
@@ -83,6 +89,9 @@ export default function ProductsPage() {
   const [form, setForm] = useState<FormState>(EMPTY_FORM);
   const [saving, setSaving] = useState(false);
   const [imageError, setImageError] = useState<string | null>(null);
+  const [dealsError, setDealsError] = useState<string | null>(null);
+  // Category chip above the list ("all" = every category, each as its own section).
+  const [categoryFilter, setCategoryFilter] = useState<string>("all");
 
   useEffect(() => {
     if (!shopId) return;
@@ -105,23 +114,42 @@ export default function ProductsPage() {
     return channelRepository.subscribeForShop(shopId, setChannels);
   }, [shopId]);
 
-  const categoryName = (id: string) => categories.find((c) => c.id === id)?.name ?? "—";
+  // The list, one section per category in category order (or just the chosen one). Products
+  // whose category was deleted get their own section at the end so they can't go missing.
+  const sections = [
+    ...categories.map((c) => ({ id: c.id, name: c.name, items: items.filter((p) => p.categoryId === c.id) })),
+    {
+      id: "__none",
+      name: "ไม่มีหมวดหมู่",
+      items: items.filter((p) => !categories.some((c) => c.id === p.categoryId)),
+    },
+  ].filter((section) =>
+    categoryFilter === "all" ? section.items.length > 0 || section.id !== "__none" : section.id === categoryFilter
+  );
 
   function openCreate() {
     setEditing(null);
-    setForm({ ...EMPTY_FORM, categoryId: categories[0]?.id ?? "" });
+    // Adding while a category chip is selected → the new item lands in that category.
+    setDealsError(null);
+    setForm({
+      ...EMPTY_FORM,
+      categoryId: categoryFilter !== "all" ? categoryFilter : (categories[0]?.id ?? ""),
+    });
     setImageError(null);
     setDialogOpen(true);
   }
 
   function openEdit(product: Product) {
     setEditing(product);
+    setDealsError(null);
     setForm({
       name: product.name,
       categoryId: product.categoryId,
       price: String(product.price),
       imageUrl: product.imageUrl ?? "",
       menuNameBase: product.menuNameBase ?? "",
+      staffOnly: product.staffOnly ?? false,
+      deals: (product.bundleDeals ?? []).map((d) => ({ qty: String(d.qty), price: String(d.price) })),
       modifierGroupIds: product.modifierGroupIds,
       channelPrices: Object.fromEntries(
         Object.entries(product.channelPrices ?? {}).map(([channelId, p]) => [channelId, String(p)])
@@ -157,6 +185,14 @@ export default function ProductsPage() {
     }));
   }
 
+  function updateDeal(index: number, patch: Partial<{ qty: string; price: string }>) {
+    setForm((f) => ({ ...f, deals: f.deals.map((d, i) => (i === index ? { ...d, ...patch } : d)) }));
+  }
+
+  function removeDeal(index: number) {
+    setForm((f) => ({ ...f, deals: f.deals.filter((_, i) => i !== index) }));
+  }
+
   function setChannelPriceInput(channelId: string, value: string) {
     setForm((f) => ({ ...f, channelPrices: { ...f.channelPrices, [channelId]: value } }));
   }
@@ -178,6 +214,14 @@ export default function ProductsPage() {
 
     const imageUrl = form.imageUrl.trim() || null;
 
+    const parsedDeals = parseDeals(form.deals);
+    if (!parsedDeals.ok) {
+      setDealsError(parsedDeals.error);
+      return;
+    }
+    const bundleDeals = parsedDeals.deals;
+    setDealsError(null);
+
     // A preset only saves if it has a label and a selection for every currently-required group
     // on this product — same check `QuickPresetEditor` shows inline, enforced again here so a
     // half-filled preset (e.g. abandoned mid-edit) never silently reaches the POS grid as a
@@ -198,6 +242,8 @@ export default function ProductsPage() {
           price,
           imageUrl,
           menuNameBase: form.menuNameBase.trim() || null,
+          staffOnly: form.staffOnly,
+          bundleDeals,
           modifierGroupIds: form.modifierGroupIds,
           channelPrices,
           posQuickPresets: presets,
@@ -211,6 +257,8 @@ export default function ProductsPage() {
           price,
           imageUrl,
           menuNameBase: form.menuNameBase.trim() || null,
+          staffOnly: form.staffOnly,
+          bundleDeals,
           modifierGroupIds: form.modifierGroupIds,
           channelPrices,
           posQuickPresets: presets,
@@ -234,8 +282,10 @@ export default function ProductsPage() {
     await productRepository.update(product.id, { active: !product.active, updatedAt });
   }
 
-  async function move(index: number, direction: "up" | "down") {
-    const swap = computeSwap(items, index, direction);
+  /** Moves within one category's section — order only matters inside a category (the POS and
+   * customer menus both list by category), so each section is renumbered on its own. */
+  async function move(sectionItems: Product[], index: number, direction: "up" | "down") {
+    const swap = computeSwap(sectionItems, index, direction);
     if (!swap) return;
     await Promise.all(swap.map((s) => productRepository.update(s.id, { sortOrder: s.sortOrder })));
   }
@@ -258,52 +308,95 @@ export default function ProductsPage() {
         </p>
       ) : null}
 
+      {categories.length > 0 ? (
+        <div className="mb-4 flex flex-wrap gap-2" role="tablist" aria-label="กรองตามหมวดหมู่">
+          {[{ id: "all", name: "ทั้งหมด", count: items.length }, ...categories.map((c) => ({
+            id: c.id,
+            name: c.name,
+            count: items.filter((p) => p.categoryId === c.id).length,
+          }))].map((chip) => (
+            <button
+              key={chip.id}
+              type="button"
+              role="tab"
+              aria-selected={categoryFilter === chip.id}
+              onClick={() => setCategoryFilter(chip.id)}
+              className={
+                "rounded-full border px-4 py-2 text-sm font-medium " +
+                (categoryFilter === chip.id
+                  ? "border-primary bg-primary text-primary-foreground"
+                  : "border-border bg-card hover:bg-accent")
+              }
+            >
+              {chip.name} <span className="opacity-70">({chip.count})</span>
+            </button>
+          ))}
+        </div>
+      ) : null}
+
       <Table>
         <TableHeader>
           <TableRow>
             <TableHead className="w-10" />
             <TableHead>ชื่อเมนู</TableHead>
-            <TableHead>หมวดหมู่</TableHead>
             <TableHead>ราคา</TableHead>
             <TableHead>สถานะ</TableHead>
             <TableHead className="text-right">จัดการ</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
-          {items.map((product, index) => (
-            <TableRow key={product.id}>
-              <TableCell>
-                <SortButtons
-                  disabledUp={index === 0}
-                  disabledDown={index === items.length - 1}
-                  onUp={() => move(index, "up")}
-                  onDown={() => move(index, "down")}
-                />
-              </TableCell>
-              <TableCell className="font-medium">{product.name}</TableCell>
-              <TableCell className="text-muted-foreground">{categoryName(product.categoryId)}</TableCell>
-              <TableCell>{product.price.toLocaleString("th-TH")} บาท</TableCell>
-              <TableCell>
-                <Badge variant={product.active ? "success" : "muted"}>
-                  {product.active ? "เปิดขาย" : "ปิดขาย"}
-                </Badge>
-              </TableCell>
-              <TableCell className="text-right">
-                <div className="flex justify-end gap-2">
-                  <Switch checked={product.active} onCheckedChange={() => toggleActive(product)} />
-                  <Button variant="outline" size="sm" onClick={() => openEdit(product)}>
-                    แก้ไข
-                  </Button>
-                  <Button variant="destructive" size="sm" onClick={() => handleDelete(product)}>
-                    ลบ
-                  </Button>
-                </div>
-              </TableCell>
-            </TableRow>
+          {sections.map((section) => (
+            <Fragment key={section.id}>
+              <TableRow className="bg-muted/60 hover:bg-muted/60">
+                <TableCell colSpan={5} className="py-2 font-semibold">
+                  {section.name} <span className="font-normal text-muted-foreground">({section.items.length})</span>
+                </TableCell>
+              </TableRow>
+              {section.items.map((product, index) => (
+                <TableRow key={product.id}>
+                  <TableCell>
+                    <SortButtons
+                      disabledUp={index === 0}
+                      disabledDown={index === section.items.length - 1}
+                      onUp={() => move(section.items, index, "up")}
+                      onDown={() => move(section.items, index, "down")}
+                    />
+                  </TableCell>
+                  <TableCell className="font-medium">
+                    <span className="flex flex-wrap items-center gap-2">
+                      {product.name}
+                      {product.bundleDeals && product.bundleDeals.length > 0 ? (
+                        <Badge variant="success">
+                          โปร {product.bundleDeals.map((d) => `${d.qty}/${d.price.toLocaleString("th-TH")}`).join(", ")}
+                        </Badge>
+                      ) : null}
+                      {product.staffOnly ? <Badge variant="muted">เฉพาะพนักงาน</Badge> : null}
+                    </span>
+                  </TableCell>
+                  <TableCell>{product.price.toLocaleString("th-TH")} บาท</TableCell>
+                  <TableCell>
+                    <Badge variant={product.active ? "success" : "muted"}>
+                      {product.active ? "เปิดขาย" : "ปิดขาย"}
+                    </Badge>
+                  </TableCell>
+                  <TableCell className="text-right">
+                    <div className="flex justify-end gap-2">
+                      <Switch checked={product.active} onCheckedChange={() => toggleActive(product)} />
+                      <Button variant="outline" size="sm" onClick={() => openEdit(product)}>
+                        แก้ไข
+                      </Button>
+                      <Button variant="destructive" size="sm" onClick={() => handleDelete(product)}>
+                        ลบ
+                      </Button>
+                    </div>
+                  </TableCell>
+                </TableRow>
+              ))}
+            </Fragment>
           ))}
-          {items.length === 0 ? (
+          {sections.every((section) => section.items.length === 0) ? (
             <TableRow>
-              <TableCell colSpan={6} className="text-center text-muted-foreground">
+              <TableCell colSpan={5} className="text-center text-muted-foreground">
                 ยังไม่มีเมนู
               </TableCell>
             </TableRow>
@@ -446,6 +539,76 @@ export default function ProductsPage() {
               </div>
             ) : null}
 
+            <div className="flex items-center justify-between gap-4 rounded-lg border border-border p-3">
+              <div>
+                <p className="text-sm font-medium">ซ่อนจากลูกค้า (สั่งผ่านพนักงานเท่านั้น)</p>
+                <p className="text-xs text-muted-foreground">
+                  ไม่ขึ้นในหน้าสั่งอาหารผ่าน QR ของลูกค้า แต่พนักงานยังกดขายที่หน้า POS ได้ตามปกติ
+                </p>
+              </div>
+              <Switch
+                checked={form.staffOnly}
+                onCheckedChange={(v) => setForm((f) => ({ ...f, staffOnly: v }))}
+                aria-label="ซ่อนจากลูกค้า"
+              />
+            </div>
+
+            <div className="grid gap-2">
+              <Label>โปรโมชั่นซื้อหลายชิ้น (ไม่บังคับ)</Label>
+              <p className="text-xs text-muted-foreground">
+                เช่น ซื้อ 3 ชิ้น ราคารวม 200 บาท ชิ้นที่เหลือคิดราคาปกติ นับรวมทุกครั้งที่กดในบิลเดียวกัน
+                ใช้กับราคาหน้าร้านเท่านั้น ไม่ใช้กับราคาเดลิเวอรี่ที่บวกเพิ่ม
+              </p>
+              <div className="grid gap-2 rounded-lg border border-border p-3">
+                {form.deals.map((deal, i) => {
+                  const qty = Number(deal.qty);
+                  const price = Number(deal.price);
+                  const normal = Number(form.price) * qty;
+                  const valid = Number.isInteger(qty) && qty >= 2 && deal.price.trim() !== "" && price >= 0;
+                  return (
+                    <div key={i} className="flex flex-wrap items-center gap-2">
+                      <span className="text-sm">ซื้อ</span>
+                      <Input
+                        aria-label="จำนวนชิ้น"
+                        inputMode="numeric"
+                        className="w-20"
+                        value={deal.qty}
+                        onChange={(e) => updateDeal(i, { qty: e.target.value })}
+                      />
+                      <span className="text-sm">ชิ้น ราคารวม</span>
+                      <Input
+                        aria-label="ราคารวม"
+                        inputMode="decimal"
+                        className="w-28"
+                        value={deal.price}
+                        onChange={(e) => updateDeal(i, { price: e.target.value })}
+                      />
+                      <span className="text-sm">บาท</span>
+                      <Button variant="ghost" size="sm" className="text-destructive" onClick={() => removeDeal(i)}>
+                        ลบ
+                      </Button>
+                      {valid && Number.isFinite(normal) && normal > 0 ? (
+                        <span className={"w-full text-xs " + (price < normal ? "text-success" : "text-destructive")}>
+                          {price < normal
+                            ? `ปกติ ${normal.toLocaleString("th-TH")} บาท ลูกค้าประหยัด ${(normal - price).toLocaleString("th-TH")} บาท`
+                            : `แพงกว่าหรือเท่ากับซื้อแยก (${normal.toLocaleString("th-TH")} บาท) โปรนี้จะไม่ถูกใช้`}
+                        </span>
+                      ) : null}
+                    </div>
+                  );
+                })}
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="justify-self-start"
+                  onClick={() => setForm((f) => ({ ...f, deals: [...f.deals, { qty: "", price: "" }] }))}
+                >
+                  + เพิ่มโปรโมชั่น
+                </Button>
+                {dealsError ? <p className="text-sm text-destructive">{dealsError}</p> : null}
+              </div>
+            </div>
+
             {channels.length > 0 ? (
               <div className="grid gap-2">
                 <Label>ราคาเฉพาะช่องทาง (ไม่บังคับ)</Label>
@@ -486,4 +649,25 @@ export default function ProductsPage() {
       </Dialog>
     </AdminSection>
   );
+}
+
+/**
+ * Form rows → `Product.bundleDeals`. Fully blank rows are dropped; anything half-filled or
+ * invalid blocks the save with a message rather than being silently discarded. Two deals for the
+ * same quantity would be ambiguous, so that's refused too.
+ */
+function parseDeals(rows: { qty: string; price: string }[]): { ok: true; deals: BundleDeal[] } | { ok: false; error: string } {
+  const deals: BundleDeal[] = [];
+  for (const row of rows) {
+    if (row.qty.trim() === "" && row.price.trim() === "") continue;
+    const qty = Number(row.qty);
+    const price = Number(row.price);
+    if (!Number.isInteger(qty) || qty < 2) return { ok: false, error: "จำนวนชิ้นของโปรโมชั่นต้องเป็นจำนวนเต็มตั้งแต่ 2 ขึ้นไป" };
+    if (row.price.trim() === "" || !Number.isFinite(price) || price < 0) {
+      return { ok: false, error: "กรอกราคารวมของโปรโมชั่นเป็นตัวเลข" };
+    }
+    if (deals.some((d) => d.qty === qty)) return { ok: false, error: `มีโปรโมชั่นซื้อ ${qty} ชิ้นซ้ำกัน` };
+    deals.push({ qty, price });
+  }
+  return { ok: true, deals: deals.sort((a, b) => a.qty - b.qty) };
 }

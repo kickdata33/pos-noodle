@@ -42,6 +42,20 @@ export interface Product extends WithId {
    */
   menuNameBase?: string | null;
   /**
+   * Quantity deals, e.g. เบียร์ "3 ขวด 200 บาท" while one bottle stays at `price` (item:
+   * "เพิ่มฟังก์ชั่นโปรโมชั่น เบียร์ 3 ขวด ราคา xxx"). Applied across every line of this product on
+   * one order — three separate taps of one bottle still make a deal — by
+   * `computePromotionDiscount`. Snapshotted onto each `OrderItem` when added, like the price.
+   * Empty/absent = no deal.
+   */
+  bundleDeals?: BundleDeal[] | null;
+  /**
+   * Hidden from the customer QR menus (dine-in and pickup) and refused by their order APIs, but
+   * still on the staff POS — for items staff recommend or that must be ordered through staff.
+   * `false`/absent = shown to customers as before.
+   */
+  staffOnly?: boolean;
+  /**
    * Staff-only one-tap shortcuts for this product's most common modifier combos (e.g. "ก๋วยเตี๋ยว
    * พิเศษ" = เนื้อสัตว์: พิเศษ, all pre-picked) — tapping one adds the item straight to the cart
    * with these selections already applied, skipping `ModifierPickerDialog` entirely. Purely a POS
@@ -83,6 +97,12 @@ export type ModifierPricingMode = "perOption" | "tieredByCount";
  */
 export interface ModifierTier {
   count: number;
+  price: number;
+}
+
+/** "ซื้อ `qty` ชิ้น ราคา `price` บาท" — see `Product.bundleDeals`. */
+export interface BundleDeal {
+  qty: number;
   price: number;
 }
 

@@ -49,7 +49,7 @@ const noCharges = { vatEnabled: false, vatRate: 0, serviceChargeEnabled: false, 
 
 test("no VAT, no service charge — total is just the subtotal", () => {
   const totals = computeOrderTotals([{ lineTotal: 100 }, { lineTotal: 50 }], noCharges);
-  assert.deepEqual(totals, { subtotal: 150, discount: 0, serviceCharge: 0, tax: 0, total: 150 });
+  assert.deepEqual(totals, { subtotal: 150, discount: 0, promoDiscount: 0, serviceCharge: 0, tax: 0, total: 150 });
 });
 
 test("service charge only", () => {

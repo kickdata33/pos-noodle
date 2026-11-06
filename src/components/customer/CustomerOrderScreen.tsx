@@ -6,8 +6,8 @@ import { ModifierPickerDialog } from "@/components/pos/ModifierPickerDialog";
 import { Button } from "@/components/ui/button";
 import { formatCurrency, formatTime } from "@/lib/format";
 import { resolveItemName } from "@/lib/pos/itemName";
-import { computeLineTotal } from "@/lib/pos/pricing";
-import type { Category, ModifierGroup, ModifierOption, OrderItem, OrderItemModifier, Product } from "@/types";
+import { bundleDealsForLine, computeLineTotal, computePromotionDiscount } from "@/lib/pos/pricing";
+import type { BundleDeal, Category, ModifierGroup, ModifierOption, OrderItem, OrderItemModifier, Product } from "@/types";
 
 interface MenuResponse {
   categories: Category[];
@@ -28,6 +28,8 @@ interface TableResponse {
 interface CartLine {
   key: string;
   productId: string;
+  /** Snapshotted `Product.bundleDeals`, for the cart total preview. */
+  bundleDeals?: BundleDeal[];
   productName: string;
   quantity: number;
   unitPrice: number;
@@ -211,6 +213,7 @@ export function CustomerOrderScreen({
         note,
         lineTotal: computeLineTotal(product.price, modifiers, quantity),
         addedAt: Date.now(),
+        ...bundleDealsForLine(product, product.price),
       },
     ]);
   }
@@ -267,7 +270,9 @@ export function CustomerOrderScreen({
 
   const editingLine = editingLineKey ? cart.find((l) => l.key === editingLineKey) ?? null : null;
 
-  const cartTotal = cart.reduce((sum, line) => sum + line.lineTotal, 0);
+  // Quantity deals (e.g. 3 ขวด 200) shown in the cart total too, so the customer sees the price
+  // the shop will actually charge. The server recomputes the real total on submit.
+  const cartTotal = cart.reduce((sum, line) => sum + line.lineTotal, 0) - computePromotionDiscount(cart);
   const currency = menu?.currency ?? "THB";
 
   async function handleSubmit() {

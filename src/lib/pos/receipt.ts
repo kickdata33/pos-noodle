@@ -65,7 +65,10 @@ export function buildOrderReceipt(
   lines.push({ text: SEPARATOR, align: "center" });
 
   lines.push({ text: `รวม ${formatCurrency(order.subtotal, currency)}`, align: "right" });
-  if (order.discount > 0) lines.push({ text: `ส่วนลด -${formatCurrency(order.discount, currency)}`, align: "right" });
+  if (order.discount > 0) {
+    const label = order.promoDiscount === order.discount ? "ส่วนลดโปรโมชั่น" : "ส่วนลด";
+    lines.push({ text: `${label} -${formatCurrency(order.discount, currency)}`, align: "right" });
+  }
   if (order.serviceCharge > 0) {
     lines.push({ text: `ค่าบริการ ${formatCurrency(order.serviceCharge, currency)}`, align: "right" });
   }

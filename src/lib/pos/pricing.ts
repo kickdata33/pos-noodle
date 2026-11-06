@@ -1,4 +1,5 @@
 import type {
+  BundleDeal,
   ModifierGroup,
   ModifierOption,
   ModifierTier,
@@ -127,23 +128,78 @@ function roundUpToNearest5(value: number): number {
 
 export interface OrderTotals {
   subtotal: number;
+  /** Everything taken off the subtotal — today only `promoDiscount`, plus any manual discount
+   * passed in (no staff discount UI exists yet). */
   discount: number;
+  promoDiscount: number;
   serviceCharge: number;
   tax: number;
   total: number;
 }
 
 /**
+ * Baht saved by quantity deals (`Product.bundleDeals`, snapshotted per line). Units of the same
+ * product at the same unit price are pooled across lines (three separate one-bottle taps = one
+ * three-bottle deal), then filled greedily with the biggest deal first; leftovers pay the normal
+ * price. A deal that wouldn't actually be cheaper than buying singly is ignored. Modifier add-ons
+ * are never discounted — the deal covers the base price only.
+ */
+/**
+ * The deals to snapshot onto a new line: the product's `bundleDeals`, but only when the line is
+ * sold at the product's normal price — a delivery app's marked-up price isn't the price the deal
+ * was set against. Spread the result into the new `OrderItem`.
+ */
+export function bundleDealsForLine(
+  product: Pick<Product, "price" | "bundleDeals">,
+  unitPrice: number
+): { bundleDeals?: BundleDeal[] } {
+  const deals = product.bundleDeals?.filter((d) => d.qty >= 2) ?? [];
+  return deals.length > 0 && unitPrice === product.price ? { bundleDeals: deals } : {};
+}
+
+type PromoItem = Partial<Pick<OrderItem, "productId" | "unitPrice" | "quantity" | "bundleDeals">>;
+
+export function computePromotionDiscount(items: PromoItem[]): number {
+  const pools = new Map<string, { unitPrice: number; units: number; deals: { qty: number; price: number }[] }>();
+  for (const item of items) {
+    if (!item.bundleDeals || item.bundleDeals.length === 0) continue;
+    if (item.productId === undefined || item.unitPrice === undefined || item.quantity === undefined) continue;
+    const key = `${item.productId}@${item.unitPrice}`;
+    const pool = pools.get(key) ?? { unitPrice: item.unitPrice, units: 0, deals: item.bundleDeals };
+    pool.units += item.quantity;
+    pools.set(key, pool);
+  }
+  let saved = 0;
+  for (const pool of pools.values()) {
+    const deals = pool.deals
+      .filter((d) => d.qty >= 2 && d.price >= 0 && d.price < d.qty * pool.unitPrice)
+      .slice()
+      .sort((a, b) => b.qty - a.qty);
+    let remaining = pool.units;
+    for (const deal of deals) {
+      const times = Math.floor(remaining / deal.qty);
+      if (times === 0) continue;
+      saved += times * (deal.qty * pool.unitPrice - deal.price);
+      remaining -= times * deal.qty;
+    }
+  }
+  return round2(saved);
+}
+
+/**
  * VAT is computed on (subtotal - discount + serviceCharge), the standard Thai restaurant
- * convention — service charge is itself taxable. `discount` is always 0 in this milestone (no
- * staff-facing discount UI yet, see progress notes) but the parameter exists so this function
- * doesn't need to change shape when that UI is added later.
+ * convention — service charge is itself taxable. The promotion discount is always recomputed
+ * from the items here, so callers must pass only a *manual* discount (none exist yet → leave it
+ * 0) — never an order's stored `discount`, which already includes the promotion and would count
+ * it twice.
  */
 export function computeOrderTotals(
-  items: Pick<OrderItem, "lineTotal">[],
+  items: (Pick<OrderItem, "lineTotal"> & PromoItem)[],
   settings: Pick<ShopSettings, "vatEnabled" | "vatRate" | "serviceChargeEnabled" | "serviceChargeRate">,
-  discount = 0
+  manualDiscount = 0
 ): OrderTotals {
+  const promoDiscount = computePromotionDiscount(items);
+  const discount = round2(manualDiscount + promoDiscount);
   const subtotal = items.reduce((sum, item) => sum + item.lineTotal, 0);
   const serviceCharge = settings.serviceChargeEnabled
     ? round2((subtotal * settings.serviceChargeRate) / 100)
@@ -152,7 +208,7 @@ export function computeOrderTotals(
   const tax = settings.vatEnabled ? round2((taxable * settings.vatRate) / 100) : 0;
   const total = round2(subtotal - discount + serviceCharge + tax);
 
-  return { subtotal: round2(subtotal), discount, serviceCharge, tax, total };
+  return { subtotal: round2(subtotal), discount, promoDiscount, serviceCharge, tax, total };
 }
 
 /** Avoids floating-point noise like 12.000000000000002 baht showing up on a receipt. */

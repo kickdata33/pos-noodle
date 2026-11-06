@@ -139,7 +139,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
         const orderDoc = openOrderSnap.docs[0];
         const order = orderDoc.data() as Order;
         const mergedItems = [...order.items, ...newItems];
-        const totals = computeOrderTotals(mergedItems, settings, order.discount);
+        const totals = computeOrderTotals(mergedItems, settings);
         // Flags this table for the badge + alert sound on the POS home screen (`PosHome`) until
         // a staff member actually opens the order — see `Order.pendingReview`'s comment.
         const round = (order.kitchenTicketCount ?? 0) + 1;

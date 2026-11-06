@@ -138,7 +138,12 @@ export function CheckoutDialog({
 
         <div className="grid gap-3 text-sm">
           <Row label="ยอดรวม" value={formatCurrency(totals.subtotal, currency)} />
-          {totals.discount > 0 ? <Row label="ส่วนลด" value={`-${formatCurrency(totals.discount, currency)}`} /> : null}
+          {totals.discount > 0 ? (
+            <Row
+              label={totals.promoDiscount === totals.discount ? "ส่วนลดโปรโมชั่น" : "ส่วนลด"}
+              value={`-${formatCurrency(totals.discount, currency)}`}
+            />
+          ) : null}
           {totals.serviceCharge > 0 ? (
             <Row label="ค่าบริการ" value={formatCurrency(totals.serviceCharge, currency)} />
           ) : null}

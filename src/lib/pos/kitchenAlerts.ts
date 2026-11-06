@@ -64,6 +64,7 @@ export function increaseItemQuantity(
       note: target.note,
       lineTotal: computeLineTotal(target.unitPrice, target.modifiers, delta),
       addedAt: now,
+      ...(target.bundleDeals ? { bundleDeals: target.bundleDeals } : {}),
     };
     return [...items, extra];
   }
