@@ -316,6 +316,27 @@ export function OrderScreen({ orderId, initialTableId, initialChannelId }: Props
     const updatedDraft: DraftOrder = { ...current, items: newItems, ...newTotals, updatedAt };
     orderRef.current = updatedDraft;
     setOrder(updatedDraft);
+    try {
+      await persistItems(current, newItems, newTotals, updatedAt);
+      setError(null);
+    } catch (err) {
+      // Never leave items on screen that never reached the server — that's exactly how one
+      // device "has" a table the others can't see. Put the cart back and say so.
+      console.error("saving order items failed", err);
+      if (orderRef.current === updatedDraft) {
+        orderRef.current = current;
+        setOrder(current);
+      }
+      setError("บันทึกไม่สำเร็จ รายการล่าสุดยังไม่ถูกบันทึก ตรวจอินเทอร์เน็ตแล้วกดใหม่");
+    }
+  }
+
+  async function persistItems(
+    current: DraftOrder,
+    newItems: OrderItem[],
+    newTotals: ReturnType<typeof computeOrderTotals>,
+    updatedAt: number
+  ) {
     if (current.id) {
       await orderRepository.update(current.id, {
         items: newItems,
@@ -563,7 +584,18 @@ export function OrderScreen({ orderId, initialTableId, initialChannelId }: Props
       if (payload.tableId) {
         // Table orders go through the occupancy check, so two devices opening the same table
         // end up on one order (see `createOrJoinTableOrder`).
-        const { id, joined } = await createOrJoinTableOrder(payload, payload.tableId, settings);
+        let result: { id: string; joined: boolean };
+        try {
+          result = await createOrJoinTableOrder(payload, payload.tableId, settings);
+        } catch (err) {
+          // Firestore rules for `tableOccupancy` not deployed yet on this project
+          // (`firebase deploy --only firestore:rules`) — fall back to a plain create rather than
+          // leaving the shop unable to open tables at all. Anything else is a real failure.
+          if ((err as { code?: string }).code !== "permission-denied") throw err;
+          console.error("tableOccupancy rules missing — deploy firestore.rules; creating without the duplicate guard", err);
+          result = { id: await orderRepository.create(payload), joined: false };
+        }
+        const { id, joined } = result;
         if (joined) {
           // Our items now live on the other device's order; the live subscription for that id
           // (after the route change below) loads it with everything on it.
