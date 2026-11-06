@@ -193,6 +193,14 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
         ...(kitchenPrintingOn ? { kitchenTicketCount: 1 } : {}),
       };
       tx.set(newOrderRef, orderData);
+      // Point the table at this order so a staff device opening the same table right now joins
+      // it instead of starting a second bill (see `lib/pos/tableOrder.ts`).
+      tx.set(db.collection(COLLECTIONS.tableOccupancy).doc(tableId), {
+        shopId: table.shopId,
+        tableId,
+        orderId: newOrderRef.id,
+        updatedAt: now,
+      });
       if (kitchenPrintingOn) {
         tx.set(printJobsRef.doc(), {
           ...kitchenJobFields({ ...orderData, id: newOrderRef.id }, kitchenSend, 1),

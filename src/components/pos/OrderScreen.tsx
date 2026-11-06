@@ -25,6 +25,7 @@ import {
 import { resolveItemName } from "@/lib/pos/itemName";
 import { increaseItemQuantity } from "@/lib/pos/kitchenAlerts";
 import { generateOrderNumber } from "@/lib/pos/orderNumber";
+import { createOrJoinTableOrder } from "@/lib/pos/tableOrder";
 import { printCheckBill, sendKitchenCancellation, sendOrderToKitchen } from "@/lib/pos/printQueue";
 import { countUnsentToKitchen } from "@/lib/pos/printTickets";
 import { deductStockForPaidOrder } from "@/lib/pos/stockService";
@@ -123,6 +124,9 @@ export function OrderScreen({ orderId, initialTableId, initialChannelId }: Props
   // Latches true while `ensureSaved` has an in-flight order creation — see that function's
   // comment for why this is a plain boolean rather than the pending Promise itself.
   const creatingRef = useRef(false);
+  // Set once this screen has handed its table over to another device's order and is waiting for
+  // the route change — stops the draft-seeding effect from re-creating a draft in the meantime.
+  const switchingOrderRef = useRef(false);
   // Latches true while `sendToKitchen` is writing a ticket — same plain-boolean pattern.
   const sendingToKitchenRef = useRef(false);
   const [activeCategoryId, setActiveCategoryId] = useState<string | null>(null);
@@ -137,6 +141,22 @@ export function OrderScreen({ orderId, initialTableId, initialChannelId }: Props
   // anything else on this screen.
   const [openOrders, setOpenOrders] = useState<Order[]>([]);
   useEffect(() => orderRepository.subscribeOpenForShop(shopId, setOpenOrders), [shopId]);
+
+  // An empty draft for a table that meanwhile got an order on another device (or from a
+  // customer's QR) switches to that order straight away, so the two devices are looking at the
+  // same bill before anyone adds anything. Skipped mid-creation — `ensureSaved`'s transaction
+  // settles that case itself.
+  useEffect(() => {
+    if (!order || order.id || !order.tableId || creatingRef.current) return;
+    const taken = openOrders.find((o) => o.tableId === order.tableId);
+    if (!taken) return;
+    switchingOrderRef.current = true;
+    orderRef.current = null;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- reacting to the live open-orders feed
+    setOrder(null);
+    setJoinedNotice(true);
+    router.replace(`/pos/order/${taken.id}`);
+  }, [order, openOrders, router]);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // Printing problems are shown, never thrown — the sale and the order must keep working even
@@ -149,6 +169,9 @@ export function OrderScreen({ orderId, initialTableId, initialChannelId }: Props
   // unsafe and then (surprisingly) stops trusting unrelated `Date.now()` calls elsewhere in the
   // file too. A slightly-too-long flash on a fast double-save is a fine trade for that.
   const [justSaved, setJustSaved] = useState(false);
+  // "This table was already opened on another device" — shown after this screen was switched
+  // onto that device's order instead of creating a second one.
+  const [joinedNotice, setJoinedNotice] = useState(false);
   function flashSaved() {
     setJustSaved(true);
     setTimeout(() => setJustSaved(false), 1500);
@@ -163,6 +186,7 @@ export function OrderScreen({ orderId, initialTableId, initialChannelId }: Props
   // erasing whatever the customer just ordered. Subscribing keeps the local copy always current.
   useEffect(() => {
     if (!orderId) return;
+    switchingOrderRef.current = false;
     return orderRepository.subscribeById(orderId, (existing) => {
       if (existing) setOrder(existing);
     });
@@ -191,7 +215,7 @@ export function OrderScreen({ orderId, initialTableId, initialChannelId }: Props
   // Never touches Firestore until the first item is added (`ensureSaved`), so this stays a
   // plain local derivation, unlike the live subscription above for a *reopened* order.
   useEffect(() => {
-    if (order || !appUser || orderId) return;
+    if (order || !appUser || orderId || switchingOrderRef.current) return;
 
     if (channels.length === 0) return; // wait for channel list before seeding a draft
     if (initialTableId && tables.length === 0) return;
@@ -296,6 +320,10 @@ export function OrderScreen({ orderId, initialTableId, initialChannelId }: Props
       await orderRepository.update(current.id, {
         items: newItems,
         subtotal: newTotals.subtotal,
+        // Quantity-deal promotions change these too — without them the saved order would show a
+        // total that doesn't match subtotal minus a (missing) discount on bills and receipts.
+        discount: newTotals.discount,
+        promoDiscount: newTotals.promoDiscount,
         serviceCharge: newTotals.serviceCharge,
         tax: newTotals.tax,
         total: newTotals.total,
@@ -532,6 +560,25 @@ export function OrderScreen({ orderId, initialTableId, initialChannelId }: Props
       const { id: draftId, ...currentWithoutId } = latest;
       void draftId;
       const payload: Omit<Order, "id"> = { ...currentWithoutId, orderNumber, updatedAt: Date.now() };
+      if (payload.tableId) {
+        // Table orders go through the occupancy check, so two devices opening the same table
+        // end up on one order (see `createOrJoinTableOrder`).
+        const { id, joined } = await createOrJoinTableOrder(payload, payload.tableId, settings);
+        if (joined) {
+          // Our items now live on the other device's order; the live subscription for that id
+          // (after the route change below) loads it with everything on it.
+          switchingOrderRef.current = true;
+          orderRef.current = null;
+          setOrder(null);
+          setJoinedNotice(true);
+        } else {
+          orderRef.current = { ...payload, id };
+          setOrder(orderRef.current);
+          flashSaved();
+        }
+        router.replace(`/pos/order/${id}`);
+        return id;
+      }
       const id = await orderRepository.create(payload);
       orderRef.current = { ...payload, id };
       setOrder(orderRef.current);
@@ -785,8 +832,13 @@ export function OrderScreen({ orderId, initialTableId, initialChannelId }: Props
         </div>
 
         <div className="flex-1 overflow-y-auto p-3">
+          {joinedNotice ? (
+            <p className="mb-2 rounded-md bg-primary/10 px-3 py-2 text-sm font-medium text-primary">
+              โต๊ะนี้ถูกเปิดจากอีกเครื่องแล้ว รายการทั้งหมดรวมอยู่ในบิลเดียวกัน
+            </p>
+          ) : null}
           {groupedItems.map((group) => (
-            <div key={group.productId} className="mb-3 border-b border-border pb-3 last:border-0">
+            <div key={`${group.productId}::${group.productName}`} className="mb-3 border-b border-border pb-3 last:border-0">
               {group.items.length > 1 ? (
                 <p className="mb-2 text-sm font-semibold">
                   {group.productName} x{group.totalQty}

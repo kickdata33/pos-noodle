@@ -267,6 +267,16 @@ service cloud.firestore {
     // admin session on the shop's PC). A new job must start out pending and unclaimed, and an
     // update can only move status/claim/result fields — never rewrite what the ticket says.
     // Customer QR orders queue their kitchen tickets through the Admin SDK, outside these rules.
+    // Which order currently holds a table (doc id = tableId) — see lib/pos/tableOrder.ts. Just a
+    // pointer; every reader re-checks the order itself, so a stale pointer is harmless. `get` on a
+    // missing doc is allowed because the create transaction probes it before the first order.
+    match /tableOccupancy/{tableId} {
+      allow get: if isActiveUser() && (resource == null || ownsExisting());
+      allow create: if isActiveUser() && ownsIncoming();
+      allow update: if isActiveUser() && ownsExisting() && ownsIncoming();
+      allow list, delete: if false;
+    }
+
     // Stock for piece-sold items (types/stock.ts). Doc id = productId. `get` is allowed on a
     // doc that doesn't exist yet because checkout probes every sold product inside its
     // transaction to find out which ones are tracked — a missing doc reveals nothing.

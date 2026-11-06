@@ -104,7 +104,7 @@ export function CheckoutDialog({
 
         <div className="grid max-h-48 gap-2 overflow-y-auto rounded-lg border border-border p-3 text-sm">
           {groupedItems.map((group) => (
-            <div key={group.productId}>
+            <div key={`${group.productId}::${group.productName}`}>
               <div className="flex items-center justify-between font-medium">
                 <span>
                   {group.productName}

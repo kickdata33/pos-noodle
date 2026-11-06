@@ -21,6 +21,10 @@ export const COLLECTIONS = {
   printJobs: "printJobs",
   /** Per-product on-hand counts for piece-sold items (doc id = productId) and their append-only
    * change log — see `types/stock.ts`. */
+  /** One doc per table (doc id = tableId) pointing at the order that last opened it — lets two
+   * devices opening the same empty table at once end up on one order instead of two, see
+   * `lib/pos/tableOrder.ts`. Only ever trusted after re-checking that order is still OPEN there. */
+  tableOccupancy: "tableOccupancy",
   stockLevels: "stockLevels",
   stockMovements: "stockMovements",
   /** One doc per shop — the daily-sequence counter behind `generateOrderNumber` (lib/pos). */
