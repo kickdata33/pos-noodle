@@ -1,5 +1,6 @@
 import type { ModifierGroup, ModifierOption, OrderItem, OrderItemModifier, Product, SalesChannel } from "@/types";
 import { computeLineTotal, distributeTieredPriceDeltas, resolveChannelPrice, resolveTieredGroupPrice } from "./pricing";
+import { resolveItemName } from "./itemName";
 
 /**
  * Turns one raw selection from the customer-facing QR order screen (`/order/table/[tableId]`)
@@ -107,7 +108,7 @@ export function resolveCustomerOrderItem(
     ok: true,
     item: {
       productId: product.id,
-      productName: product.name,
+      productName: resolveItemName(product, modifiers, catalog.modifierOptions),
       quantity: selection.quantity,
       unitPrice,
       modifiers,

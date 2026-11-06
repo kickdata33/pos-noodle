@@ -178,7 +178,9 @@ export interface ItemGroup {
 export function groupItemsByProduct(items: OrderItem[]): ItemGroup[] {
   const groups: ItemGroup[] = [];
   for (const item of items) {
-    const group = groups.find((g) => g.productId === item.productId);
+    // Same product under a different line name (ก๋วยเตี๋ยวหมู vs ก๋วยเตี๋ยวเนื้อ, see
+    // `resolveItemName`) stays a separate group, so the cart reads the way the kitchen will.
+    const group = groups.find((g) => g.productId === item.productId && g.productName === item.productName);
     if (group) {
       group.totalQty += item.quantity;
       group.items.push(item);

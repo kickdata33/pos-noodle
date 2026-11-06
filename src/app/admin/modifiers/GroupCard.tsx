@@ -60,6 +60,9 @@ export function GroupCard({
   // this one's draft. Only one option can be mid-edit at a time.
   const [editingPriceId, setEditingPriceId] = useState<string | null>(null);
   const [priceDraft, setPriceDraft] = useState("");
+  // Inline editor for `ModifierOption.menuNameTag`, same commit-on-blur pattern as the price.
+  const [editingTagId, setEditingTagId] = useState<string | null>(null);
+  const [tagDraft, setTagDraft] = useState("");
   // The "จำกัดเมนู" dialog — which option it's open for (null = closed), whether restriction is
   // turned on at all, and the draft set of product ids while it's open. Kept separate from
   // `options`/the option's own `restrictToProductIds` for the same reason `priceDraft` is: a
@@ -113,6 +116,18 @@ export function GroupCard({
     setEditingPriceId(null);
     if (priceDelta === option.priceDelta) return; // nothing actually changed, skip the write
     await modifierOptionRepository.update(option.id, { priceDelta });
+  }
+
+  function startEditingTag(option: ModifierOption) {
+    setEditingTagId(option.id);
+    setTagDraft(option.menuNameTag ?? "");
+  }
+
+  async function commitTagEdit(option: ModifierOption) {
+    const menuNameTag = tagDraft.trim() || null;
+    setEditingTagId(null);
+    if (menuNameTag === (option.menuNameTag ?? null)) return;
+    await modifierOptionRepository.update(option.id, { menuNameTag });
   }
 
   function openRestrictDialog(option: ModifierOption) {
@@ -200,7 +215,7 @@ export function GroupCard({
         <div className="border-t border-border p-4">
           <div className="grid gap-2">
             {options.map((option, index) => (
-              <div key={option.id} className="flex items-center gap-3 rounded-md border border-border px-3 py-2">
+              <div key={option.id} className="flex flex-wrap items-center gap-3 rounded-md border border-border px-3 py-2">
                 <SortButtons
                   disabledUp={index === 0}
                   disabledDown={index === options.length - 1}
@@ -233,6 +248,30 @@ export function GroupCard({
                     </button>
                   )
                 ) : null}
+                {editingTagId === option.id ? (
+                  <Input
+                    autoFocus
+                    aria-label={`คำต่อชื่อเมนูของ ${option.name}`}
+                    placeholder="เช่น หมู"
+                    className="h-8 w-24"
+                    value={tagDraft}
+                    onChange={(e) => setTagDraft(e.target.value)}
+                    onBlur={() => commitTagEdit(option)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") e.currentTarget.blur();
+                      if (e.key === "Escape") setEditingTagId(null);
+                    }}
+                  />
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => startEditingTag(option)}
+                    className="rounded-md px-2 py-1 text-sm text-muted-foreground underline decoration-dotted hover:bg-accent"
+                    title="คำที่ต่อท้ายชื่อเมนูเมื่อเลือกตัวเลือกนี้ (ใช้กับเมนูที่ตั้งชื่อเมนูตามตัวเลือกไว้)"
+                  >
+                    {option.menuNameTag ? `ชื่อเมนู +${option.menuNameTag}` : "+ คำต่อชื่อเมนู"}
+                  </button>
+                )}
                 {eligibleProducts.length > 1 ? (
                   <Button
                     variant="outline"

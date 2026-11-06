@@ -35,6 +35,13 @@ export interface Product extends WithId {
   /** Modifier groups this product offers, e.g. [เส้น, เพิ่มเติม]. Order = display order. */
   modifierGroupIds: string[];
   /**
+   * When set, an order line's name is built from this plus the `menuNameTag` of whichever
+   * options were picked (item: "เลือกหมู ให้ขึ้นว่า ก๋วยเตี๋ยวหมู ถ้าเลือกเนื้อให้โชว์ก๋วยเตี๋ยวเนื้อ")
+   * — e.g. base "ก๋วยเตี๋ยว" + tag "หมู" → "ก๋วยเตี๋ยวหมู". See `resolveItemName`. `null`/absent
+   * (every product before this field) keeps `name` as the line name, unchanged.
+   */
+  menuNameBase?: string | null;
+  /**
    * Staff-only one-tap shortcuts for this product's most common modifier combos (e.g. "ก๋วยเตี๋ยว
    * พิเศษ" = เนื้อสัตว์: พิเศษ, all pre-picked) — tapping one adds the item straight to the cart
    * with these selections already applied, skipping `ModifierPickerDialog` entirely. Purely a POS
@@ -145,6 +152,13 @@ export interface ModifierOption extends WithId {
    * `lib/pos/customerOrder.ts` (server-side backstop for customer/QR orders).
    */
   restrictToProductIds?: string[] | null;
+  /**
+   * Word added to the line name of a product that has `menuNameBase` when this option is picked,
+   * e.g. "หมู" on หมูสด/หมูเด้ง/ลูกชิ้นหมู and "เนื้อ" on เนื้อเปื่อย/เนื้อสด. A tag, not a full name,
+   * because one option group is often shared by several products (ก๋วยเตี๋ยว, เกาเหลา) — each
+   * product supplies its own base. Ignored on products without `menuNameBase`.
+   */
+  menuNameTag?: string | null;
   active: boolean;
   sortOrder: number;
   createdAt: EpochMillis;

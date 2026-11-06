@@ -14,6 +14,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { formatCurrency, formatTime } from "@/lib/format";
+import { resolveItemName } from "@/lib/pos/itemName";
 import { computeLineTotal } from "@/lib/pos/pricing";
 import type { Category, ModifierGroup, ModifierOption, OrderItemModifier, Product } from "@/types";
 
@@ -137,7 +138,7 @@ export function PickupOrderScreen() {
       {
         key: crypto.randomUUID(),
         productId: product.id,
-        productName: product.name,
+        productName: menu ? resolveItemName(product, modifiers, menu.modifierOptions) : product.name,
         quantity,
         unitPrice: product.price,
         modifiers,
@@ -171,12 +172,20 @@ export function PickupOrderScreen() {
     setPickerProduct(product);
   }
 
+  /** Changing a cart line's options can change its name (ก๋วยเตี๋ยวหมู → ก๋วยเตี๋ยวเนื้อ, see
+   * `resolveItemName`). Display only — the server names the saved line itself. */
+  function renameForModifiers(productId: string, currentName: string, modifiers: OrderItemModifier[]): string {
+    const product = menu?.products.find((p) => p.id === productId);
+    return product && menu ? resolveItemName(product, modifiers, menu.modifierOptions) : currentName;
+  }
+
   function updateCartLine(key: string, quantity: number, modifiers: OrderItemModifier[], note: string) {
     setCart((prev) =>
       prev.map((line) =>
         line.key === key
           ? {
               ...line,
+              productName: renameForModifiers(line.productId, line.productName, modifiers),
               quantity,
               modifiers,
               note,

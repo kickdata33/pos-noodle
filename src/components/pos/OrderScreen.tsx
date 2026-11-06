@@ -21,6 +21,7 @@ import {
   resolveChannelPrice,
   resolveModifiersFromSelections,
 } from "@/lib/pos/pricing";
+import { resolveItemName } from "@/lib/pos/itemName";
 import { increaseItemQuantity } from "@/lib/pos/kitchenAlerts";
 import { generateOrderNumber } from "@/lib/pos/orderNumber";
 import { printCheckBill, sendKitchenCancellation, sendOrderToKitchen } from "@/lib/pos/printQueue";
@@ -346,7 +347,7 @@ export function OrderScreen({ orderId, initialTableId, initialChannelId }: Props
     const item: OrderItem = {
       id: crypto.randomUUID(),
       productId: product.id,
-      productName: product.name,
+      productName: resolveItemName(product, modifiers, modifierOptions),
       quantity,
       unitPrice,
       modifiers,

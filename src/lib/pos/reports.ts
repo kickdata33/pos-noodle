@@ -69,9 +69,12 @@ export function topProducts(
             .slice()
             .sort((a, b) => a.optionId.localeCompare(b.optionId))
         : [];
+      // Lines of one product saved under different names (ก๋วยเตี๋ยวหมู vs ก๋วยเตี๋ยวเนื้อ, see
+      // `resolveItemName`) are different dishes to the shop — keyed apart so a combined total
+      // never shows up under just one of the names.
       const key = splitModifiers.length
         ? `${item.productId}::${splitModifiers.map((m) => m.optionId).join(",")}`
-        : item.productId;
+        : `${item.productId}::name:${item.productName}`;
       const entry = byKey.get(key) ?? {
         productId: item.productId,
         productName: splitModifiers.length

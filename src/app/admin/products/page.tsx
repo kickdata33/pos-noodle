@@ -36,6 +36,8 @@ interface FormState {
   /** Text field state for `Product.imageUrl` — blank means no photo, same convention as
    * `ShopSettings.logoUrl`'s own form field. */
   imageUrl: string;
+  /** `Product.menuNameBase` — blank means "don't build the line name from options". */
+  menuNameBase: string;
   modifierGroupIds: string[];
   /** One string per channel id — blank means "no override, use the channel's automatic markup
    * (or plain price)". Kept as strings in form state the same way `price` is, converted to
@@ -50,6 +52,7 @@ const EMPTY_FORM: FormState = {
   categoryId: "",
   price: "",
   imageUrl: "",
+  menuNameBase: "",
   modifierGroupIds: [],
   channelPrices: {},
   presets: [],
@@ -118,6 +121,7 @@ export default function ProductsPage() {
       categoryId: product.categoryId,
       price: String(product.price),
       imageUrl: product.imageUrl ?? "",
+      menuNameBase: product.menuNameBase ?? "",
       modifierGroupIds: product.modifierGroupIds,
       channelPrices: Object.fromEntries(
         Object.entries(product.channelPrices ?? {}).map(([channelId, p]) => [channelId, String(p)])
@@ -193,6 +197,7 @@ export default function ProductsPage() {
           categoryId: form.categoryId,
           price,
           imageUrl,
+          menuNameBase: form.menuNameBase.trim() || null,
           modifierGroupIds: form.modifierGroupIds,
           channelPrices,
           posQuickPresets: presets,
@@ -205,6 +210,7 @@ export default function ProductsPage() {
           categoryId: form.categoryId,
           price,
           imageUrl,
+          menuNameBase: form.menuNameBase.trim() || null,
           modifierGroupIds: form.modifierGroupIds,
           channelPrices,
           posQuickPresets: presets,
@@ -320,6 +326,20 @@ export default function ProductsPage() {
                 placeholder="เช่น กาแฟเย็น"
                 autoFocus
               />
+            </div>
+
+            <div className="grid gap-2">
+              <Label htmlFor="product-name-base">ชื่อเมนูตามตัวเลือก (ไม่บังคับ)</Label>
+              <Input
+                id="product-name-base"
+                value={form.menuNameBase}
+                onChange={(e) => setForm((f) => ({ ...f, menuNameBase: e.target.value }))}
+                placeholder="เช่น ก๋วยเตี๋ยว"
+              />
+              <p className="text-xs text-muted-foreground">
+                ใส่ชื่อหลัก แล้วไปตั้ง &quot;คำต่อชื่อเมนู&quot; ที่ตัวเลือกใน Modifier เช่น หมูสด = หมู, เนื้อเปื่อย = เนื้อ
+                ครัวและบิลจะขึ้นเป็น ก๋วยเตี๋ยวหมู หรือ ก๋วยเตี๋ยวเนื้อ ตามที่เลือก ถ้าเว้นว่างจะใช้ชื่อเมนูปกติ
+              </p>
             </div>
 
             <div className="grid gap-2">
