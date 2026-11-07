@@ -5,8 +5,10 @@ import { useEffect, useState } from "react";
 
 import { TableQrDialog } from "@/components/shared/TableQrDialog";
 import { Badge } from "@/components/ui/badge";
+import { useAuth } from "@/hooks/useAuth";
 import { formatCurrency } from "@/lib/format";
 import { isLowStock } from "@/lib/pos/stock";
+import { printQrForTable } from "@/lib/pos/tableQrPrint";
 import { orderRepository } from "@/repositories/orderRepository";
 import { stockLevelRepository } from "@/repositories/stockRepository";
 import type { Order, StockLevel, Table as PosTable } from "@/types";
@@ -27,6 +29,31 @@ export function PosHome() {
   // party is a staff task that happens constantly, not an admin config chore. See
   // `TableQrDialog`'s own comment for how it branches on `qrMode`.
   const [qrTable, setQrTable] = useState<PosTable | null>(null);
+  const { appUser } = useAuth();
+  // One-tap "พิมพ์ QR" on each table card (item: "ต้องสร้างแล้วปริ้นให้ลูกค้าได้ก่อน") — works on an
+  // empty table, so staff can seat a party and hand them the QR before anything is ordered; the
+  // customer's first order opens the bill. Only in shops that switched it on.
+  const qrPrintEnabled = Boolean(settings?.printStation?.tableQrEnabled);
+  const [qrPrintState, setQrPrintState] = useState<Record<string, "sending" | "sent" | "error">>({});
+  async function handlePrintQr(table: PosTable) {
+    if (!settings || !appUser || qrPrintState[table.id] === "sending") return;
+    setQrPrintState((s) => ({ ...s, [table.id]: "sending" }));
+    try {
+      await printQrForTable(table, settings, appUser);
+      setQrPrintState((s) => ({ ...s, [table.id]: "sent" }));
+    } catch {
+      setQrPrintState((s) => ({ ...s, [table.id]: "error" }));
+    }
+    setTimeout(
+      () =>
+        setQrPrintState((s) => {
+          const next = { ...s };
+          delete next[table.id];
+          return next;
+        }),
+      3000
+    );
+  }
   const currency = settings?.currency ?? "THB";
 
   // The new-order chime itself is handled by `PosOrderAlertListener`, mounted once in
@@ -68,7 +95,9 @@ export function PosHome() {
                     : `/pos/order/new?tableId=${table.id}`
                 }
                 className={
-                  "relative isolate flex flex-col items-center justify-center gap-1 overflow-hidden rounded-lg border p-4 h-24 " +
+                  "relative isolate flex flex-col items-center justify-center gap-1 overflow-hidden rounded-lg border p-4 " +
+                  // Taller with the "พิมพ์ QR" button so it never sits on top of the table name.
+                  (qrPrintEnabled ? "h-28 pt-8 " : "h-24 ") +
                   (order?.pendingReview
                     ? "border-success"
                     : order
@@ -93,6 +122,33 @@ export function PosHome() {
                     className="absolute right-1 top-1 z-10 rounded border border-border bg-card/90 px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground hover:bg-accent"
                   >
                     QR
+                  </button>
+                ) : null}
+                {qrPrintEnabled ? (
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      void handlePrintQr(table);
+                    }}
+                    disabled={qrPrintState[table.id] === "sending"}
+                    className={
+                      "absolute left-1 top-1 z-10 rounded-md border px-2 py-1 text-xs font-semibold " +
+                      (qrPrintState[table.id] === "error"
+                        ? "border-destructive bg-destructive/10 text-destructive"
+                        : qrPrintState[table.id] === "sent"
+                          ? "border-success bg-success/10 text-success"
+                          : "border-primary/40 bg-card text-primary hover:bg-primary/10")
+                    }
+                  >
+                    {qrPrintState[table.id] === "sending"
+                      ? "กำลังส่ง..."
+                      : qrPrintState[table.id] === "sent"
+                        ? "ส่งพิมพ์แล้ว ✓"
+                        : qrPrintState[table.id] === "error"
+                          ? "พิมพ์ไม่สำเร็จ"
+                          : "พิมพ์ QR"}
                   </button>
                 ) : null}
                 <span className="text-lg font-semibold">{table.name}</span>
