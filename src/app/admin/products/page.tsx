@@ -576,9 +576,9 @@ export default function ProductsPage() {
             <div className="grid gap-2">
               <Label>โปรโมชั่นซื้อหลายชิ้น (ไม่บังคับ)</Label>
               <p className="text-xs text-muted-foreground">
-                เช่น ซื้อ 3 ชิ้น ราคารวม 200 บาท ชิ้นที่เหลือคิดราคาปกติ นับรวมทุกครั้งที่กดในบิลเดียวกัน
-                ใช้กับราคาหน้าร้านเท่านั้น ไม่ใช้กับราคาเดลิเวอรี่ที่บวกเพิ่ม ใส่ช่วงเวลาได้ เช่น 3 ขวด 189 ถึง 20:00
-                และ 3 ขวด 219 ตั้งแต่ 20:00 ระบบใช้ราคาตามเวลาที่กดสั่งแต่ละรายการ
+                เช่น ซื้อ 3 ชิ้น ราคารวม 189 บาท หน้า POS จะมีปุ่มสีเขียว &quot;โปร 3 ชิ้น ฿189&quot; ให้พนักงานกดเลือก
+                ได้ทีละชุด ใส่ช่วงเวลาได้ เช่น 16:00 ถึง 20:00 และ 20:00 ถึง 06:00 ปุ่มจะขึ้นเฉพาะช่วงเวลานั้น
+                ใช้กับราคาหน้าร้านเท่านั้น และใช้ได้กับเมนูที่ไม่มีตัวเลือก (Modifier)
               </p>
               <div className="grid gap-2 rounded-lg border border-border p-3">
                 {form.deals.map((deal, i) => {
@@ -650,6 +650,11 @@ export default function ProductsPage() {
                   + เพิ่มโปรโมชั่น
                 </Button>
                 {dealsError ? <p className="text-sm text-destructive">{dealsError}</p> : null}
+                {form.deals.length > 0 && form.modifierGroupIds.length > 0 ? (
+                  <p className="text-sm text-destructive">
+                    เมนูนี้มีตัวเลือก (Modifier) ปุ่มโปรจะไม่ขึ้นที่หน้า POS เอาตัวเลือกออก หรือสร้างเมนูโปรแยก
+                  </p>
+                ) : null}
               </div>
             </div>
 

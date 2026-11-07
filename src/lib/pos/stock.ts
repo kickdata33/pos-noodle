@@ -6,9 +6,15 @@ import type { OrderItem, StockLevel, StockMovement } from "@/types";
  */
 
 /** Quantity sold per product on one order (an order can hold the same product on several lines). */
-export function saleQuantitiesByProduct(items: Pick<OrderItem, "productId" | "quantity">[]): Map<string, number> {
+export function saleQuantitiesByProduct(
+  items: Pick<OrderItem, "productId" | "quantity" | "bundleUnits">[]
+): Map<string, number> {
   const totals = new Map<string, number>();
-  for (const item of items) totals.set(item.productId, (totals.get(item.productId) ?? 0) + item.quantity);
+  for (const item of items) {
+    // A promotion set ("โปร 3 ชิ้น") takes all of its pieces off the shelf.
+    const pieces = item.quantity * (item.bundleUnits ?? 1);
+    totals.set(item.productId, (totals.get(item.productId) ?? 0) + pieces);
+  }
   return totals;
 }
 

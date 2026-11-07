@@ -145,21 +145,21 @@ export interface OrderTotals {
  * are never discounted — the deal covers the base price only.
  */
 /**
- * The deals to snapshot onto a new line: the product's `bundleDeals`, but only when the line is
- * sold at the product's normal price — a delivery app's marked-up price isn't the price the deal
- * was set against. Spread the result into the new `OrderItem`.
+ * Deals running at `now` (shop time) that the POS should offer as "โปร" buttons for this product
+ * on this channel — none on a channel with its own/marked-up price (deals are set against the
+ * normal price), none for products with option groups (a set has no way to pick options per
+ * piece), and only deals that are actually cheaper than buying the pieces singly.
  */
-export function bundleDealsForLine(
-  product: Pick<Product, "price" | "bundleDeals">,
+export function activeDealsAt(
+  product: Pick<Product, "price" | "bundleDeals" | "modifierGroupIds">,
   unitPrice: number,
-  now: number = Date.now()
-): { bundleDeals?: BundleDeal[] } {
-  // Only the deals running *right now* are snapshotted — a line added at 19:55 keeps its
-  // before-20:00 price even if the bill is paid at 21:00, and lines from the two windows are
-  // never pooled into one deal (see `computePromotionDiscount`'s pool key).
+  now: number
+): BundleDeal[] {
+  if (unitPrice !== product.price || product.modifierGroupIds.length > 0) return [];
   const minute = bangkokMinuteOfDay(now);
-  const deals = product.bundleDeals?.filter((d) => d.qty >= 2 && isDealActiveAt(d, minute)) ?? [];
-  return deals.length > 0 && unitPrice === product.price ? { bundleDeals: deals } : {};
+  return (product.bundleDeals ?? []).filter(
+    (d) => d.qty >= 2 && d.price < d.qty * product.price && isDealActiveAt(d, minute)
+  );
 }
 
 const BANGKOK_OFFSET_MS = 7 * 60 * 60 * 1000;

@@ -15,8 +15,9 @@ import { formatCurrency, formatTime } from "@/lib/format";
 import { useAuth } from "@/hooks/useAuth";
 import { printReceiptViaEpos } from "@/lib/pos/eposPrint";
 import {
-  bundleDealsForLine,
+  activeDealsAt,
   computeLineTotal,
+  dealWindowLabel,
   computeOrderTotals,
   groupItemsByProduct,
   resolveChannelPrice,
@@ -131,6 +132,19 @@ export function OrderScreen({ orderId, initialTableId, initialChannelId }: Props
   // "This table was already opened on another device" — shown after this screen was switched
   // onto that device's order instead of creating a second one.
   const [joinedNotice, setJoinedNotice] = useState(false);
+  // Shop clock for which promotion buttons are live (`activeDealsAt`) — refreshed every 30s so a
+  // "ก่อน 20:00" button disappears and its "ตั้งแต่ 20:00" one appears without a reload. Starts
+  // at 0 (no deals shown) until the first tick right after mount.
+  const [clock, setClock] = useState(0);
+  useEffect(() => {
+    const tick = () => setClock(Date.now());
+    const first = setTimeout(tick, 0);
+    const timer = setInterval(tick, 30_000);
+    return () => {
+      clearTimeout(first);
+      clearInterval(timer);
+    };
+  }, []);
   // One-tap "พิมพ์ QR ให้ลูกค้าสั่ง" state — see `handlePrintTableQr`.
   const [printingQr, setPrintingQr] = useState(false);
   const [qrPrintMessage, setQrPrintMessage] = useState<{ ok: boolean; text: string } | null>(null);
@@ -360,6 +374,30 @@ export function OrderScreen({ orderId, initialTableId, initialChannelId }: Props
     }
   }
 
+  /**
+   * Adds one promotion set (item: "ให้กดเลือกเป็นโปรโมชั่น ก่อน 2 ทุ่ม หลัง 2 ทุ่ม") — a single
+   * line priced at the deal price for the whole set, so staff can't end up at 4 bottles thinking
+   * it's 3, and the bill says exactly which promotion was sold. `+`/`-` on the line then add or
+   * remove whole sets.
+   */
+  function addDealToCart(product: Product, deal: { qty: number; price: number }) {
+    const current = orderRef.current;
+    if (!current || !product.active) return;
+    const item: OrderItem = {
+      id: crypto.randomUUID(),
+      productId: product.id,
+      productName: `${product.name} (โปร ${deal.qty} ชิ้น)`,
+      quantity: 1,
+      unitPrice: deal.price,
+      modifiers: [],
+      note: "",
+      lineTotal: deal.price,
+      addedAt: clock || current.updatedAt,
+      bundleUnits: deal.qty,
+    };
+    applyItems([...current.items, item]);
+  }
+
   function handleAddProduct(product: Product) {
     if (!product.active) return; // sold out — see `visibleProducts`'s comment
     if (product.modifierGroupIds.length > 0) {
@@ -408,7 +446,6 @@ export function OrderScreen({ orderId, initialTableId, initialChannelId }: Props
       note,
       lineTotal,
       addedAt: Date.now(),
-      ...bundleDealsForLine(product, unitPrice),
     };
     applyItems([...current.items, item]);
   }
@@ -827,6 +864,23 @@ export function OrderScreen({ orderId, initialTableId, initialChannelId }: Props
                   <span className="text-sm font-medium text-destructive">ของหมด</span>
                 )}
               </button>
+              {product.active
+                ? activeDealsAt(product, resolveChannelPrice(product, currentChannel), clock).map((deal) => {
+                    const window = dealWindowLabel(deal);
+                    return (
+                      <button
+                        key={`${deal.qty}-${deal.price}-${deal.fromTime ?? ""}-${deal.toTime ?? ""}`}
+                        onClick={() => addDealToCart(product, deal)}
+                        className="flex w-full items-center justify-between gap-2 rounded-md border border-success bg-success/10 px-3 py-2 text-left text-sm font-semibold text-success hover:bg-success/20"
+                      >
+                        <span>
+                          โปร {deal.qty} ชิ้น {formatCurrency(deal.price, settings.currency)}
+                        </span>
+                        {window ? <span className="text-xs font-normal">{window}</span> : null}
+                      </button>
+                    );
+                  })
+                : null}
               {/* Staff-only quick-add shortcuts (Product.posQuickPresets) — one tap adds the item
                   with its modifiers already picked, no popup. Never shown on the customer-facing
                   self-order screens, which don't read this field at all. */}

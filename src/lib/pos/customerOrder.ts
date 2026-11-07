@@ -1,6 +1,5 @@
 import type { ModifierGroup, ModifierOption, OrderItem, OrderItemModifier, Product, SalesChannel } from "@/types";
 import {
-  bundleDealsForLine,
   computeLineTotal,
   distributeTieredPriceDeltas,
   resolveChannelPrice,
@@ -122,7 +121,6 @@ export function resolveCustomerOrderItem(
       modifiers,
       note,
       lineTotal,
-      ...bundleDealsForLine(product, unitPrice),
       addedAt: Date.now(),
     },
   };

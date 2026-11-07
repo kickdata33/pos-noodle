@@ -43,10 +43,12 @@ export interface Product extends WithId {
   menuNameBase?: string | null;
   /**
    * Quantity deals, e.g. เบียร์ "3 ขวด 200 บาท" while one bottle stays at `price` (item:
-   * "เพิ่มฟังก์ชั่นโปรโมชั่น เบียร์ 3 ขวด ราคา xxx"). Applied across every line of this product on
-   * one order — three separate taps of one bottle still make a deal — by
-   * `computePromotionDiscount`. Snapshotted onto each `OrderItem` when added, like the price.
-   * Empty/absent = no deal.
+   * "เพิ่มฟังก์ชั่นโปรโมชั่น เบียร์ 3 ขวด ราคา xxx"). Shown on the POS as buttons staff tap to add
+   * a whole set at the deal price (item: "ให้กดเลือกเป็นโปรโมชั่น ป้องกันพนักงานกดผิด"), only
+   * while the deal's time window is running — see `activeDealsAt` and `OrderItem.bundleUnits`.
+   * (Lines added while deals were still applied automatically keep their snapshotted
+   * `OrderItem.bundleDeals` and are still priced by `computePromotionDiscount`.)
+   * Only for products without option groups. Empty/absent = no deal.
    */
   bundleDeals?: BundleDeal[] | null;
   /**

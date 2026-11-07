@@ -3,7 +3,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { resolveCustomerOrderItem } from "../src/lib/pos/customerOrder";
-import { bundleDealsForLine, computeOrderTotals, computePromotionDiscount } from "../src/lib/pos/pricing";
+import { activeDealsAt, computeOrderTotals, computePromotionDiscount } from "../src/lib/pos/pricing";
+import { saleQuantitiesByProduct } from "../src/lib/pos/stock";
 import type { OrderItem, Product } from "../src/types";
 
 const beerDeals = [{ qty: 3, price: 200 }];
@@ -63,11 +64,13 @@ test("totals subtract the promotion and report it separately", () => {
   assert.equal(totals.total, 200);
 });
 
-test("deals are only snapshotted at the normal price", () => {
-  const product = { price: 79, bundleDeals: beerDeals };
-  assert.deepEqual(bundleDealsForLine(product, 79), { bundleDeals: beerDeals });
-  assert.deepEqual(bundleDealsForLine(product, 95), {});
-  assert.deepEqual(bundleDealsForLine({ price: 79 }, 79), {});
+test("promotion buttons: normal price only, no option groups, only cheaper deals", () => {
+  const product = { price: 79, bundleDeals: beerDeals, modifierGroupIds: [] as string[] };
+  const noon = Date.UTC(2026, 10, 7, 5, 0);
+  assert.equal(activeDealsAt(product, 79, noon).length, 1);
+  assert.equal(activeDealsAt(product, 95, noon).length, 0, "marked-up channel");
+  assert.equal(activeDealsAt({ ...product, modifierGroupIds: ["g"] }, 79, noon).length, 0);
+  assert.equal(activeDealsAt({ ...product, bundleDeals: [{ qty: 3, price: 300 }] }, 79, noon).length, 0);
 });
 
 test("customer orders can't include staff-only items", () => {
@@ -111,35 +114,27 @@ test("time windows: before/after 20:00 and across midnight", async () => {
   assert.equal(dealWindowLabel({}), "");
 });
 
-test("a line gets the deal running when it's added (shop time), and windows don't pool", () => {
+test("only the deal for the current time window is offered (shop time)", () => {
   const product = {
     price: 89,
+    modifierGroupIds: [] as string[],
     bundleDeals: [
-      { qty: 3, price: 189, toTime: "20:00" },
-      { qty: 3, price: 219, fromTime: "20:00" },
+      { qty: 3, price: 189, fromTime: "16:00", toTime: "20:00" },
+      { qty: 3, price: 219, fromTime: "20:00", toTime: "06:00" },
     ],
   };
-  // 12:00 UTC = 19:00 Bangkok; 13:30 UTC = 20:30 Bangkok.
-  const evening = Date.UTC(2026, 10, 7, 12, 0);
-  const late = Date.UTC(2026, 10, 7, 13, 30);
-  const early = bundleDealsForLine(product, 89, evening).bundleDeals!;
-  const after = bundleDealsForLine(product, 89, late).bundleDeals!;
-  assert.deepEqual(early.map((d) => d.price), [189]);
-  assert.deepEqual(after.map((d) => d.price), [219]);
+  // UTC → Bangkok: 10:00 → 17:00, 13:30 → 20:30, 20:00 → 03:00, 03:00 → 10:00.
+  const at = (h: number, m = 0) => Date.UTC(2026, 10, 7, h, m);
+  assert.deepEqual(activeDealsAt(product, 89, at(10)).map((d) => d.price), [189]);
+  assert.deepEqual(activeDealsAt(product, 89, at(13, 30)).map((d) => d.price), [219]);
+  assert.deepEqual(activeDealsAt(product, 89, at(20)).map((d) => d.price), [219]);
+  assert.deepEqual(activeDealsAt(product, 89, at(3)).map((d) => d.price), [], "no promotion 06:00–16:00");
+});
 
-  const line = (id: string, qty: number, deals: typeof early): OrderItem => ({
-    id,
-    productId: "beer",
-    productName: "เบียร์",
-    quantity: qty,
-    unitPrice: 89,
-    modifiers: [],
-    note: "",
-    lineTotal: 89 * qty,
-    bundleDeals: deals,
-  });
-  assert.equal(computePromotionDiscount([line("a", 3, early)]), 267 - 189);
-  assert.equal(computePromotionDiscount([line("a", 3, after)]), 267 - 219);
-  // 2 bottles before 20:00 + 1 after: no window has 3 → no deal.
-  assert.equal(computePromotionDiscount([line("a", 2, early), line("b", 1, after)]), 0);
+test("a promotion set takes all of its pieces out of stock", () => {
+  const totals = saleQuantitiesByProduct([
+    { productId: "beer", quantity: 2, bundleUnits: 3 },
+    { productId: "beer", quantity: 1 },
+  ]);
+  assert.equal(totals.get("beer"), 7);
 });

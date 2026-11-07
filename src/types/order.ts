@@ -66,6 +66,12 @@ export interface OrderItem extends WithId {
   /** `Product.bundleDeals` as they were when this line was added (only on lines added at the
    * product's normal price — channel markups don't get shop promotions). */
   bundleDeals?: BundleDeal[];
+  /**
+   * Set on a promotion line staff picked explicitly ("โปร 3 ชิ้น ฿189"): each unit of `quantity`
+   * is one *set* of this many pieces, sold at `unitPrice` for the whole set. Stock deducts
+   * `quantity × bundleUnits`. Absent on normal lines (= 1 piece each).
+   */
+  bundleUnits?: number;
 }
 
 /**
