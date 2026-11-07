@@ -11,6 +11,19 @@ $Dir = Join-Path $env:LOCALAPPDATA 'RanPOS\print-agent'
 function Step($t) { Write-Host ''; Write-Host "== $t" -ForegroundColor Cyan }
 function Fail($t) { Write-Host ''; Write-Host "ERROR: $t" -ForegroundColor Red; Read-Host 'Press Enter to close'; exit 1 }
 
+# Stop a running agent before replacing it. Its node.exe is started by run-hidden.vbs, so it is
+# found as the child of that wscript.exe (older installs) or by the --ranpos-agent marker.
+function Stop-RanPOSAgent {
+  try { Stop-ScheduledTask -TaskName 'RanPOS Print Agent' -ErrorAction SilentlyContinue } catch { }
+  $hosts = @(Get-CimInstance Win32_Process -Filter "Name='wscript.exe'" -ErrorAction SilentlyContinue |
+    Where-Object { $_.CommandLine -like '*RanPOS*print-agent*run-hidden.vbs*' })
+  $hostIds = $hosts | ForEach-Object { $_.ProcessId }
+  Get-CimInstance Win32_Process -Filter "Name='node.exe'" -ErrorAction SilentlyContinue |
+  Where-Object { ($hostIds -contains $_.ParentProcessId) -or ($_.CommandLine -like '*--ranpos-agent*') } |
+  ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+  $hosts | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+}
+
 function Refresh-Path {
   $env:Path = [Environment]::GetEnvironmentVariable('Path', 'Machine') + ';' + [Environment]::GetEnvironmentVariable('Path', 'User')
 }
@@ -53,9 +66,7 @@ Write-Host ("Paired as '" + $info.name + "' for station(s): " + ($info.stations 
 
 # ---------------------------------------------------------------- 3. Files
 Step "Downloading the agent into $Dir"
-Get-CimInstance Win32_Process -Filter "Name='node.exe'" -ErrorAction SilentlyContinue |
-Where-Object { $_.CommandLine -like '*print-agent*main.js*' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
-try { Stop-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue } catch { }
+Stop-RanPOSAgent
 New-Item -ItemType Directory -Force -Path $Dir | Out-Null
 $manifest = Invoke-RestMethod -Uri "$Origin/print-agent/manifest.json"
 foreach ($f in $manifest.files) {
@@ -107,7 +118,7 @@ catch { }
 $vbs = @"
 Set sh = CreateObject("WScript.Shell")
 sh.CurrentDirectory = "$Dir"
-rc = sh.Run("""$($node.Source)"" src\main.js", 0, True)
+rc = sh.Run("""$($node.Source)"" src\main.js --ranpos-agent", 0, True)
 WScript.Quit rc
 "@
 [System.IO.File]::WriteAllText((Join-Path $Dir 'run-hidden.vbs'), $vbs, (New-Object System.Text.UTF8Encoding($false)))
@@ -132,6 +143,7 @@ try {
     -RestartCount 999 -RestartInterval (New-TimeSpan -Minutes 1) -ExecutionTimeLimit ([TimeSpan]::Zero) -MultipleInstances IgnoreNew
   $principal = New-ScheduledTaskPrincipal -UserId $runAs -LogonType Interactive -RunLevel Limited
   Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger $trigger -Settings $settings -Principal $principal -Force | Out-Null
+  Stop-RanPOSAgent
   Start-ScheduledTask -TaskName $TaskName
   Write-Host "Scheduled task '$TaskName' registered and started."
 }
