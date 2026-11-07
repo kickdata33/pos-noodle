@@ -43,7 +43,9 @@ $fontSmall = New-Object System.Drawing.Font($fontName, 7.5, [System.Drawing.Font
 # 80 mm paper, 72 mm printable. Everything below is in points (1/72 inch).
 $widthPt = 72 / 25.4 * 72
 $qrPt = 46 / 25.4 * 72
-$lineGap = 1.0
+# Tight layout: GDI+'s default StringFormat pads every measured line by about 1/6 em top and
+# bottom, which on a receipt adds up to a lot of empty paper — the typographic format doesn't.
+$lineGap = 0.6
 
 function Get-LineFont($line) {
   if ($line.size -eq 2) { return $fontBig }
@@ -52,7 +54,7 @@ function Get-LineFont($line) {
 }
 
 function Get-Format($align) {
-  $f = New-Object System.Drawing.StringFormat
+  $f = [System.Drawing.StringFormat]::GenericTypographic.Clone()
   switch ($align) {
     'center' { $f.Alignment = [System.Drawing.StringAlignment]::Center }
     'right' { $f.Alignment = [System.Drawing.StringAlignment]::Far }
@@ -71,7 +73,7 @@ function Invoke-Layout($g, [bool]$draw) {
   $fmt = Get-Format 'right'
   $size = $g.MeasureString([string]$job.timeLabel, $fontSmall, [int]$widthPt, $fmt)
   if ($draw) { $g.DrawString([string]$job.timeLabel, $fontSmall, $brush, (New-Object System.Drawing.RectangleF(0, $y, $widthPt, $size.Height)), $fmt) }
-  $y += $size.Height + $lineGap
+  $y += $size.Height + 2
   foreach ($line in $job.lines) {
     $font = Get-LineFont $line
     $fmt = Get-Format $line.align
@@ -95,7 +97,7 @@ function Invoke-Layout($g, [bool]$draw) {
       $y += $size.Height
     }
   }
-  return $y + 12
+  return $y + 8
 }
 
 # Measure first, so the page is exactly as long as the ticket (no metres of blank paper).

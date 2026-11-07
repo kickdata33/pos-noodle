@@ -112,6 +112,19 @@ export function PrintAgentSettings() {
         );
       })}
 
+      {active.length > 0 && now > 0 ? (
+        <details className="text-sm">
+          <summary className="cursor-pointer text-muted-foreground">อัปเดตโปรแกรมพิมพ์บนคอม (เมื่อมีเวอร์ชันใหม่)</summary>
+          <p className="mt-2">บนคอมร้าน เปิด Windows PowerShell แล้ววางคำสั่งนี้ ไม่ต้องใช้รหัสเชื่อมต่อหรือเลือกเครื่องพิมพ์ใหม่</p>
+          <Input
+            readOnly
+            className="mt-1"
+            value={`powershell -NoProfile -ExecutionPolicy Bypass -Command "irm ${window.location.origin}/print-agent/update.ps1 | iex"`}
+            onFocus={(e) => e.currentTarget.select()}
+          />
+        </details>
+      ) : null}
+
       {pairing ? (
         <div className="grid gap-2 rounded-md border border-primary/40 bg-primary/5 p-3 text-sm">
           <p className="font-semibold">ติดตั้งบนคอมร้าน (รหัสนี้แสดงครั้งเดียว)</p>
