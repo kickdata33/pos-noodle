@@ -22,12 +22,21 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { useAuth } from "@/hooks/useAuth";
 import { computeSwap } from "@/lib/admin/sortOrder";
 import { compressImageFile } from "@/lib/billing/compressImage";
+import { dealWindowLabel, dealWindowsOverlap, parseClock } from "@/lib/pos/pricing";
 import { categoryRepository } from "@/repositories/categoryRepository";
 import { channelRepository } from "@/repositories/channelRepository";
 import { modifierGroupRepository, modifierOptionRepository } from "@/repositories/modifierRepository";
 import { productRepository } from "@/repositories/productRepository";
 import type { BundleDeal, Category, ModifierGroup, ModifierOption, Product, ProductQuickPreset, SalesChannel } from "@/types";
 import { QuickPresetEditor } from "./QuickPresetEditor";
+
+/** One promotion row in the form — all text inputs; `fromTime`/`toTime` are "HH:MM" or "". */
+interface DealRow {
+  qty: string;
+  price: string;
+  fromTime: string;
+  toTime: string;
+}
 
 interface FormState {
   name: string;
@@ -41,7 +50,7 @@ interface FormState {
   /** `Product.staffOnly` — hidden from customer QR menus. */
   staffOnly: boolean;
   /** `Product.bundleDeals` as text inputs; rows left fully blank are dropped on save. */
-  deals: { qty: string; price: string }[];
+  deals: DealRow[];
   modifierGroupIds: string[];
   /** One string per channel id — blank means "no override, use the channel's automatic markup
    * (or plain price)". Kept as strings in form state the same way `price` is, converted to
@@ -149,7 +158,12 @@ export default function ProductsPage() {
       imageUrl: product.imageUrl ?? "",
       menuNameBase: product.menuNameBase ?? "",
       staffOnly: product.staffOnly ?? false,
-      deals: (product.bundleDeals ?? []).map((d) => ({ qty: String(d.qty), price: String(d.price) })),
+      deals: (product.bundleDeals ?? []).map((d) => ({
+        qty: String(d.qty),
+        price: String(d.price),
+        fromTime: d.fromTime ?? "",
+        toTime: d.toTime ?? "",
+      })),
       modifierGroupIds: product.modifierGroupIds,
       channelPrices: Object.fromEntries(
         Object.entries(product.channelPrices ?? {}).map(([channelId, p]) => [channelId, String(p)])
@@ -185,7 +199,7 @@ export default function ProductsPage() {
     }));
   }
 
-  function updateDeal(index: number, patch: Partial<{ qty: string; price: string }>) {
+  function updateDeal(index: number, patch: Partial<DealRow>) {
     setForm((f) => ({ ...f, deals: f.deals.map((d, i) => (i === index ? { ...d, ...patch } : d)) }));
   }
 
@@ -367,7 +381,13 @@ export default function ProductsPage() {
                       {product.name}
                       {product.bundleDeals && product.bundleDeals.length > 0 ? (
                         <Badge variant="success">
-                          โปร {product.bundleDeals.map((d) => `${d.qty}/${d.price.toLocaleString("th-TH")}`).join(", ")}
+                          โปร{" "}
+                          {product.bundleDeals
+                            .map((d) => {
+                              const window = dealWindowLabel(d);
+                              return `${d.qty}/${d.price.toLocaleString("th-TH")}${window ? ` (${window})` : ""}`;
+                            })
+                            .join(", ")}
                         </Badge>
                       ) : null}
                       {product.staffOnly ? <Badge variant="muted">เฉพาะพนักงาน</Badge> : null}
@@ -557,7 +577,8 @@ export default function ProductsPage() {
               <Label>โปรโมชั่นซื้อหลายชิ้น (ไม่บังคับ)</Label>
               <p className="text-xs text-muted-foreground">
                 เช่น ซื้อ 3 ชิ้น ราคารวม 200 บาท ชิ้นที่เหลือคิดราคาปกติ นับรวมทุกครั้งที่กดในบิลเดียวกัน
-                ใช้กับราคาหน้าร้านเท่านั้น ไม่ใช้กับราคาเดลิเวอรี่ที่บวกเพิ่ม
+                ใช้กับราคาหน้าร้านเท่านั้น ไม่ใช้กับราคาเดลิเวอรี่ที่บวกเพิ่ม ใส่ช่วงเวลาได้ เช่น 3 ขวด 189 ถึง 20:00
+                และ 3 ขวด 219 ตั้งแต่ 20:00 ระบบใช้ราคาตามเวลาที่กดสั่งแต่ละรายการ
               </p>
               <div className="grid gap-2 rounded-lg border border-border p-3">
                 {form.deals.map((deal, i) => {
@@ -587,6 +608,27 @@ export default function ProductsPage() {
                       <Button variant="ghost" size="sm" className="text-destructive" onClick={() => removeDeal(i)}>
                         ลบ
                       </Button>
+                      <div className="flex w-full flex-wrap items-center gap-2">
+                        <span className="text-sm text-muted-foreground">ช่วงเวลา</span>
+                        <Input
+                          aria-label="ตั้งแต่เวลา"
+                          type="time"
+                          className="w-32"
+                          value={deal.fromTime}
+                          onChange={(e) => updateDeal(i, { fromTime: e.target.value })}
+                        />
+                        <span className="text-sm">ถึง</span>
+                        <Input
+                          aria-label="ถึงเวลา"
+                          type="time"
+                          className="w-32"
+                          value={deal.toTime}
+                          onChange={(e) => updateDeal(i, { toTime: e.target.value })}
+                        />
+                        <span className="text-xs text-muted-foreground">
+                          {deal.fromTime || deal.toTime ? dealWindowLabel(deal) : "เว้นว่าง = ทั้งวัน"}
+                        </span>
+                      </div>
                       {valid && Number.isFinite(normal) && normal > 0 ? (
                         <span className={"w-full text-xs " + (price < normal ? "text-success" : "text-destructive")}>
                           {price < normal
@@ -601,7 +643,9 @@ export default function ProductsPage() {
                   variant="outline"
                   size="sm"
                   className="justify-self-start"
-                  onClick={() => setForm((f) => ({ ...f, deals: [...f.deals, { qty: "", price: "" }] }))}
+                  onClick={() =>
+                    setForm((f) => ({ ...f, deals: [...f.deals, { qty: "", price: "", fromTime: "", toTime: "" }] }))
+                  }
                 >
                   + เพิ่มโปรโมชั่น
                 </Button>
@@ -656,18 +700,26 @@ export default function ProductsPage() {
  * invalid blocks the save with a message rather than being silently discarded. Two deals for the
  * same quantity would be ambiguous, so that's refused too.
  */
-function parseDeals(rows: { qty: string; price: string }[]): { ok: true; deals: BundleDeal[] } | { ok: false; error: string } {
+function parseDeals(rows: DealRow[]): { ok: true; deals: BundleDeal[] } | { ok: false; error: string } {
   const deals: BundleDeal[] = [];
   for (const row of rows) {
-    if (row.qty.trim() === "" && row.price.trim() === "") continue;
+    if (row.qty.trim() === "" && row.price.trim() === "" && !row.fromTime && !row.toTime) continue;
     const qty = Number(row.qty);
     const price = Number(row.price);
     if (!Number.isInteger(qty) || qty < 2) return { ok: false, error: "จำนวนชิ้นของโปรโมชั่นต้องเป็นจำนวนเต็มตั้งแต่ 2 ขึ้นไป" };
     if (row.price.trim() === "" || !Number.isFinite(price) || price < 0) {
       return { ok: false, error: "กรอกราคารวมของโปรโมชั่นเป็นตัวเลข" };
     }
-    if (deals.some((d) => d.qty === qty)) return { ok: false, error: `มีโปรโมชั่นซื้อ ${qty} ชิ้นซ้ำกัน` };
-    deals.push({ qty, price });
+    if ((row.fromTime && parseClock(row.fromTime) === null) || (row.toTime && parseClock(row.toTime) === null)) {
+      return { ok: false, error: "เวลาของโปรโมชั่นไม่ถูกต้อง" };
+    }
+    const deal: BundleDeal = { qty, price, fromTime: row.fromTime || null, toTime: row.toTime || null };
+    // Same quantity twice is fine only when the two windows never run at the same time —
+    // otherwise the till couldn't tell which price applies.
+    if (deals.some((d) => d.qty === qty && dealWindowsOverlap(d, deal))) {
+      return { ok: false, error: `โปรโมชั่นซื้อ ${qty} ชิ้นมีช่วงเวลาซ้อนกัน ตั้งเวลาให้ไม่ทับกัน เช่น ถึง 20:00 กับ ตั้งแต่ 20:00` };
+    }
+    deals.push(deal);
   }
   return { ok: true, deals: deals.sort((a, b) => a.qty - b.qty) };
 }

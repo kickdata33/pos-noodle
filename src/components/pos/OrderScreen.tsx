@@ -26,6 +26,7 @@ import { resolveItemName } from "@/lib/pos/itemName";
 import { increaseItemQuantity } from "@/lib/pos/kitchenAlerts";
 import { generateOrderNumber } from "@/lib/pos/orderNumber";
 import { createOrJoinTableOrder } from "@/lib/pos/tableOrder";
+import { printQrForTable } from "@/lib/pos/tableQrPrint";
 import { printCheckBill, sendKitchenCancellation, sendOrderToKitchen } from "@/lib/pos/printQueue";
 import { countUnsentToKitchen } from "@/lib/pos/printTickets";
 import { deductStockForPaidOrder } from "@/lib/pos/stockService";
@@ -127,6 +128,12 @@ export function OrderScreen({ orderId, initialTableId, initialChannelId }: Props
   // Set once this screen has handed its table over to another device's order and is waiting for
   // the route change — stops the draft-seeding effect from re-creating a draft in the meantime.
   const switchingOrderRef = useRef(false);
+  // "This table was already opened on another device" — shown after this screen was switched
+  // onto that device's order instead of creating a second one.
+  const [joinedNotice, setJoinedNotice] = useState(false);
+  // One-tap "พิมพ์ QR ให้ลูกค้าสั่ง" state — see `handlePrintTableQr`.
+  const [printingQr, setPrintingQr] = useState(false);
+  const [qrPrintMessage, setQrPrintMessage] = useState<{ ok: boolean; text: string } | null>(null);
   // Latches true while `sendToKitchen` is writing a ticket — same plain-boolean pattern.
   const sendingToKitchenRef = useRef(false);
   const [activeCategoryId, setActiveCategoryId] = useState<string | null>(null);
@@ -169,9 +176,6 @@ export function OrderScreen({ orderId, initialTableId, initialChannelId }: Props
   // unsafe and then (surprisingly) stops trusting unrelated `Date.now()` calls elsewhere in the
   // file too. A slightly-too-long flash on a fast double-save is a fine trade for that.
   const [justSaved, setJustSaved] = useState(false);
-  // "This table was already opened on another device" — shown after this screen was switched
-  // onto that device's order instead of creating a second one.
-  const [joinedNotice, setJoinedNotice] = useState(false);
   function flashSaved() {
     setJustSaved(true);
     setTimeout(() => setJustSaved(false), 1500);
@@ -624,6 +628,26 @@ export function OrderScreen({ orderId, initialTableId, initialChannelId }: Props
 
   const kitchenPrintingOn = Boolean(catalogSettings?.printStation?.kitchenEnabled);
 
+  // "พิมพ์ QR ให้ลูกค้าสั่ง" — only for dine-in, and only in shops that switched it on
+  // (Admin → ตั้งค่าร้าน → พิมพ์ QR สั่งอาหารของโต๊ะ); everyone else never sees the button.
+  const qrPrintTable =
+    catalogSettings?.printStation?.tableQrEnabled && order?.tableId
+      ? (tables.find((t) => t.id === order.tableId) ?? null)
+      : null;
+  async function handlePrintTableQr() {
+    if (!qrPrintTable || !catalogSettings || !appUser) return;
+    setPrintingQr(true);
+    setQrPrintMessage(null);
+    try {
+      await printQrForTable(qrPrintTable, catalogSettings, appUser);
+      setQrPrintMessage({ ok: true, text: "ส่งพิมพ์แล้ว รับที่เครื่องแคชเชียร์" });
+    } catch (err) {
+      setQrPrintMessage({ ok: false, text: err instanceof Error ? err.message : "ส่งพิมพ์ไม่สำเร็จ" });
+    } finally {
+      setPrintingQr(false);
+    }
+  }
+
   /**
    * Prints a kitchen ticket for everything on this order the kitchen hasn't received yet (see
    * `computeKitchenSend`). There's no "บันทึกออเดอร์" step to hang this on (every tap saves
@@ -852,6 +876,18 @@ export function OrderScreen({ orderId, initialTableId, initialChannelId }: Props
               <p className="text-xs font-medium text-destructive">
                 ลูกค้าแจ้งว่าโอนแล้ว — กรุณาตรวจสอบยอดในแอปธนาคารก่อนยืนยันรับชำระ
               </p>
+            ) : null}
+            {qrPrintTable ? (
+              <div className="mt-2 flex flex-wrap items-center gap-2">
+                <Button size="sm" variant="outline" onClick={handlePrintTableQr} disabled={printingQr}>
+                  {printingQr ? "กำลังส่งพิมพ์..." : "พิมพ์ QR ให้ลูกค้าสั่ง"}
+                </Button>
+                {qrPrintMessage ? (
+                  <span className={"text-xs " + (qrPrintMessage.ok ? "text-success" : "text-destructive")}>
+                    {qrPrintMessage.text}
+                  </span>
+                ) : null}
+              </div>
             ) : null}
           </div>
           {/* Every menu tap saves immediately (create on the first item, update after) — this is

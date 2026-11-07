@@ -22,7 +22,7 @@ import type { Table } from "@/types";
  * Overwriting the previous token here is itself how an old printed QR gets invalidated — no
  * separate "revoke" step needed, since the old token simply stops matching.
  */
-export async function POST(_request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+export async function POST(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const session = await getServerSession();
   if (!session) return NextResponse.json({ error: "ไม่มีสิทธิ์เข้าถึง" }, { status: 401 });
 
@@ -38,6 +38,13 @@ export async function POST(_request: NextRequest, { params }: { params: Promise<
   }
   if (table.qrMode !== "session") {
     return NextResponse.json({ error: "โต๊ะนี้ไม่ได้เปิดใช้โหมด QR แบบเปลี่ยนใหม่" }, { status: 400 });
+  }
+
+  // `?reuse=1` (the one-tap "พิมพ์ QR" on the order screen): keep a token that's already active,
+  // so reprinting for a table that's mid-visit doesn't kill the QR its customers already scanned.
+  // Without it (the dialog's explicit "สร้าง QR ใหม่") a fresh token always replaces the old one.
+  if (request.nextUrl.searchParams.get("reuse") === "1" && table.sessionToken) {
+    return NextResponse.json({ ok: true, token: table.sessionToken });
   }
 
   const token = randomUUID();

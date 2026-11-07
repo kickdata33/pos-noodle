@@ -90,3 +90,56 @@ test("customer orders can't include staff-only items", () => {
   );
   assert.equal(result.ok, false);
 });
+
+test("time windows: before/after 20:00 and across midnight", async () => {
+  const { isDealActiveAt, dealWindowsOverlap, dealWindowLabel } = await import("../src/lib/pos/pricing");
+  const at = (h: number, m = 0) => h * 60 + m;
+  const before8 = { toTime: "20:00" };
+  const after8 = { fromTime: "20:00" };
+  assert.equal(isDealActiveAt(before8, at(19, 59)), true);
+  assert.equal(isDealActiveAt(before8, at(20, 0)), false);
+  assert.equal(isDealActiveAt(after8, at(20, 0)), true);
+  assert.equal(isDealActiveAt(after8, at(23, 59)), true);
+  const lateNight = { fromTime: "20:00", toTime: "02:00" };
+  assert.equal(isDealActiveAt(lateNight, at(1, 30)), true);
+  assert.equal(isDealActiveAt(lateNight, at(2, 0)), false);
+  assert.equal(isDealActiveAt({}, at(12)), true, "no window = all day");
+  assert.equal(dealWindowsOverlap(before8, after8), false);
+  assert.equal(dealWindowsOverlap({}, after8), true);
+  assert.equal(dealWindowLabel(before8), "ก่อน 20:00");
+  assert.equal(dealWindowLabel(after8), "ตั้งแต่ 20:00");
+  assert.equal(dealWindowLabel({}), "");
+});
+
+test("a line gets the deal running when it's added (shop time), and windows don't pool", () => {
+  const product = {
+    price: 89,
+    bundleDeals: [
+      { qty: 3, price: 189, toTime: "20:00" },
+      { qty: 3, price: 219, fromTime: "20:00" },
+    ],
+  };
+  // 12:00 UTC = 19:00 Bangkok; 13:30 UTC = 20:30 Bangkok.
+  const evening = Date.UTC(2026, 10, 7, 12, 0);
+  const late = Date.UTC(2026, 10, 7, 13, 30);
+  const early = bundleDealsForLine(product, 89, evening).bundleDeals!;
+  const after = bundleDealsForLine(product, 89, late).bundleDeals!;
+  assert.deepEqual(early.map((d) => d.price), [189]);
+  assert.deepEqual(after.map((d) => d.price), [219]);
+
+  const line = (id: string, qty: number, deals: typeof early): OrderItem => ({
+    id,
+    productId: "beer",
+    productName: "เบียร์",
+    quantity: qty,
+    unitPrice: 89,
+    modifiers: [],
+    note: "",
+    lineTotal: 89 * qty,
+    bundleDeals: deals,
+  });
+  assert.equal(computePromotionDiscount([line("a", 3, early)]), 267 - 189);
+  assert.equal(computePromotionDiscount([line("a", 3, after)]), 267 - 219);
+  // 2 bottles before 20:00 + 1 after: no window has 3 → no deal.
+  assert.equal(computePromotionDiscount([line("a", 2, early), line("b", 1, after)]), 0);
+});

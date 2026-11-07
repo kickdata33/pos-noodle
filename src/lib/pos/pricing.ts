@@ -151,10 +151,61 @@ export interface OrderTotals {
  */
 export function bundleDealsForLine(
   product: Pick<Product, "price" | "bundleDeals">,
-  unitPrice: number
+  unitPrice: number,
+  now: number = Date.now()
 ): { bundleDeals?: BundleDeal[] } {
-  const deals = product.bundleDeals?.filter((d) => d.qty >= 2) ?? [];
+  // Only the deals running *right now* are snapshotted — a line added at 19:55 keeps its
+  // before-20:00 price even if the bill is paid at 21:00, and lines from the two windows are
+  // never pooled into one deal (see `computePromotionDiscount`'s pool key).
+  const minute = bangkokMinuteOfDay(now);
+  const deals = product.bundleDeals?.filter((d) => d.qty >= 2 && isDealActiveAt(d, minute)) ?? [];
   return deals.length > 0 && unitPrice === product.price ? { bundleDeals: deals } : {};
+}
+
+const BANGKOK_OFFSET_MS = 7 * 60 * 60 * 1000;
+
+/** Minutes since midnight in shop time — computed from the UTC epoch so the server (UTC on
+ * Vercel) and a staff tablet agree. */
+export function bangkokMinuteOfDay(epochMs: number): number {
+  const d = new Date(epochMs + BANGKOK_OFFSET_MS);
+  return d.getUTCHours() * 60 + d.getUTCMinutes();
+}
+
+/** "HH:MM" → minutes since midnight, or `null` for blank/invalid. */
+export function parseClock(value: string | null | undefined): number | null {
+  const m = /^(\d{1,2}):(\d{2})$/.exec((value ?? "").trim());
+  if (!m) return null;
+  const h = Number(m[1]);
+  const min = Number(m[2]);
+  if (h > 24 || min > 59 || (h === 24 && min > 0)) return null;
+  return h * 60 + min;
+}
+
+/** Whether a deal's time window covers `minute` (see `BundleDeal.fromTime`). */
+export function isDealActiveAt(deal: Pick<BundleDeal, "fromTime" | "toTime">, minute: number): boolean {
+  const from = parseClock(deal.fromTime) ?? 0;
+  const to = parseClock(deal.toTime) ?? 24 * 60;
+  if (from === to) return true;
+  return from < to ? minute >= from && minute < to : minute >= from || minute < to;
+}
+
+/** Two deals' windows share at least one minute of the day. */
+export function dealWindowsOverlap(
+  a: Pick<BundleDeal, "fromTime" | "toTime">,
+  b: Pick<BundleDeal, "fromTime" | "toTime">
+): boolean {
+  for (let m = 0; m < 24 * 60; m++) if (isDealActiveAt(a, m) && isDealActiveAt(b, m)) return true;
+  return false;
+}
+
+/** Short label for a deal's window: "", "ก่อน 20:00", "ตั้งแต่ 20:00", "17:00–20:00". */
+export function dealWindowLabel(deal: Pick<BundleDeal, "fromTime" | "toTime">): string {
+  const from = parseClock(deal.fromTime) === null ? null : deal.fromTime!.trim();
+  const to = parseClock(deal.toTime) === null ? null : deal.toTime!.trim();
+  if (from && to) return `${from}–${to}`;
+  if (to) return `ก่อน ${to}`;
+  if (from) return `ตั้งแต่ ${from}`;
+  return "";
 }
 
 type PromoItem = Partial<Pick<OrderItem, "productId" | "unitPrice" | "quantity" | "bundleDeals">>;
@@ -164,7 +215,9 @@ export function computePromotionDiscount(items: PromoItem[]): number {
   for (const item of items) {
     if (!item.bundleDeals || item.bundleDeals.length === 0) continue;
     if (item.productId === undefined || item.unitPrice === undefined || item.quantity === undefined) continue;
-    const key = `${item.productId}@${item.unitPrice}`;
+    // Same product, same price, same deals — lines snapshotted in different time windows carry
+    // different deals and so never pool together.
+    const key = `${item.productId}@${item.unitPrice}@${JSON.stringify(item.bundleDeals)}`;
     const pool = pools.get(key) ?? { unitPrice: item.unitPrice, units: 0, deals: item.bundleDeals };
     pool.units += item.quantity;
     pools.set(key, pool);

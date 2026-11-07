@@ -104,6 +104,15 @@ export interface ModifierTier {
 export interface BundleDeal {
   qty: number;
   price: number;
+  /**
+   * Optional time window, shop time (Bangkok), "HH:MM" — the deal only applies to lines added
+   * from `fromTime` (inclusive) until `toTime` (exclusive), e.g. "3 ขวด 189 ก่อน 20:00" and
+   * "3 ขวด 219 ตั้งแต่ 20:00" (item: "โปรโมชั่นระบุเวลาได้"). A window may cross midnight
+   * ("20:00"–"02:00"). Blank `fromTime` = from 00:00, blank `toTime` = until midnight, both blank
+   * = all day (every deal before this field existed).
+   */
+  fromTime?: string | null;
+  toTime?: string | null;
 }
 
 /** e.g. Group "เส้น" (required, single-select) or "เพิ่มเติม" (optional, multi-select) — item 12. */
