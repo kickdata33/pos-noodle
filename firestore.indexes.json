@@ -1,6 +1,22 @@
 {
   "indexes": [
     {
+      "collectionGroup": "modifierOptions",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "groupId", "order": "ASCENDING" },
+        { "fieldPath": "sortOrder", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "deliveryPayouts",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "shopId", "order": "ASCENDING" },
+        { "fieldPath": "dateKey", "order": "ASCENDING" }
+      ]
+    },
+    {
       "collectionGroup": "stockMovements",
       "queryScope": "COLLECTION",
       "fields": [
