@@ -1,4 +1,4 @@
-import { doc, getDoc, setDoc, updateDoc } from "firebase/firestore";
+import { doc, getDoc, setDoc, updateDoc, onSnapshot, type Unsubscribe } from "firebase/firestore";
 
 import { db } from "@/lib/firebase/client";
 import { COLLECTIONS } from "@/lib/firebase/collections";
@@ -18,6 +18,18 @@ class ShopRepository {
   async getSettings(shopId: string): Promise<ShopSettings | null> {
     const snap = await getDoc(doc(db, COLLECTIONS.shopSettings, shopId));
     return snap.exists() ? ({ id: snap.id, ...snap.data() } as ShopSettings) : null;
+  }
+
+  /**
+   * Live settings for the POS — a switch flipped in Admin (print a receipt, print QR...) takes
+   * effect on every open tablet right away, instead of only after each one reloads.
+   */
+  subscribeSettings(shopId: string, onChange: (settings: ShopSettings | null) => void): Unsubscribe {
+    return onSnapshot(
+      doc(db, COLLECTIONS.shopSettings, shopId),
+      (snap) => onChange(snap.exists() ? ({ id: snap.id, ...snap.data() } as ShopSettings) : null),
+      (err) => console.error("subscribeSettings failed", err)
+    );
   }
 
   async setSettings(shopId: string, data: Omit<ShopSettings, "id">): Promise<void> {

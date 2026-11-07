@@ -50,9 +50,9 @@ const PosCatalogContext = createContext<PosCatalog | null>(null);
  * Mounted once here at the `/pos` layout level, this provider's subscriptions stay alive across
  * every `/pos/*` navigation (Next.js keeps a shared layout mounted while only the page below it
  * swaps), so opening an order is now just that order doc's own listener — everything else is
- * already in memory. `settings` is a one-time fetch (no live-subscribe method exists on
- * `shopRepository` — it's a single small doc, not worth adding one for), matching every prior
- * caller's behavior; `null` until it resolves, same as those callers' local fallback state did.
+ * already in memory. `settings` is live too (`shopRepository.subscribeSettings`): it used to be
+ * a one-time fetch, so a switch flipped in Admin (e.g. "พิมพ์ใบเสร็จอัตโนมัติ") silently did
+ * nothing on tablets until each one was reloaded. `null` until the first snapshot arrives.
  */
 export function PosCatalogProvider({ shopId, children }: { shopId: string; children: ReactNode }) {
   const [categories, setCategories] = useState<Category[]>([]);
@@ -77,7 +77,7 @@ export function PosCatalogProvider({ shopId, children }: { shopId: string; child
   useEffect(() => tableRepository.subscribeForShop(shopId, setTables), [shopId]);
   useEffect(() => paymentMethodRepository.subscribeForShop(shopId, setPaymentMethods), [shopId]);
   useEffect(() => {
-    shopRepository.getSettings(shopId).then(setSettings);
+    return shopRepository.subscribeSettings(shopId, setSettings);
   }, [shopId]);
 
   return (
