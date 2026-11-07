@@ -5,7 +5,10 @@ import { useEffect, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import type { Table } from "@/types";
+import { useAuth } from "@/hooks/useAuth";
+import { printTableQr } from "@/lib/pos/printQueue";
+import { shopRepository } from "@/repositories/shopRepository";
+import type { ShopSettings, Table } from "@/types";
 
 function buildUrl(tableId: string, token?: string | null): string {
   const base = `${window.location.origin}/order/table/${tableId}`;
@@ -36,6 +39,26 @@ export function TableQrDialog({ table, onOpenChange }: { table: Table | null; on
   const [url, setUrl] = useState<string>("");
   const [generating, setGenerating] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const { appUser } = useAuth();
+  // Settings are needed only for the "พิมพ์ QR" button (is it switched on, and the shop name on
+  // the slip) — fetched once per shop, since this dialog lives on both POS and Admin screens.
+  const [settings, setSettings] = useState<ShopSettings | null>(null);
+  const [printing, setPrinting] = useState(false);
+  const [printMessage, setPrintMessage] = useState<string | null>(null);
+  useEffect(() => {
+    if (!appUser?.shopId) return;
+    let cancelled = false;
+    shopRepository
+      .getSettings(appUser.shopId)
+      .then((s) => {
+        if (!cancelled) setSettings(s);
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [appUser?.shopId]);
+  const printEnabled = Boolean(settings?.printStation?.tableQrEnabled);
 
   async function renderQr(targetUrl: string) {
     setUrl(targetUrl);
@@ -49,6 +72,7 @@ export function TableQrDialog({ table, onOpenChange }: { table: Table | null; on
     // reasoning the original dialog this was built from already documented for `setDataUrl`.
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setError(null);
+    setPrintMessage(null);
     if (!table) {
       // Dialog just closed (or hasn't opened yet) — clear the previous table's image so a
       // re-open of a *different* table never flashes the old QR before the new one renders.
@@ -77,8 +101,10 @@ export function TableQrDialog({ table, onOpenChange }: { table: Table | null; on
     // eslint-disable-next-line react-hooks/exhaustive-deps -- re-runs on table identity + its live sessionToken, not `sessionMode`/`renderQr` (derived from `table`, not independent inputs)
   }, [table?.id, table?.sessionToken, sessionMode]);
 
-  async function generateNew() {
-    if (!table) return;
+  /** Asks the server for a fresh session token and shows its QR. Returns the new link, or
+   * `null` (with the error already shown) on failure. */
+  async function generateNew(): Promise<string | null> {
+    if (!table) return null;
     setGenerating(true);
     setError(null);
     try {
@@ -86,13 +112,46 @@ export function TableQrDialog({ table, onOpenChange }: { table: Table | null; on
       const data = (await res.json()) as { ok?: boolean; token?: string; error?: string };
       if (!res.ok || !data.ok || !data.token) {
         setError(data.error ?? "สร้าง QR ไม่สำเร็จ");
-        return;
+        return null;
       }
-      await renderQr(buildUrl(table.id, data.token));
+      const link = buildUrl(table.id, data.token);
+      await renderQr(link);
+      return link;
     } catch {
       setError("สร้าง QR ไม่สำเร็จ กรุณาลองใหม่");
+      return null;
     } finally {
       setGenerating(false);
+    }
+  }
+
+  /**
+   * Prints this table's QR slip at the cashier Print Station. A session-mode table without an
+   * active token gets one first — so seating a party is one tap: "พิมพ์ QR" — and one that already
+   * has a token reprints the same QR (the customers at the table keep a working link).
+   */
+  async function handlePrint() {
+    if (!table || !appUser || !settings) return;
+    setPrinting(true);
+    setPrintMessage(null);
+    try {
+      let link = url;
+      if (sessionMode && !table.sessionToken && !dataUrl) {
+        const fresh = await generateNew();
+        if (!fresh) return;
+        link = fresh;
+      }
+      if (!link) return;
+      await printTableQr(
+        appUser.shopId,
+        { shopName: settings.name, tableName: table.name, url: link, sessionMode },
+        appUser.id
+      );
+      setPrintMessage("ส่งพิมพ์แล้ว รับใบ QR ที่เครื่องพิมพ์แคชเชียร์");
+    } catch {
+      setError("ส่งพิมพ์ไม่สำเร็จ ลองใหม่อีกครั้ง");
+    } finally {
+      setPrinting(false);
     }
   }
 
@@ -114,6 +173,7 @@ export function TableQrDialog({ table, onOpenChange }: { table: Table | null; on
           )}
           {dataUrl ? <p className="break-all text-center text-xs text-muted-foreground">{url}</p> : null}
           {error ? <p className="text-center text-sm text-destructive">{error}</p> : null}
+          {printMessage ? <p className="text-center text-sm font-medium text-success">{printMessage}</p> : null}
 
           {sessionMode ? (
             <>
@@ -132,12 +192,19 @@ export function TableQrDialog({ table, onOpenChange }: { table: Table | null; on
         </div>
 
         <DialogFooter>
+          {printEnabled && (dataUrl || sessionMode) ? (
+            <Button onClick={handlePrint} disabled={printing || generating}>
+              {printing ? "กำลังส่งพิมพ์..." : "พิมพ์ QR"}
+            </Button>
+          ) : null}
           {dataUrl ? (
             <a href={dataUrl} download={`qr-${table?.name}.png`}>
               <Button variant="outline">ดาวน์โหลด</Button>
             </a>
           ) : null}
-          <Button onClick={() => onOpenChange(false)}>ปิด</Button>
+          <Button variant={printEnabled ? "outline" : "default"} onClick={() => onOpenChange(false)}>
+            ปิด
+          </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

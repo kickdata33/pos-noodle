@@ -50,7 +50,7 @@ export default function SettingsPage() {
               paymentQrImageUrl: s.paymentQrImageUrl ?? null,
               pickupIdentificationMode: s.pickupIdentificationMode ?? "queue",
               receiptPrinterIp: s.receiptPrinterIp ?? null,
-              printStation: s.printStation ?? { kitchenEnabled: false, checkBillEnabled: false },
+              printStation: s.printStation ?? { kitchenEnabled: false, checkBillEnabled: false, tableQrEnabled: false },
             }
           : s
       );
@@ -267,10 +267,7 @@ export default function SettingsPage() {
             <Switch
               checked={settings.printStation?.kitchenEnabled ?? false}
               onCheckedChange={(v) =>
-                update("printStation", {
-                  kitchenEnabled: v,
-                  checkBillEnabled: settings.printStation?.checkBillEnabled ?? false,
-                })
+                update("printStation", { ...settings.printStation, kitchenEnabled: v, checkBillEnabled: settings.printStation?.checkBillEnabled ?? false })
               }
             />
           </div>
@@ -284,9 +281,24 @@ export default function SettingsPage() {
             <Switch
               checked={settings.printStation?.checkBillEnabled ?? false}
               onCheckedChange={(v) =>
+                update("printStation", { ...settings.printStation, kitchenEnabled: settings.printStation?.kitchenEnabled ?? false, checkBillEnabled: v })
+              }
+            />
+          </div>
+          <div className="flex items-center justify-between gap-4">
+            <div>
+              <p className="font-medium">พิมพ์ QR สั่งอาหารของโต๊ะ</p>
+              <p className="text-sm text-muted-foreground">
+                เพิ่มปุ่ม พิมพ์ QR ในหน้าต่าง QR ของโต๊ะ ออกที่เครื่องแคชเชียร์ ให้พนักงานยื่นให้ลูกค้าสแกนสั่งเอง
+              </p>
+            </div>
+            <Switch
+              checked={settings.printStation?.tableQrEnabled ?? false}
+              onCheckedChange={(v) =>
                 update("printStation", {
                   kitchenEnabled: settings.printStation?.kitchenEnabled ?? false,
-                  checkBillEnabled: v,
+                  checkBillEnabled: settings.printStation?.checkBillEnabled ?? false,
+                  tableQrEnabled: v,
                 })
               }
             />

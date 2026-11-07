@@ -108,6 +108,9 @@ export interface ShopSettings extends WithId {
     kitchenEnabled: boolean;
     /** Print a check bill (with a PromptPay QR for the exact amount) when staff taps "คิดเงิน". */
     checkBillEnabled: boolean;
+    /** Show "พิมพ์ QR" in the table QR dialog — a slip with the table's self-order QR, printed at
+     * the cashier station, for staff to hand to the customer. Absent = off. */
+    tableQrEnabled?: boolean;
   };
   /**
    * Which optional Admin modules this shop has turned on, beyond the universal POS core that

@@ -166,3 +166,20 @@ test("check bill without PromptPay ID prints with no QR", () => {
   assert.equal(job.qrPayload, null);
   assert.equal(job.qrCaption, null);
 });
+
+test("table QR slip: big table name, the ordering link as the QR, session warning", async () => {
+  const { tableQrJobFields } = await import("../src/lib/pos/printTickets");
+  const job = tableQrJobFields({
+    shopName: "ร้านทดสอบ",
+    tableName: "5",
+    url: "https://shop.ranpos.online/order/table/t5?s=abc",
+    sessionMode: true,
+  });
+  assert.equal(job.station, "cashier");
+  assert.equal(job.kind, "tableQr");
+  assert.equal(job.qrPayload, "https://shop.ranpos.online/order/table/t5?s=abc");
+  assert.ok(job.lines.some((l) => l.text === "โต๊ะ 5" && l.size === 2));
+  assert.ok(job.qrCaption?.includes("เช็คบิล"));
+  const staticJob = tableQrJobFields({ shopName: "ร้าน", tableName: "1", url: "u", sessionMode: false });
+  assert.ok(!staticJob.qrCaption?.includes("เช็คบิล"));
+});

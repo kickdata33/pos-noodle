@@ -131,3 +131,32 @@ export function checkBillJobFields(
     printedAt: null,
   };
 }
+
+/**
+ * Self-order QR slip for one table (item: "ปริ้น QR ให้ลูกค้าสั่งเอง") — printed at the cashier
+ * station and handed to the customer. `url` is the table's ordering link, including the one-time
+ * session token when the table uses `qrMode: "session"`; the slip then says it only works for
+ * this visit, so customers don't keep it for later.
+ */
+export function tableQrJobFields(
+  input: { shopName: string; tableName: string; url: string; sessionMode: boolean }
+): Pick<PrintJob, "station" | "kind" | "orderId" | "lines" | "qrPayload" | "qrCaption" | "status" | "claimedBy" | "error" | "printedAt"> {
+  const lines: ReceiptLine[] = [
+    { text: input.shopName, align: "center", bold: true },
+    { text: `โต๊ะ ${input.tableName}`, align: "center", bold: true, size: 2 },
+    { text: "สแกนเพื่อสั่งอาหาร", align: "center", bold: true },
+    { text: "สั่งเพิ่มได้ตลอด รายการเข้าบิลโต๊ะนี้ทันที", align: "center" },
+  ];
+  return {
+    station: "cashier",
+    kind: "tableQr",
+    orderId: "",
+    lines,
+    qrPayload: input.url,
+    qrCaption: input.sessionMode ? "QR นี้ใช้ได้จนกว่าจะเช็คบิล" : "เปิดกล้องมือถือแล้วสแกน",
+    status: "pending",
+    claimedBy: null,
+    error: null,
+    printedAt: null,
+  };
+}

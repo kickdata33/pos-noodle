@@ -7,7 +7,8 @@ import type { EpochMillis, WithId } from "./common";
  */
 export type PrintStation = "kitchen" | "cashier";
 
-export type PrintJobKind = "kitchen" | "checkBill";
+/** `tableQr` = a slip with a table's self-order QR for the customer to scan. */
+export type PrintJobKind = "kitchen" | "checkBill" | "tableQr";
 
 export type PrintJobStatus = "pending" | "printing" | "printed" | "failed";
 

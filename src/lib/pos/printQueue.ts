@@ -2,7 +2,7 @@ import { collection, doc, writeBatch } from "firebase/firestore";
 
 import { db } from "@/lib/firebase/client";
 import { COLLECTIONS } from "@/lib/firebase/collections";
-import { checkBillJobFields, computeKitchenSend, kitchenJobFields } from "@/lib/pos/printTickets";
+import { checkBillJobFields, computeKitchenSend, kitchenJobFields, tableQrJobFields } from "@/lib/pos/printTickets";
 import type { Order, OrderItem, PrintJob, ShopSettings } from "@/types";
 
 /**
@@ -104,4 +104,16 @@ export async function printCheckBill(
   batch.set(newJobRef(), job);
   await batch.commit();
   return true;
+}
+
+/** Queues a table's self-order QR slip at the cashier station. No order involved. */
+export async function printTableQr(
+  shopId: string,
+  input: { shopName: string; tableName: string; url: string; sessionMode: boolean },
+  createdBy: string
+): Promise<void> {
+  const job: Omit<PrintJob, "id"> = { ...tableQrJobFields(input), shopId, createdBy, createdAt: Date.now() };
+  const batch = writeBatch(db);
+  batch.set(newJobRef(), job);
+  await batch.commit();
 }
