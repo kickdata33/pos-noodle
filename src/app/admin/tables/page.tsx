@@ -8,6 +8,7 @@ import { BulkCreateTablesDialog } from "@/components/admin/tables/BulkCreateTabl
 import { TableQrDialog } from "@/components/shared/TableQrDialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Dialog,
   DialogContent,
@@ -21,8 +22,10 @@ import { Switch } from "@/components/ui/switch";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { useAuth } from "@/hooks/useAuth";
 import { computeSwap } from "@/lib/admin/sortOrder";
+import { printQrForTable } from "@/lib/pos/tableQrPrint";
+import { shopRepository } from "@/repositories/shopRepository";
 import { tableRepository } from "@/repositories/tableRepository";
-import type { Table as PosTable } from "@/types";
+import type { Table as PosTable, ShopSettings } from "@/types";
 
 /**
  * Table CRUD (item 13). Unlike Categories/Products, item 13 explicitly asks for real delete
@@ -44,11 +47,67 @@ export default function TablesPage() {
   const [saving, setSaving] = useState(false);
   const [qrTable, setQrTable] = useState<PosTable | null>(null);
   const [bulkOpen, setBulkOpen] = useState(false);
+  // Multi-select (item: "เลือกโต๊ะได้หลายๆ โต๊ะพร้อมกัน แล้วแก้ไข") — change QR mode, open/close or
+  // print QR for many tables in one go instead of one "แก้ไข" at a time.
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [bulkBusy, setBulkBusy] = useState(false);
+  const [bulkMessage, setBulkMessage] = useState<{ ok: boolean; text: string } | null>(null);
+  const [settings, setSettings] = useState<ShopSettings | null>(null);
 
   useEffect(() => {
     if (!shopId) return;
     return tableRepository.subscribeForShop(shopId, setItems);
   }, [shopId]);
+
+  useEffect(() => {
+    if (!shopId) return;
+    shopRepository.getSettings(shopId).then(setSettings).catch(() => undefined);
+  }, [shopId]);
+
+  // Drop selections for tables that were deleted elsewhere, so counts never include ghosts.
+  const selectedTables = items.filter((t) => selected.has(t.id));
+  const allSelected = items.length > 0 && selectedTables.length === items.length;
+
+  function toggleSelected(id: string) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+    setBulkMessage(null);
+  }
+
+  function toggleSelectAll() {
+    setSelected(allSelected ? new Set() : new Set(items.map((t) => t.id)));
+    setBulkMessage(null);
+  }
+
+  async function runBulk(label: string, action: (table: PosTable) => Promise<unknown>) {
+    if (selectedTables.length === 0) return;
+    setBulkBusy(true);
+    setBulkMessage(null);
+    const results = await Promise.allSettled(selectedTables.map(action));
+    const failed = results.filter((r) => r.status === "rejected").length;
+    setBulkBusy(false);
+    setBulkMessage(
+      failed === 0
+        ? { ok: true, text: `${label} ${selectedTables.length} โต๊ะแล้ว` }
+        : { ok: false, text: `${label}ไม่สำเร็จ ${failed} จาก ${selectedTables.length} โต๊ะ ลองอีกครั้ง` }
+    );
+  }
+
+  const bulkSetQrMode = (mode: "static" | "session") =>
+    runBulk(mode === "session" ? "ตั้ง QR เปลี่ยนทุกรอบ" : "ตั้ง QR ถาวร", (t) =>
+      // Same rule as the single-table form: going static clears any leftover session token.
+      tableRepository.update(t.id, { qrMode: mode, ...(mode === "static" ? { sessionToken: null } : {}) })
+    );
+  const bulkSetActive = (active: boolean) =>
+    runBulk(active ? "เปิดใช้งาน" : "ปิดชั่วคราว", (t) => tableRepository.update(t.id, { active }));
+  const bulkPrintQr = () =>
+    runBulk("ส่งพิมพ์ QR", (t) =>
+      settings && appUser ? printQrForTable(t, settings, appUser) : Promise.reject(new Error("no settings"))
+    );
 
   function openCreate() {
     setEditing(null);
@@ -123,9 +182,57 @@ export default function TablesPage() {
         </Button>
       }
     >
+      {selectedTables.length > 0 ? (
+        <div className="sticky top-0 z-10 mb-3 flex flex-wrap items-center gap-2 rounded-lg border border-primary/40 bg-card p-3 shadow-sm">
+          <span className="mr-1 font-semibold">เลือก {selectedTables.length} โต๊ะ</span>
+          <Button size="sm" variant="outline" disabled={bulkBusy} onClick={() => bulkSetQrMode("session")}>
+            QR เปลี่ยนทุกรอบ
+          </Button>
+          <Button size="sm" variant="outline" disabled={bulkBusy} onClick={() => bulkSetQrMode("static")}>
+            QR ถาวร
+          </Button>
+          <Button size="sm" variant="outline" disabled={bulkBusy} onClick={() => bulkSetActive(true)}>
+            เปิดใช้งาน
+          </Button>
+          <Button size="sm" variant="outline" disabled={bulkBusy} onClick={() => bulkSetActive(false)}>
+            ปิดชั่วคราว
+          </Button>
+          {settings?.printStation?.tableQrEnabled ? (
+            <Button size="sm" disabled={bulkBusy} onClick={bulkPrintQr}>
+              พิมพ์ QR
+            </Button>
+          ) : null}
+          <Button
+            size="sm"
+            variant="ghost"
+            disabled={bulkBusy}
+            onClick={() => {
+              setSelected(new Set());
+              setBulkMessage(null);
+            }}
+          >
+            ยกเลิกการเลือก
+          </Button>
+          {bulkMessage ? (
+            <span className={"w-full text-sm " + (bulkMessage.ok ? "text-success" : "text-destructive")}>
+              {bulkMessage.text}
+            </span>
+          ) : null}
+        </div>
+      ) : bulkMessage ? (
+        <p className={"mb-3 text-sm " + (bulkMessage.ok ? "text-success" : "text-destructive")}>{bulkMessage.text}</p>
+      ) : null}
+
       <Table>
         <TableHeader>
           <TableRow>
+            <TableHead className="w-10">
+              <Checkbox
+                aria-label="เลือกทุกโต๊ะ"
+                checked={allSelected ? true : selectedTables.length > 0 ? "indeterminate" : false}
+                onCheckedChange={toggleSelectAll}
+              />
+            </TableHead>
             <TableHead className="w-10" />
             <TableHead>ชื่อโต๊ะ</TableHead>
             <TableHead>สถานะ</TableHead>
@@ -134,7 +241,14 @@ export default function TablesPage() {
         </TableHeader>
         <TableBody>
           {items.map((table, index) => (
-            <TableRow key={table.id}>
+            <TableRow key={table.id} data-state={selected.has(table.id) ? "selected" : undefined}>
+              <TableCell>
+                <Checkbox
+                  aria-label={`เลือกโต๊ะ ${table.name}`}
+                  checked={selected.has(table.id)}
+                  onCheckedChange={() => toggleSelected(table.id)}
+                />
+              </TableCell>
               <TableCell>
                 <SortButtons
                   disabledUp={index === 0}
@@ -174,7 +288,7 @@ export default function TablesPage() {
           ))}
           {items.length === 0 ? (
             <TableRow>
-              <TableCell colSpan={4} className="text-center text-muted-foreground">
+              <TableCell colSpan={5} className="text-center text-muted-foreground">
                 ยังไม่มีโต๊ะ
               </TableCell>
             </TableRow>
