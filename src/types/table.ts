@@ -29,4 +29,11 @@ export interface Table extends WithId {
    * `/api/customer/table/[tableId]`'s own validation for how this is checked.
    */
   sessionToken?: string | null;
+  /**
+   * Set when staff print this table's self-order QR while it has no bill yet (item: "ถ้ากดพิมพ์
+   * QR แล้ว แสดงว่าลูกค้ากำลังจะสั่ง ให้เปลี่ยนสถานะ") — the POS home shows the table as
+   * "มีลูกค้า · รอสั่ง" so nobody seats another party there. Cleared with the QR session (paid,
+   * cancelled, moved, or "ลูกค้าออกแล้ว"); the POS also ignores it after a few hours.
+   */
+  seatedAt?: number | null;
 }

@@ -33,6 +33,7 @@ export async function POST(_request: NextRequest, { params }: { params: Promise<
     return NextResponse.json({ error: "ไม่มีสิทธิ์เข้าถึง" }, { status: 403 });
   }
 
-  await ref.update({ sessionToken: null });
+  // Closing the visit also clears the "มีลูกค้า · รอสั่ง" mark (Table.seatedAt).
+  await ref.update({ sessionToken: null, seatedAt: null });
   return NextResponse.json({ ok: true });
 }

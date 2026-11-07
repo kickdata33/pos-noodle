@@ -21,4 +21,7 @@ export async function printQrForTable(
     url += `?s=${encodeURIComponent(data.token)}`;
   }
   await printTableQr(user.shopId, { shopName: settings.name, tableName: table.name, url, sessionMode }, user.id);
+  // Show the table as "มีลูกค้า · รอสั่ง" on every POS screen. Best-effort: the slip is already
+  // queued, so a failure here must not report the print as failed.
+  await fetch(`/api/pos/tables/${table.id}/seat`, { method: "POST" }).catch(() => undefined);
 }

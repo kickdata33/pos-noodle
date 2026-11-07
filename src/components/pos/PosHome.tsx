@@ -21,6 +21,9 @@ import { usePosCatalog } from "./PosCatalogContext";
  * against tables/channels client-side — `Table` itself carries no status field (see
  * Milestone 3 plan: "table occupancy is derived, not stored").
  */
+/** A "รอสั่ง" mark older than this is treated as forgotten (customer left, nobody cleared it). */
+const SEATED_MAX_MS = 3 * 60 * 60 * 1000;
+
 export function PosHome() {
   const { shopId, tables, channels, settings } = usePosCatalog();
   const [openOrders, setOpenOrders] = useState<Order[]>([]);
@@ -35,6 +38,26 @@ export function PosHome() {
   // customer's first order opens the bill. Only in shops that switched it on.
   const qrPrintEnabled = Boolean(settings?.printStation?.tableQrEnabled);
   const [qrPrintState, setQrPrintState] = useState<Record<string, "sending" | "sent" | "error">>({});
+  // Clock for "รอสั่ง X นาที" and for ignoring stale seated marks — ticks every 30 s.
+  const [now, setNow] = useState(0);
+  useEffect(() => {
+    const tick = () => setNow(Date.now());
+    const first = setTimeout(tick, 0);
+    const timer = setInterval(tick, 30_000);
+    return () => {
+      clearTimeout(first);
+      clearInterval(timer);
+    };
+  }, []);
+  /** Minutes since the QR was printed for an empty table, or null when it isn't "รอสั่ง". */
+  function seatedMinutes(table: PosTable): number | null {
+    if (!table.seatedAt || now === 0 || now - table.seatedAt > SEATED_MAX_MS) return null;
+    return Math.max(0, Math.floor((now - table.seatedAt) / 60_000));
+  }
+  async function clearSeated(table: PosTable) {
+    // Customer left without ordering — same as closing the visit (also retires its session QR).
+    await fetch(`/api/pos/tables/${table.id}/close-session`, { method: "POST" }).catch(() => undefined);
+  }
   async function handlePrintQr(table: PosTable) {
     if (!settings || !appUser || qrPrintState[table.id] === "sending") return;
     setQrPrintState((s) => ({ ...s, [table.id]: "sending" }));
@@ -86,6 +109,7 @@ export function PosHome() {
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
           {activeTables.map((table) => {
             const order = orderForTable(table.id);
+            const waitingMinutes = order ? null : seatedMinutes(table);
             return (
               <Link
                 key={table.id}
@@ -102,7 +126,9 @@ export function PosHome() {
                     ? "border-success"
                     : order
                       ? "border-primary bg-primary/10"
-                      : "border-border bg-card hover:bg-accent")
+                      : waitingMinutes !== null
+                        ? "border-amber-500 bg-amber-100 hover:bg-amber-200 dark:bg-amber-950 dark:hover:bg-amber-900"
+                        : "border-border bg-card hover:bg-accent")
                 }
               >
                 {order?.pendingReview ? (
@@ -156,6 +182,28 @@ export function PosHome() {
                   <Badge variant={order.pendingReview ? "success" : "default"}>
                     {order.pendingReview ? "ออเดอร์ใหม่จาก QR" : formatCurrency(order.total, currency)}
                   </Badge>
+                ) : waitingMinutes !== null ? (
+                  <span className="flex items-center gap-1">
+                    <span className="rounded-md bg-amber-500 px-2 py-0.5 text-xs font-semibold text-white">
+                      รอสั่ง {waitingMinutes} นาที
+                    </span>
+                    <button
+                      type="button"
+                      aria-label={`โต๊ะ ${table.name} ลูกค้าออกแล้ว ล้างสถานะรอสั่ง`}
+                      title="ลูกค้าออกแล้ว"
+                      onClick={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        const note = table.qrMode === "session" ? " QR ที่พิมพ์ไว้จะใช้ไม่ได้" : "";
+                        if (window.confirm(`โต๊ะ ${table.name}: ลูกค้าออกไปแล้วโดยไม่สั่ง?${note}`)) {
+                          void clearSeated(table);
+                        }
+                      }}
+                      className="z-10 rounded px-1.5 text-sm font-bold text-amber-800 hover:bg-amber-200 dark:text-amber-200"
+                    >
+                      ×
+                    </button>
+                  </span>
                 ) : (
                   <Badge variant="muted">ว่าง</Badge>
                 )}
