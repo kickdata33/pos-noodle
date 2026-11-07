@@ -328,7 +328,7 @@ const PRINT_CSS = `
   .ticket-line.big { font-size: 16pt; line-height: 1.25; }
   .ticket-line.bold { font-weight: 700; }
   .ticket-qr { margin-top: 3mm; text-align: center; break-inside: avoid; }
-  .ticket-qr img { width: 46mm; height: 46mm; image-rendering: pixelated; }
+  .ticket-qr img { display: block; margin: 0 auto; width: 46mm; height: 46mm; image-rendering: pixelated; }
 }
 `;
 
