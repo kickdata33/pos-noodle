@@ -39,7 +39,7 @@ export function buildPrintStationSetupBat(input: { origin: string; host: string;
     ")",
     "",
     'if not exist "%PROFILE%" mkdir "%PROFILE%"',
-    'set ARGS=--kiosk-printing --user-data-dir="%PROFILE%" %URL%',
+    'set ARGS=--kiosk-printing --no-first-run --no-default-browser-check --user-data-dir="%PROFILE%" %URL%',
     "",
     "powershell -NoProfile -ExecutionPolicy Bypass -Command ^",
     '  "$w = New-Object -ComObject WScript.Shell;" ^',
@@ -58,7 +58,7 @@ export function buildPrintStationSetupBat(input: { origin: string; host: string;
 
 /** The same launch line for people who prefer to edit a shortcut by hand. */
 export function buildPrintStationCommand(input: { origin: string; host: string; station: string }): string {
-  return `"C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe" --kiosk-printing --user-data-dir="${stationProfileDir(
+  return `"C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe" --kiosk-printing --no-first-run --no-default-browser-check --user-data-dir="${stationProfileDir(
     input.host,
     input.station
   )}" ${input.origin}/pos/print-station?station=${input.station}`;
