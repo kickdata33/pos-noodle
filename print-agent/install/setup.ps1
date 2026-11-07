@@ -76,7 +76,9 @@ Step 'Choose the printer'
 $printers = @(Get-Printer | Sort-Object Name)
 if ($printers.Count -eq 0) { Fail 'Windows has no printers. Install the receipt printer driver first, then run this again.' }
 for ($i = 0; $i -lt $printers.Count; $i++) { Write-Host ("  [{0}] {1}  ({2})" -f ($i + 1), $printers[$i].Name, $printers[$i].PrinterStatus) }
-$guess = $printers | Where-Object { $_.Name -match 'XP|POS|80|Receipt|Thermal|Xprinter' } | Select-Object -First 1
+# Best guess for a receipt printer — never Windows' virtual printers (XPS/PDF/OneNote/Fax).
+$virtual = 'XPS|PDF|OneNote|Fax|Document Writer'
+$guess = $printers | Where-Object { $_.Name -notmatch $virtual -and $_.Name -match 'Xprinter|XP-|POS|80|Receipt|Thermal' } | Select-Object -First 1
 $chosen = @{}
 foreach ($station in $info.stations) {
   $label = if ($station -eq 'kitchen') { 'KITCHEN' } else { 'CASHIER' }
