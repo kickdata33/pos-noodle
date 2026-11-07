@@ -9,6 +9,7 @@ import { usePosCatalog } from "@/components/pos/PosCatalogContext";
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/hooks/useAuth";
 import { formatTime } from "@/lib/format";
+import { buildPrintStationCommand, buildPrintStationSetupBat } from "@/lib/pos/printStationSetup";
 import { printJobRepository } from "@/repositories/printJobRepository";
 import type { PrintJob, PrintJobLine, PrintStation } from "@/types";
 
@@ -248,6 +249,8 @@ export function PrintStationScreen() {
         </Button>
       </div>
 
+      <SetupHelp station={station} />
+
       <h2 className="mb-2 font-semibold">พิมพ์ล่าสุด</h2>
       {recent.length === 0 ? (
         <p className="text-sm text-muted-foreground">ยังไม่มีงานพิมพ์ตั้งแต่เปิดหน้านี้</p>
@@ -328,3 +331,64 @@ const PRINT_CSS = `
   .ticket-qr img { width: 46mm; height: 46mm; image-rendering: pixelated; }
 }
 `;
+
+/**
+ * "พิมพ์แล้วยังมีป๊อปอัพ?" helper: downloads a ready-made Windows setup file for *this* shop and
+ * station (built from the page's own address, so it works for every shop without editing), with
+ * the raw launch command as a fallback to copy. See `lib/pos/printStationSetup.ts`.
+ */
+function SetupHelp({ station }: { station: PrintStation }) {
+  const [copied, setCopied] = useState(false);
+
+  function input() {
+    return {
+      origin: window.location.origin,
+      host: window.location.hostname,
+      station,
+      label: station === "kitchen" ? "Kitchen" : "Cashier",
+    };
+  }
+
+  function download() {
+    const bat = buildPrintStationSetupBat(input());
+    const blob = new Blob([bat], { type: "application/octet-stream" });
+    const href = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = href;
+    a.download = `setup-print-station-${window.location.hostname.split(".")[0]}-${station}.bat`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(href), 1000);
+  }
+
+  async function copyCommand() {
+    try {
+      await navigator.clipboard.writeText(buildPrintStationCommand(input()));
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      // Clipboard blocked — the command is still visible to select by hand below.
+    }
+  }
+
+  return (
+    <details className="mb-6 rounded-lg border border-border bg-card p-4">
+      <summary className="cursor-pointer font-semibold">ตั้งให้พิมพ์ออกทันที ไม่มีป๊อปอัพ (Windows)</summary>
+      <ol className="mt-3 grid list-decimal gap-2 pl-5 text-sm">
+        <li>ตั้งเครื่องพิมพ์ใบเสร็จเป็น Default ใน Windows (Settings → Printers &amp; scanners → Set as default)</li>
+        <li>
+          กดปุ่มด้านล่างเพื่อดาวน์โหลดไฟล์ตั้งค่าของร้านนี้ ถ้า Chrome ถามว่าจะเก็บไฟล์ไหม ให้กด เก็บ/Keep
+        </li>
+        <li>ปิดหน้าต่างนี้ แล้วดับเบิลคลิกไฟล์ที่โหลดมา ถ้า Windows เตือน ให้กด More info → Run anyway</li>
+        <li>จะได้ไอคอน POS Print Station บนหน้าจอ และเปิดเองทุกครั้งที่เปิดคอม ใช้ไอคอนนี้เปิดสถานีพิมพ์เสมอ</li>
+      </ol>
+      <div className="mt-3 flex flex-wrap gap-2">
+        <Button onClick={download}>ดาวน์โหลดไฟล์ตั้งค่า</Button>
+        <Button variant="outline" onClick={copyCommand}>
+          {copied ? "คัดลอกแล้ว ✓" : "คัดลอกคำสั่ง (ตั้งเอง)"}
+        </Button>
+      </div>
+    </details>
+  );
+}
