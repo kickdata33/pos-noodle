@@ -44,3 +44,4 @@ next-env.d.ts
 # Print Agent files published for download at build time (scripts/copyPrintAgent.mjs)
 /public/print-agent/
 /print-agent/node_modules/
+*.bundle
