@@ -26,6 +26,7 @@ import {
 import { resolveItemName } from "@/lib/pos/itemName";
 import { increaseItemQuantity } from "@/lib/pos/kitchenAlerts";
 import { generateOrderNumber } from "@/lib/pos/orderNumber";
+import { confirmPaymentOnce } from "@/lib/pos/payOrder";
 import { createOrJoinTableOrder } from "@/lib/pos/tableOrder";
 import { printQrForTable } from "@/lib/pos/tableQrPrint";
 import { printCheckBill, sendKitchenCancellation, sendOrderToKitchen } from "@/lib/pos/printQueue";
@@ -34,7 +35,6 @@ import { deductStockForPaidOrder } from "@/lib/pos/stockService";
 import { buildOrderReceipt } from "@/lib/pos/receipt";
 import { auditLogRepository } from "@/repositories/auditLogRepository";
 import { orderRepository } from "@/repositories/orderRepository";
-import { paymentRepository } from "@/repositories/paymentRepository";
 import type { AuditReason, Order, OrderItem, Product, ShopSettings, Table } from "@/types";
 
 type DraftOrder = Omit<Order, "id"> & { id: string | null };
@@ -762,28 +762,26 @@ export function OrderScreen({ orderId, initialTableId, initialChannelId }: Props
     setError(null);
     try {
       const id = await ensureSaved();
-      const paidAt = Date.now();
-      await orderRepository.update(id, {
-        status: "PAID",
-        paymentStatus: "PAID",
-        paymentMethodId: payment.paymentMethodId,
-        paymentMethodName: payment.paymentMethodName,
-        cashReceived: payment.cashReceived,
-        changeDue: payment.changeDue,
-        paidAt,
-        updatedAt: paidAt,
-      });
-      await paymentRepository.create({
-        orderId: id,
-        shopId,
-        paymentMethodId: payment.paymentMethodId,
-        paymentMethodName: payment.paymentMethodName,
-        amount: totals.total,
-        cashReceived: payment.cashReceived,
-        changeDue: payment.changeDue,
+      // One transaction: order → PAID, payment recorded, receipt queued (if the shop prints
+      // through the queue) — and a no-op if this bill was already paid (double tap, retry,
+      // another device), so nothing below runs twice either. See `confirmPaymentOnce`.
+      const latest = orderRef.current ?? order;
+      const { alreadyPaid, paidAt } = await confirmPaymentOnce({
+        order: { ...latest, id } as Order,
+        payment: {
+          paymentMethodId: payment.paymentMethodId,
+          paymentMethodName: payment.paymentMethodName,
+          amount: totals.total,
+          cashReceived: payment.cashReceived,
+          changeDue: payment.changeDue,
+        },
+        settings: catalogSettings,
         createdBy: appUser!.id,
-        createdAt: paidAt,
       });
+      if (alreadyPaid) {
+        router.push("/pos");
+        return;
+      }
       // Piece-sold items (water, snacks, bottled drinks) come off the shelf count now — not
       // awaited: a stock write problem must never hold up or undo a completed sale.
       deductStockForPaidOrder({ id, shopId, items: orderRef.current?.items ?? order.items }, appUser!).catch((err) =>

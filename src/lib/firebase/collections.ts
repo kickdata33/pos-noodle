@@ -19,6 +19,10 @@ export const COLLECTIONS = {
    * `types/printJob.ts`. Shop members create and read their own shop's jobs; the station (a
    * signed-in staff/admin session on the shop's PC) claims and marks them printed. */
   printJobs: "printJobs",
+  /** Background Print Agents (types/printJob.ts `PrintAgent`) and their hashed secrets —
+   * the secrets collection is server-only (no client rule allows it). */
+  printAgents: "printAgents",
+  printAgentSecrets: "printAgentSecrets",
   /** Per-product on-hand counts for piece-sold items (doc id = productId) and their append-only
    * change log — see `types/stock.ts`. */
   /** One doc per table (doc id = tableId) pointing at the order that last opened it — lets two

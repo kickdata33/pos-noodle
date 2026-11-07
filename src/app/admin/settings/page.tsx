@@ -10,6 +10,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
+import { PrintAgentSettings } from "@/components/admin/settings/PrintAgentSettings";
 import { Textarea } from "@/components/ui/textarea";
 import { useAuth } from "@/hooks/useAuth";
 import { compressImageFile } from "@/lib/billing/compressImage";
@@ -287,6 +288,25 @@ export default function SettingsPage() {
           </div>
           <div className="flex items-center justify-between gap-4">
             <div>
+              <p className="font-medium">พิมพ์ใบเสร็จอัตโนมัติหลังชำระเงิน</p>
+              <p className="text-sm text-muted-foreground">
+                ออกที่เครื่องแคชเชียร์ครั้งเดียวต่อการชำระเงิน แม้กดยืนยันซ้ำ พิมพ์ซ้ำได้จากประวัติออเดอร์
+              </p>
+            </div>
+            <Switch
+              checked={settings.printStation?.receiptEnabled ?? false}
+              onCheckedChange={(v) =>
+                update("printStation", {
+                  ...settings.printStation,
+                  kitchenEnabled: settings.printStation?.kitchenEnabled ?? false,
+                  checkBillEnabled: settings.printStation?.checkBillEnabled ?? false,
+                  receiptEnabled: v,
+                })
+              }
+            />
+          </div>
+          <div className="flex items-center justify-between gap-4">
+            <div>
               <p className="font-medium">พิมพ์ QR สั่งอาหารของโต๊ะ</p>
               <p className="text-sm text-muted-foreground">
                 เพิ่มปุ่ม พิมพ์ QR ในหน้าต่าง QR ของโต๊ะ ออกที่เครื่องแคชเชียร์ ให้พนักงานยื่นให้ลูกค้าสแกนสั่งเอง
@@ -296,6 +316,7 @@ export default function SettingsPage() {
               checked={settings.printStation?.tableQrEnabled ?? false}
               onCheckedChange={(v) =>
                 update("printStation", {
+                  ...settings.printStation,
                   kitchenEnabled: settings.printStation?.kitchenEnabled ?? false,
                   checkBillEnabled: settings.printStation?.checkBillEnabled ?? false,
                   tableQrEnabled: v,
@@ -304,6 +325,8 @@ export default function SettingsPage() {
             />
           </div>
         </div>
+
+        <PrintAgentSettings />
 
         <div className="grid gap-2">
           <Label htmlFor="s-currency">สกุลเงิน (ISO code)</Label>

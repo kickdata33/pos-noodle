@@ -2,7 +2,14 @@ import { collection, doc, writeBatch } from "firebase/firestore";
 
 import { db } from "@/lib/firebase/client";
 import { COLLECTIONS } from "@/lib/firebase/collections";
-import { checkBillJobFields, computeKitchenSend, kitchenJobFields, tableQrJobFields } from "@/lib/pos/printTickets";
+import {
+  autoReceiptJobId,
+  checkBillJobFields,
+  computeKitchenSend,
+  kitchenJobFields,
+  receiptJobFields,
+  tableQrJobFields,
+} from "@/lib/pos/printTickets";
 import type { Order, OrderItem, PrintJob, ShopSettings } from "@/types";
 
 /**
@@ -113,6 +120,47 @@ export async function printTableQr(
   createdBy: string
 ): Promise<void> {
   const job: Omit<PrintJob, "id"> = { ...tableQrJobFields(input), shopId, createdBy, createdAt: Date.now() };
+  const batch = writeBatch(db);
+  batch.set(newJobRef(), job);
+  await batch.commit();
+}
+
+/**
+ * A deliberate reprint of an earlier job (POS problem list "พิมพ์ใหม่", or reprinting a
+ * receipt): always a brand-new job with the same content, linked by `reprintOf` — never a reset
+ * of the old job, so the history of what happened to the original stays intact.
+ */
+export async function reprintJob(original: PrintJob, createdBy: string): Promise<void> {
+  const job: Omit<PrintJob, "id"> = {
+    shopId: original.shopId,
+    station: original.station,
+    kind: original.kind,
+    orderId: original.orderId,
+    lines: original.lines,
+    qrPayload: original.qrPayload,
+    qrCaption: original.qrCaption,
+    status: "pending",
+    claimedBy: null,
+    error: null,
+    printedAt: null,
+    createdBy,
+    createdAt: Date.now(),
+    reprintOf: original.id,
+  };
+  const batch = writeBatch(db);
+  batch.set(newJobRef(), job);
+  await batch.commit();
+}
+
+/** Reprint a paid order's receipt on purpose — a new job each time. */
+export async function reprintReceipt(order: Order, settings: ShopSettings, createdBy: string): Promise<void> {
+  const job: Omit<PrintJob, "id"> = {
+    ...receiptJobFields(order, settings),
+    shopId: order.shopId,
+    createdBy,
+    createdAt: Date.now(),
+    reprintOf: autoReceiptJobId(order.id),
+  };
   const batch = writeBatch(db);
   batch.set(newJobRef(), job);
   await batch.commit();

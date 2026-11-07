@@ -111,6 +111,9 @@ export interface ShopSettings extends WithId {
     /** Show "พิมพ์ QR" in the table QR dialog — a slip with the table's self-order QR, printed at
      * the cashier station, for staff to hand to the customer. Absent = off. */
     tableQrEnabled?: boolean;
+    /** Queue the paid receipt for the cashier station when a payment is confirmed — once per
+     * payment, in the same transaction that marks the order paid. Absent = off. */
+    receiptEnabled?: boolean;
   };
   /**
    * Which optional Admin modules this shop has turned on, beyond the universal POS core that

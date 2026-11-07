@@ -12,7 +12,9 @@ import {
 } from "@/components/ui/dialog";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { formatCurrency } from "@/lib/format";
+import { useAuth } from "@/hooks/useAuth";
 import { printReceiptViaEpos } from "@/lib/pos/eposPrint";
+import { reprintReceipt } from "@/lib/pos/printQueue";
 import { buildOrderReceipt } from "@/lib/pos/receipt";
 import { orderRepository } from "@/repositories/orderRepository";
 import { shopRepository } from "@/repositories/shopRepository";
@@ -38,6 +40,7 @@ const STATUS_VARIANT: Record<OrderStatus, "default" | "success" | "muted" | "des
 /** Read-only order list (item 19), open to staff and admin alike — no editing here. */
 export function OrderHistory() {
   const { shopId } = usePosCatalog();
+  const { appUser } = useAuth();
   const [orders, setOrders] = useState<Order[]>([]);
   const [settings, setSettings] = useState<ShopSettings | null>(null);
   const [selected, setSelected] = useState<Order | null>(null);
@@ -57,12 +60,21 @@ export function OrderHistory() {
    * when a copy is wanted after the fact). Only ever offered for a `PAID` order, since an OPEN
    * or CANCELLED one has no completed sale to print a receipt for. */
   async function handleReprint(order: Order) {
-    if (!settings?.receiptPrinterIp) return;
+    if (!settings) return;
     setReprinting(true);
     setReprintResult(null);
     try {
-      const result = await printReceiptViaEpos(settings.receiptPrinterIp, buildOrderReceipt(order, settings));
-      setReprintResult(result.ok ? "ส่งพิมพ์แล้ว" : result.error ?? "พิมพ์ไม่สำเร็จ");
+      if (settings.printStation?.receiptEnabled && appUser) {
+        // Print-queue shops: a deliberate reprint is a new job of its own (never a reset of the
+        // automatic one), picked up by the cashier station / Print Agent.
+        await reprintReceipt(order, settings, appUser.id);
+        setReprintResult("ส่งเข้าคิวพิมพ์แล้ว รับที่เครื่องแคชเชียร์");
+      } else if (settings.receiptPrinterIp) {
+        const result = await printReceiptViaEpos(settings.receiptPrinterIp, buildOrderReceipt(order, settings));
+        setReprintResult(result.ok ? "ส่งพิมพ์แล้ว" : result.error ?? "พิมพ์ไม่สำเร็จ");
+      }
+    } catch {
+      setReprintResult("ส่งพิมพ์ไม่สำเร็จ");
     } finally {
       setReprinting(false);
     }
@@ -153,7 +165,7 @@ export function OrderHistory() {
                 ) : null}
               </div>
             ) : null}
-            {selected?.status === "PAID" && settings?.receiptPrinterIp ? (
+            {selected?.status === "PAID" && (settings?.receiptPrinterIp || settings?.printStation?.receiptEnabled) ? (
               <div className="flex items-center gap-3">
                 <Button variant="outline" size="sm" onClick={() => handleReprint(selected)} disabled={reprinting}>
                   {reprinting ? "กำลังพิมพ์..." : "พิมพ์ใบเสร็จ"}

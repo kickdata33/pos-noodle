@@ -27,6 +27,19 @@ service cloud.firestore {
         && userDoc().active == true;
     }
 
+    // A background Print Agent signed in with the custom token from /api/print-agent/token.
+    // It has no users/ doc, so isActiveUser() is false for it — it can touch nothing but its
+    // own shop's print jobs (agentMayPrint) and its own heartbeat.
+    function isPrintAgent() {
+      return isSignedIn() && request.auth.token.role == 'printAgent';
+    }
+
+    function agentMayPrint(job) {
+      return isPrintAgent()
+        && job.shopId == request.auth.token.shopId
+        && job.station in request.auth.token.stations;
+    }
+
     function isAdmin() {
       return isActiveUser() && userDoc().role == 'admin';
     }
@@ -299,16 +312,37 @@ service cloud.firestore {
     }
 
     match /printJobs/{jobId} {
-      allow read: if isActiveUser() && ownsExisting();
+      allow read: if (isActiveUser() && ownsExisting()) || agentMayPrint(resource.data);
       allow create: if isActiveUser() && ownsIncoming()
         && request.resource.data.status == 'pending'
         && request.resource.data.claimedBy == null
         && request.resource.data.station in ['kitchen', 'cashier'];
+      // Staff (and the browser Print Station, itself a staff session): status/claim/result
+      // fields and the "dealt with" flag — never what the ticket says.
       allow update: if isActiveUser() && ownsExisting() && ownsIncoming()
         && request.resource.data.diff(resource.data).affectedKeys()
-             .hasOnly(['status', 'claimedBy', 'error', 'printedAt'])
-        && request.resource.data.status in ['pending', 'printing', 'printed', 'failed'];
+             .hasOnly(['status', 'claimedBy', 'claimedAt', 'error', 'printedAt', 'printerName', 'problemAcknowledged'])
+        && request.resource.data.status in ['pending', 'printing', 'sent', 'printed', 'failed', 'uncertain'];
+      // Background Print Agent: only its own shop's jobs for its own stations, only the
+      // claim/result fields, and only as `claimedBy` = itself.
+      allow update: if agentMayPrint(resource.data)
+        && request.resource.data.diff(resource.data).affectedKeys()
+             .hasOnly(['status', 'claimedBy', 'claimedAt', 'error', 'printedAt', 'printerName'])
+        && request.resource.data.status in ['pending', 'printing', 'sent', 'failed', 'uncertain']
+        && (request.resource.data.claimedBy == null || request.resource.data.claimedBy == request.auth.token.agentId);
       allow delete: if false;
+    }
+
+    // Background Print Agents (types/printJob.ts). Created/revoked only by the server; shop
+    // members read them for the "สถานีพิมพ์ออฟไลน์" banner; an agent may refresh only its own
+    // heartbeat fields.
+    match /printAgents/{agentId} {
+      allow read: if isActiveUser() && ownsExisting();
+      allow update: if isPrintAgent() && request.auth.token.agentId == agentId
+        && resource.data.revokedAt == null
+        && request.resource.data.diff(resource.data).affectedKeys()
+             .hasOnly(['lastSeenAt', 'printers', 'hostname', 'version']);
+      allow create, delete: if false;
     }
 
     // --- Order counters: one doc per shop, holds the daily order-number sequence. Same trust

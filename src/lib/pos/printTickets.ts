@@ -160,3 +160,31 @@ export function tableQrJobFields(
     printedAt: null,
   };
 }
+
+/**
+ * Paid receipt for the cashier station — exactly the receipt layout the Epson path already
+ * prints (`buildOrderReceipt`), so both printers produce the same document. The time line is
+ * left to the station (`includeTime: false`), like every other queued ticket.
+ */
+export function receiptJobFields(
+  order: Order,
+  settings: ShopSettings
+): Pick<PrintJob, "station" | "kind" | "orderId" | "lines" | "qrPayload" | "qrCaption" | "status" | "claimedBy" | "error" | "printedAt"> {
+  return {
+    station: "cashier",
+    kind: "receipt",
+    orderId: order.id,
+    lines: buildOrderReceipt(order, settings, { includeTime: false }).lines,
+    qrPayload: null,
+    qrCaption: null,
+    status: "pending",
+    claimedBy: null,
+    error: null,
+    printedAt: null,
+  };
+}
+
+/** Deterministic id for an order's automatic receipt job — see `payOrder.confirmPaymentOnce`. */
+export function autoReceiptJobId(orderId: string): string {
+  return `receipt-${orderId}`;
+}

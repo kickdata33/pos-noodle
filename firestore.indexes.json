@@ -1,6 +1,14 @@
 {
   "indexes": [
     {
+      "collectionGroup": "printJobs",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "shopId", "order": "ASCENDING" },
+        { "fieldPath": "status", "order": "ASCENDING" }
+      ]
+    },
+    {
       "collectionGroup": "modifierOptions",
       "queryScope": "COLLECTION",
       "fields": [

@@ -141,7 +141,9 @@ export function PrintStationScreen() {
         if (claimed) {
           const qrDataUrl = job.qrPayload ? await QRCode.toDataURL(job.qrPayload, { width: 360, margin: 1 }) : null;
           await printOne({ key: job.id, lines: job.lines, qrDataUrl, qrCaption: job.qrCaption, createdAt: job.createdAt });
-          await printJobRepository.update(job.id, { status: "printed", printedAt: Date.now() });
+          // The browser can't know paper came out — only that Chrome handed the page to the
+          // printer driver — so this is "sent", never "printed" (see PrintJobStatus).
+          await printJobRepository.update(job.id, { status: "sent", printedAt: Date.now() });
           entry = { id: job.id, title: jobTitle(job), at: Date.now(), ok: true };
         }
       } catch (err) {

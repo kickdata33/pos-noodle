@@ -1,0 +1,18 @@
+{
+  "name": "ranpos-print-agent",
+  "version": "1.0.0",
+  "private": true,
+  "description": "RanPOS background Print Agent: prints the shop's print queue on a Windows printer with no browser open.",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "node src/main.js",
+    "test": "node --test test/*.test.js"
+  },
+  "dependencies": {
+    "firebase": "^12.18.0",
+    "qrcode": "^1.5.4"
+  }
+}

@@ -3,6 +3,7 @@ import type { ReactNode } from "react";
 
 import { PosCatalogProvider } from "@/components/pos/PosCatalogContext";
 import { PosOrderAlertListener } from "@/components/pos/PosOrderAlertListener";
+import { PrintStatusBanner } from "@/components/pos/PrintStatusBanner";
 import { SignOutButton } from "@/components/shared/SignOutButton";
 import { SuspensionBanner } from "@/components/shared/SuspensionBanner";
 import { getServerSession } from "@/lib/auth/session";
@@ -38,6 +39,7 @@ export default async function PosLayout({ children }: { children: ReactNode }) {
           <p className="font-medium">{session.appUser.name}</p>
           <SignOutButton />
         </header>
+        <PrintStatusBanner />
         <div className="flex-1">{children}</div>
       </div>
     </PosCatalogProvider>
