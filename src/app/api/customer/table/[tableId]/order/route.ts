@@ -138,6 +138,9 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       if (!openOrderSnap.empty) {
         const orderDoc = openOrderSnap.docs[0];
         const order = orderDoc.data() as Order;
+        // Staff already tapped "คิดเงิน" — the bill is being paid, so no more items from the
+        // customer's phone (staff can still add from the POS, or reopen ordering there).
+        if (order.billRequestedAt) throw new BillRequestedError();
         const mergedItems = [...order.items, ...newItems];
         const totals = computeOrderTotals(mergedItems, settings);
         // Flags this table for the badge + alert sound on the POS home screen (`PosHome`) until
@@ -220,6 +223,12 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
 
     return NextResponse.json({ ok: true, orderId, addedCount: newItems.length });
   } catch (error) {
+    if (error instanceof BillRequestedError) {
+      return NextResponse.json(
+        { error: "ร้านกำลังคิดเงินโต๊ะนี้อยู่ หากต้องการสั่งเพิ่ม กรุณาแจ้งพนักงาน" },
+        { status: 409 }
+      );
+    }
     if (error instanceof ThrottledError) {
       return NextResponse.json(
         { error: "เพิ่งสั่งไปเมื่อครู่ กรุณารอสักครู่แล้วลองใหม่" },
@@ -231,3 +240,4 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
 }
 
 class ThrottledError extends Error {}
+class BillRequestedError extends Error {}

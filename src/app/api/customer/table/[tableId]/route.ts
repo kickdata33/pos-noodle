@@ -52,5 +52,9 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     // (payment fields, staff who opened it, etc. stay server-side).
     existingItems: existingOrder?.items ?? [],
     orderNumber: existingOrder?.orderNumber ?? null,
+    // Staff tapped "คิดเงิน" → the customer page shows the check-your-bill view (Order.billRequestedAt).
+    billRequested: Boolean(existingOrder?.billRequestedAt),
+    // The amount actually due (after promotions/service charge/VAT), not just the sum of lines.
+    total: existingOrder?.total ?? null,
   });
 }

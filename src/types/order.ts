@@ -148,6 +148,13 @@ export interface Order extends WithId {
   /** The part of `discount` that came from quantity deals (`computePromotionDiscount`) — shown
    * as "ส่วนลดโปรโมชั่น". Absent on orders from before promotions existed. */
   promoDiscount?: number;
+  /**
+   * Set when staff tap "คิดเงิน" (item: "หลังกดคิดเงิน ให้ขึ้นในมือถือลูกค้าว่า ขอบคุณที่ใช้บริการ
+   * กรุณาตรวจสอบรายการ") — the customer's QR page switches to a check-your-bill view and the
+   * customer order API refuses new items, so nobody adds food while transferring money. Staff can
+   * reopen ordering from the order screen ("เปิดให้ลูกค้าสั่งต่อ"). Absent/null = ordering open.
+   */
+  billRequestedAt?: number | null;
   /** Set when a PAID bill is voided (Admin → รายการบิล); stock taken at checkout was returned in
    * the same transaction. */
   voidedAt?: EpochMillis;

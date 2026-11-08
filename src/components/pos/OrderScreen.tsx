@@ -728,6 +728,21 @@ export function OrderScreen({ orderId, initialTableId, initialChannelId }: Props
    * The dialog opens even if printing failed. */
   async function handleOpenCheckout() {
     await sendToKitchen();
+    // Tell the customer's QR page the bill is on its way (thank-you / check-your-items view, no
+    // more ordering from the phone). Best-effort; staff can reopen ordering from this screen.
+    if (orderRef.current && orderRef.current.items.length > 0 && !orderRef.current.billRequestedAt) {
+      try {
+        const id = await ensureSaved();
+        const billRequestedAt = Date.now();
+        await orderRepository.update(id, { billRequestedAt });
+        if (orderRef.current) {
+          orderRef.current = { ...orderRef.current, billRequestedAt };
+          setOrder(orderRef.current);
+        }
+      } catch {
+        // The bill can still be paid; the customer page just won't switch views.
+      }
+    }
     const current = orderRef.current;
     if (current && appUser && catalogSettings?.printStation?.checkBillEnabled) {
       try {
@@ -739,6 +754,16 @@ export function OrderScreen({ orderId, initialTableId, initialChannelId }: Props
       }
     }
     setCheckoutOpen(true);
+  }
+
+  async function reopenCustomerOrdering() {
+    const current = orderRef.current;
+    if (!current?.id) return;
+    await orderRepository.update(current.id, { billRequestedAt: null });
+    if (orderRef.current) {
+      orderRef.current = { ...orderRef.current, billRequestedAt: null };
+      setOrder(orderRef.current);
+    }
   }
 
   async function handleReprintCheckBill() {
@@ -928,6 +953,16 @@ export function OrderScreen({ orderId, initialTableId, initialChannelId }: Props
               <p className="text-xs font-medium text-destructive">
                 ลูกค้าแจ้งว่าโอนแล้ว — กรุณาตรวจสอบยอดในแอปธนาคารก่อนยืนยันรับชำระ
               </p>
+            ) : null}
+            {order.billRequestedAt && order.tableId ? (
+              <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
+                <span className="font-medium text-amber-700 dark:text-amber-300">
+                  กำลังคิดเงิน — ลูกค้าสั่งเพิ่มผ่าน QR ไม่ได้
+                </span>
+                <Button size="sm" variant="ghost" onClick={reopenCustomerOrdering}>
+                  เปิดให้ลูกค้าสั่งต่อ
+                </Button>
+              </div>
             ) : null}
             {qrPrintTable ? (
               <div className="mt-2 flex flex-wrap items-center gap-2">

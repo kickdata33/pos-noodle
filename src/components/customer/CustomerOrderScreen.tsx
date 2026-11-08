@@ -21,6 +21,10 @@ interface TableResponse {
   table: { id: string; name: string };
   existingItems: OrderItem[];
   orderNumber: string | null;
+  /** Staff tapped "คิดเงิน" — show the check-your-bill view instead of the menu. */
+  billRequested?: boolean;
+  /** Amount due as the shop computed it (promotions, service charge, VAT included). */
+  total?: number | null;
 }
 
 /** A locally-built cart line before it's ever sent to the server — no `id` yet (the API assigns
@@ -360,6 +364,59 @@ export function CustomerOrderScreen({
   // same product with different modifiers/notes don't get flattened into one — plus a grand
   // total, since "สั่งไปแล้ว" previously showed quantities with no price or detail at all.
   const orderedTotal = tableInfo.existingItems.reduce((sum, item) => sum + item.lineTotal, 0);
+
+  // Staff are checking out this table: thank the customer, show exactly what they're paying for,
+  // and take the menu away so nothing gets added mid-transfer (the API refuses it too). Polling
+  // keeps running — staff reopening ordering brings the menu back, payment shows "ขอบคุณ".
+  if (tableInfo.billRequested) {
+    const due = tableInfo.total ?? orderedTotal;
+    return (
+      <main className="mx-auto flex min-h-dvh max-w-md flex-col gap-4 p-5">
+        <header className="pt-4 text-center">
+          <p className="text-sm text-muted-foreground">โต๊ะ {tableInfo.table.name}</p>
+          <h1 className="mt-2 text-2xl font-semibold">ขอบคุณที่ใช้บริการ 🙏</h1>
+          <p className="mt-2 text-base">กรุณาตรวจสอบรายการและยอดชำระของท่าน</p>
+        </header>
+        <section className="rounded-xl border border-border bg-card p-4">
+          <ul className="flex flex-col gap-2 text-sm">
+            {tableInfo.existingItems.map((item) => (
+              <li key={item.id} className="flex justify-between gap-2 border-b border-border/60 pb-2 last:border-0 last:pb-0">
+                <span>
+                  {item.productName} x{item.quantity}
+                  {item.modifiers.length > 0 ? (
+                    <span className="block text-xs text-muted-foreground">
+                      {item.modifiers.map((m) => m.optionName).join(", ")}
+                    </span>
+                  ) : null}
+                </span>
+                <span className="shrink-0 tabular-nums">{formatCurrency(item.lineTotal, currency)}</span>
+              </li>
+            ))}
+          </ul>
+          {due !== orderedTotal ? (
+            <div className="mt-3 flex justify-between text-sm text-muted-foreground">
+              <span>รวมรายการ</span>
+              <span className="tabular-nums">{formatCurrency(orderedTotal, currency)}</span>
+            </div>
+          ) : null}
+          <div className="mt-2 flex items-baseline justify-between border-t border-border pt-3">
+            <span className="text-base font-medium">ยอดชำระ</span>
+            <span className="text-2xl font-bold tabular-nums">{formatCurrency(due, currency)}</span>
+          </div>
+        </section>
+        <p className="text-center text-sm text-muted-foreground">
+          ชำระได้โดยสแกน QR บนใบแจ้งค่าอาหาร หรือแจ้งพนักงาน
+          <br />
+          รายการไม่ถูกต้องหรือต้องการสั่งเพิ่ม กรุณาแจ้งพนักงาน
+        </p>
+        {cart.length > 0 ? (
+          <p className="rounded-lg bg-muted p-3 text-center text-sm">
+            มี {cart.length} รายการในตะกร้าที่ยังไม่ได้สั่ง หากต้องการ กรุณาแจ้งพนักงาน
+          </p>
+        ) : null}
+      </main>
+    );
+  }
 
   return (
     <div className="flex min-h-dvh flex-col pb-40">
