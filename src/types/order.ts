@@ -72,6 +72,11 @@ export interface OrderItem extends WithId {
    * `quantity × bundleUnits`. Absent on normal lines (= 1 piece each).
    */
   bundleUnits?: number;
+  /** When the kitchen marked this line ทำแล้ว (with `prepared`). Lines marked before this field
+   * existed have none and count as already served. */
+  preparedAt?: number;
+  /** When the kitchen sent this line out with "เรียกเสิร์ฟ" (`types/serveCall.ts`). */
+  serveCalledAt?: number;
 }
 
 /**

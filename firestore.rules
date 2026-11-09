@@ -280,6 +280,18 @@ service cloud.firestore {
     // admin session on the shop's PC). A new job must start out pending and unclaimed, and an
     // update can only move status/claim/result fields — never rewrite what the ticket says.
     // Customer QR orders queue their kitchen tickets through the Admin SDK, outside these rules.
+    // Kitchen "เรียกเสิร์ฟ" calls (types/serveCall.ts): any active member of the shop may raise
+    // one (kitchen screen) and acknowledge it (staff phone) — acknowledging may only fill in who
+    // and when, never rewrite the call.
+    match /serveCalls/{callId} {
+      allow read: if isActiveUser() && ownsExisting();
+      allow create: if isActiveUser() && ownsIncoming() && request.resource.data.acknowledgedAt == null;
+      allow update: if isActiveUser() && ownsExisting() && ownsIncoming()
+        && request.resource.data.diff(resource.data).affectedKeys()
+             .hasOnly(['acknowledgedAt', 'acknowledgedById', 'acknowledgedByName']);
+      allow delete: if false;
+    }
+
     // Which order currently holds a table (doc id = tableId) — see lib/pos/tableOrder.ts. Just a
     // pointer; every reader re-checks the order itself, so a stale pointer is harmless. `get` on a
     // missing doc is allowed because the create transaction probes it before the first order.

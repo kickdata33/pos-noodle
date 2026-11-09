@@ -4,11 +4,15 @@ import { useEffect, useRef, useState } from "react";
 
 import { PosBackLink } from "@/components/pos/PosBackLink";
 import { usePosCatalog } from "@/components/pos/PosCatalogContext";
+import { Button } from "@/components/ui/button";
+import { useAuth } from "@/hooks/useAuth";
 import { formatTime } from "@/lib/format";
 import { detectNewKitchenItems, isNewKitchenItem } from "@/lib/pos/kitchenAlerts";
 import { playOrderAlertSound } from "@/lib/pos/notificationSound";
+import { awaitingServeCall, linesToCall, staysOnKitchenScreen } from "@/lib/pos/serveCalls";
 import { orderRepository } from "@/repositories/orderRepository";
-import type { Order, OrderItem } from "@/types";
+import { serveCallRepository } from "@/repositories/serveCallRepository";
+import type { Order, OrderItem, ServeCall } from "@/types";
 
 /**
  * Kitchen display (a separate screen/corner from the order-taking POS, per the shop's request):
@@ -23,7 +27,13 @@ import type { Order, OrderItem } from "@/types";
  */
 export function KitchenScreen() {
   const { shopId } = usePosCatalog();
+  const { appUser } = useAuth();
   const [openOrders, setOpenOrders] = useState<Order[]>([]);
+  // "เรียกเสิร์ฟ" calls nobody has picked up yet — shown at the top so the cook can see the floor
+  // hasn't responded.
+  const [openCalls, setOpenCalls] = useState<ServeCall[]>([]);
+  const [callingId, setCallingId] = useState<string | null>(null);
+  useEffect(() => serveCallRepository.subscribeOpen(shopId, setOpenCalls), [shopId]);
 
   // Item ids already on screen — anything unprepared that isn't in here is new food to cook, so
   // the tablet chimes (for staff-keyed orders too, not only customer QR orders — the layout-wide
@@ -48,8 +58,9 @@ export function KitchenScreen() {
     return () => clearInterval(timer);
   }, []);
 
+  // An order leaves this screen once everything is cooked AND called out ("เรียกเสิร์ฟ").
   const kitchenOrders = openOrders
-    .filter((o) => o.items.some((item) => !item.prepared))
+    .filter(staysOnKitchenScreen)
     .slice()
     .sort((a, b) => a.createdAt - b.createdAt);
 
@@ -58,14 +69,43 @@ export function KitchenScreen() {
     // purity rule can't trace that through the inline arrow wrapper, so it's a false positive.
     // eslint-disable-next-line react-hooks/purity
     const updatedAt = Date.now();
-    const items = order.items.map((i) => (i.id === item.id ? { ...i, prepared: !i.prepared } : i));
+    const items = order.items.map((i) => {
+      if (i.id !== item.id) return i;
+      if (!i.prepared) return { ...i, prepared: true, preparedAt: updatedAt };
+      // Un-ticking drops the timestamps entirely (Firestore rejects `undefined` values).
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+      const { preparedAt, serveCalledAt, ...rest } = i;
+      return { ...rest, prepared: false };
+    });
     await orderRepository.update(order.id, { items, updatedAt });
+  }
+
+  async function callToServe(order: Order) {
+    if (!appUser) return;
+    const lines = linesToCall(order.items);
+    if (lines.length === 0) return;
+    setCallingId(order.id);
+    try {
+      await serveCallRepository.callToServe(order, lines, appUser);
+    } finally {
+      setCallingId(null);
+    }
   }
 
   return (
     <main className="mx-auto max-w-3xl p-4 sm:p-6">
       <PosBackLink />
       <h1 className="mb-4 text-lg font-semibold">หน้าจอครัว</h1>
+
+      {openCalls.length > 0 ? (
+        <div className="mb-4 grid gap-1 rounded-lg border border-amber-500 bg-amber-100 p-3 text-sm dark:bg-amber-950">
+          {openCalls.map((c) => (
+            <p key={c.id} className="font-medium">
+              🔔 {c.label} — เรียกเสิร์ฟแล้ว รอพนักงานรับ ({Math.max(0, Math.floor((now - c.createdAt) / 60_000))} นาที)
+            </p>
+          ))}
+        </div>
+      ) : null}
 
       <div className="grid gap-4">
         {kitchenOrders.map((order) => (
@@ -84,6 +124,17 @@ export function KitchenScreen() {
               </span>
               <span className="text-sm text-muted-foreground">เปิดเมื่อ {formatTime(order.createdAt)}</span>
             </div>
+            <Button
+              className="mb-3 h-12 w-full bg-amber-500 text-base font-bold text-white hover:bg-amber-600"
+              disabled={callingId === order.id || linesToCall(order.items).length === 0}
+              onClick={() => callToServe(order)}
+            >
+              {callingId === order.id
+                ? "กำลังเรียก..."
+                : order.items.some(awaitingServeCall)
+                  ? `🔔 เรียกเสิร์ฟ (${order.items.filter(awaitingServeCall).length} รายการที่ทำแล้ว)`
+                  : "🔔 เรียกเสิร์ฟทั้งหมด"}
+            </Button>
 
             <div className="grid gap-2">
               {order.items.map((item) => (

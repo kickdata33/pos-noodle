@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 
+import { ServeCallToggle } from "@/components/pos/ServeCallToggle";
 import { TableQrDialog } from "@/components/shared/TableQrDialog";
 import { Badge } from "@/components/ui/badge";
 import { useAuth } from "@/hooks/useAuth";
@@ -269,7 +270,10 @@ export function PosHome() {
         </section>
       ) : null}
 
-      <div className="mt-6 flex flex-wrap gap-x-4 gap-y-2">
+      <div className="mt-6">
+        <ServeCallToggle />
+      </div>
+      <div className="mt-4 flex flex-wrap gap-x-4 gap-y-2">
         <Link href="/pos/kitchen" className="text-sm text-muted-foreground underline">
           หน้าจอครัว
         </Link>

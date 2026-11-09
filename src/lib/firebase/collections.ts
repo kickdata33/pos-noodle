@@ -29,6 +29,8 @@ export const COLLECTIONS = {
    * devices opening the same empty table at once end up on one order instead of two, see
    * `lib/pos/tableOrder.ts`. Only ever trusted after re-checking that order is still OPEN there. */
   tableOccupancy: "tableOccupancy",
+  /** Kitchen "เรียกเสิร์ฟ" calls — types/serveCall.ts. */
+  serveCalls: "serveCalls",
   stockLevels: "stockLevels",
   stockMovements: "stockMovements",
   /** One doc per shop — the daily-sequence counter behind `generateOrderNumber` (lib/pos). */

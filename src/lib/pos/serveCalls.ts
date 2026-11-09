@@ -1,0 +1,39 @@
+import type { Order, OrderItem } from "@/types";
+
+/**
+ * Pure rules for the kitchen's "เรียกเสิร์ฟ" (unit-tested in scripts/serveCalls.test.ts).
+ */
+
+/** Marked ทำแล้ว on the kitchen screen but not yet called out to the floor. Lines prepared before
+ * `preparedAt` existed have none and count as already served. */
+export function awaitingServeCall(item: Pick<OrderItem, "prepared" | "preparedAt" | "serveCalledAt">): boolean {
+  return Boolean(item.prepared && item.preparedAt && !item.serveCalledAt);
+}
+
+/** An order stays on the kitchen screen while anything is still to cook OR cooked-but-not-called. */
+export function staysOnKitchenScreen(order: Pick<Order, "items">): boolean {
+  return order.items.some((i) => !i.prepared || awaitingServeCall(i));
+}
+
+/**
+ * Which lines a "เรียกเสิร์ฟ" tap sends out: the ones marked ทำแล้ว and not yet called. If the cook
+ * didn't bother ticking individual lines, it's every line not yet called — and those get marked
+ * prepared too, since the food is clearly ready.
+ */
+export function linesToCall(items: OrderItem[]): OrderItem[] {
+  const ready = items.filter(awaitingServeCall);
+  if (ready.length > 0) return ready;
+  return items.filter((i) => !i.serveCalledAt && !(i.prepared && !i.preparedAt));
+}
+
+export function applyServeCall(items: OrderItem[], called: OrderItem[], now: number): OrderItem[] {
+  const ids = new Set(called.map((i) => i.id));
+  return items.map((i) =>
+    ids.has(i.id) ? { ...i, prepared: true, preparedAt: i.preparedAt ?? now, serveCalledAt: now } : i
+  );
+}
+
+export function serveCallLabel(order: Pick<Order, "tableName" | "customerLabel" | "channelName">): string {
+  if (order.tableName) return `โต๊ะ ${order.tableName}`;
+  return order.customerLabel ? `${order.channelName} ${order.customerLabel}` : order.channelName;
+}
