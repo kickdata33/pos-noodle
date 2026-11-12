@@ -50,6 +50,7 @@ import {
   type RecurringExpense,
   type RecurringExpenseSkip,
 } from "@/types";
+import { tableLabel } from "@/lib/tableLabel";
 
 const PRESETS: { value: ReportPreset; label: string }[] = [
   { value: "today", label: "วันนี้" },
@@ -432,7 +433,7 @@ export default function AccountingPage() {
         <DialogContent>
           <DialogHeader>
             <DialogTitle>
-              {selectedOrder?.orderNumber} — {selectedOrder?.tableName ? `โต๊ะ ${selectedOrder.tableName}` : selectedOrder?.channelName}
+              {selectedOrder?.orderNumber} — {selectedOrder?.tableName ? tableLabel(selectedOrder.tableName) : selectedOrder?.channelName}
               {selectedOrder?.customerLabel ? ` · ${selectedOrder.customerLabel}` : ""}
             </DialogTitle>
           </DialogHeader>
@@ -1109,7 +1110,7 @@ function LedgerDetailPanel({
               className="flex w-full items-center justify-between gap-2 rounded-md px-1 py-1 text-left text-sm hover:bg-accent"
             >
               <span className="truncate text-muted-foreground">
-                {o.orderNumber || "—"} · {o.tableName ? `โต๊ะ ${o.tableName}` : o.channelName}
+                {o.orderNumber || "—"} · {o.tableName ? tableLabel(o.tableName) : o.channelName}
               </span>
               <span className="shrink-0">{formatCurrency(o.total, currency)}</span>
             </button>

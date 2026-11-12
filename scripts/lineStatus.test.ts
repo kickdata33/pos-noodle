@@ -17,3 +17,11 @@ test("prepared and called-out lines", () => {
   assert.equal(lineKitchenStatus({ quantity: 1, prepared: true }, false), "ready");
   assert.equal(lineKitchenStatus({ quantity: 1, prepared: true, serveCalledAt: 5 }, true), "served");
 });
+
+test("table label never doubles the word โต๊ะ", async () => {
+  const { tableLabel } = await import("../src/lib/tableLabel");
+  assert.equal(tableLabel("3"), "โต๊ะ 3");
+  assert.equal(tableLabel("โต๊ะ 1"), "โต๊ะ 1");
+  assert.equal(tableLabel(" โต๊ะ VIP "), "โต๊ะ VIP");
+  assert.equal(tableLabel("ห้อง 101"), "โต๊ะ ห้อง 101");
+});

@@ -2,6 +2,7 @@ import { formatCurrency } from "@/lib/format";
 import { generatePromptPayPayload } from "@/lib/pos/promptpay";
 import { buildOrderReceipt, type ReceiptLine } from "@/lib/pos/receipt";
 import type { Order, OrderItem, PrintJob, ShopSettings } from "@/types";
+import { tableLabel } from "@/lib/tableLabel";
 
 /**
  * Pure builders for Print Station jobs (`types/printJob.ts`) — no Firestore, no `Date.now()`, so
@@ -51,7 +52,7 @@ type OrderHeader = Pick<Order, "orderNumber" | "tableName" | "channelName" | "cu
 
 /** "โต๊ะ 3" for dine-in, otherwise the channel ("Grab", "กลับบ้าน คิว 12"). */
 export function kitchenDestinationLabel(order: OrderHeader): string {
-  if (order.tableName) return `โต๊ะ ${order.tableName}`;
+  if (order.tableName) return tableLabel(order.tableName);
   return order.customerLabel ? `${order.channelName} ${order.customerLabel}` : order.channelName;
 }
 
@@ -143,7 +144,7 @@ export function tableQrJobFields(
 ): Pick<PrintJob, "station" | "kind" | "orderId" | "lines" | "qrPayload" | "qrCaption" | "status" | "claimedBy" | "error" | "printedAt"> {
   const lines: ReceiptLine[] = [
     { text: input.shopName, align: "center", bold: true },
-    { text: `โต๊ะ ${input.tableName}`, align: "center", bold: true, size: 2 },
+    { text: tableLabel(input.tableName), align: "center", bold: true, size: 2 },
     { text: "สแกนเพื่อสั่งอาหาร", align: "center", bold: true },
     { text: "สั่งเพิ่มได้ตลอด รายการเข้าบิลโต๊ะนี้ทันที", align: "center" },
   ];

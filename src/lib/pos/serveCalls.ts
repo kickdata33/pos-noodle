@@ -1,4 +1,5 @@
 import type { Order, OrderItem } from "@/types";
+import { tableLabel } from "@/lib/tableLabel";
 
 /**
  * Pure rules for the kitchen's "เรียกเสิร์ฟ" (unit-tested in scripts/serveCalls.test.ts).
@@ -34,6 +35,6 @@ export function applyServeCall(items: OrderItem[], called: OrderItem[], now: num
 }
 
 export function serveCallLabel(order: Pick<Order, "tableName" | "customerLabel" | "channelName">): string {
-  if (order.tableName) return `โต๊ะ ${order.tableName}`;
+  if (order.tableName) return tableLabel(order.tableName);
   return order.customerLabel ? `${order.channelName} ${order.customerLabel}` : order.channelName;
 }

@@ -26,6 +26,7 @@ import { printQrForTable } from "@/lib/pos/tableQrPrint";
 import { shopRepository } from "@/repositories/shopRepository";
 import { tableRepository } from "@/repositories/tableRepository";
 import type { Table as PosTable, ShopSettings } from "@/types";
+import { tableLabel } from "@/lib/tableLabel";
 
 /**
  * Table CRUD (item 13). Unlike Categories/Products, item 13 explicitly asks for real delete
@@ -244,7 +245,7 @@ export default function TablesPage() {
             <TableRow key={table.id} data-state={selected.has(table.id) ? "selected" : undefined}>
               <TableCell>
                 <Checkbox
-                  aria-label={`เลือกโต๊ะ ${table.name}`}
+                  aria-label={`เลือก${tableLabel(table.name)}`}
                   checked={selected.has(table.id)}
                   onCheckedChange={() => toggleSelected(table.id)}
                 />

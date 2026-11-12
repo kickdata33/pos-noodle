@@ -4,6 +4,7 @@ import { formatCurrency } from "@/lib/format";
 import { notifyShop } from "@/lib/notifications/notifyShop";
 import { getServerSession } from "@/lib/auth/session";
 import { getAdminDb } from "@/lib/firebase/admin";
+import { tableLabel } from "@/lib/tableLabel";
 
 /**
  * Fired by `OrderScreen` right after a checkout or cancel Firestore write succeeds (those writes
@@ -33,7 +34,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "invalid event" }, { status: 400 });
   }
 
-  const where = body.tableName ? `โต๊ะ ${body.tableName}` : body.channelName ?? "";
+  const where = body.tableName ? tableLabel(body.tableName) : body.channelName ?? "";
   const paymentLine = body.paymentMethodName ? `\nวิธีชำระ ${body.paymentMethodName}` : "";
   const text =
     body.event === "paid"

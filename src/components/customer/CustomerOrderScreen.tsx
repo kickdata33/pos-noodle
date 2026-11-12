@@ -8,6 +8,7 @@ import { formatCurrency, formatTime } from "@/lib/format";
 import { resolveItemName } from "@/lib/pos/itemName";
 import { computeLineTotal } from "@/lib/pos/pricing";
 import type { Category, ModifierGroup, ModifierOption, OrderItem, OrderItemModifier, Product } from "@/types";
+import { tableLabel } from "@/lib/tableLabel";
 
 interface MenuResponse {
   categories: Category[];
@@ -373,7 +374,7 @@ export function CustomerOrderScreen({
     return (
       <main className="mx-auto flex min-h-dvh max-w-md flex-col gap-4 p-5">
         <header className="pt-4 text-center">
-          <p className="text-sm text-muted-foreground">โต๊ะ {tableInfo.table.name}</p>
+          <p className="text-sm text-muted-foreground">{tableLabel(tableInfo.table.name)}</p>
           <h1 className="mt-2 text-2xl font-semibold">ขอบคุณที่ใช้บริการ 🙏</h1>
           <p className="mt-2 text-base">กรุณาตรวจสอบรายการและยอดชำระของท่าน</p>
         </header>

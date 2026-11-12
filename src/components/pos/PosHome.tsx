@@ -15,6 +15,7 @@ import { stockLevelRepository } from "@/repositories/stockRepository";
 import type { Order, StockLevel, Table as PosTable } from "@/types";
 
 import { usePosCatalog } from "./PosCatalogContext";
+import { tableLabel } from "@/lib/tableLabel";
 
 /**
  * POS home (item 5): the table grid plus the big non-table channel buttons. A table's
@@ -149,13 +150,13 @@ export function PosHome() {
                 ) : null}
                 <div className="flex items-start justify-between gap-2">
                   <div className="min-w-0">
-                    <span className="block truncate text-2xl font-bold leading-tight">โต๊ะ {table.name}</span>
+                    <span className="block truncate text-2xl font-bold leading-tight">{tableLabel(table.name)}</span>
                     <span className="block text-sm font-medium opacity-90">{statusText}</span>
                   </div>
                   {table.qrMode === "session" ? (
                     <button
                       type="button"
-                      aria-label={`QR ของโต๊ะ ${table.name}`}
+                      aria-label={`QR ของ${tableLabel(table.name)}`}
                       onClick={(e) => {
                         e.preventDefault();
                         e.stopPropagation();
@@ -184,13 +185,13 @@ export function PosHome() {
                     {waitingMinutes !== null && !order ? (
                       <button
                         type="button"
-                        aria-label={`โต๊ะ ${table.name} ลูกค้าออกแล้ว ล้างสถานะรอสั่ง`}
+                        aria-label={`${tableLabel(table.name)} ลูกค้าออกแล้ว ล้างสถานะรอสั่ง`}
                         title="ลูกค้าออกแล้ว"
                         onClick={(e) => {
                           e.preventDefault();
                           e.stopPropagation();
                           const note = table.qrMode === "session" ? " QR ที่พิมพ์ไว้จะใช้ไม่ได้" : "";
-                          if (window.confirm(`โต๊ะ ${table.name}: ลูกค้าออกไปแล้วโดยไม่สั่ง?${note}`)) {
+                          if (window.confirm(`${tableLabel(table.name)}: ลูกค้าออกไปแล้วโดยไม่สั่ง?${note}`)) {
                             void clearSeated(table);
                           }
                         }}

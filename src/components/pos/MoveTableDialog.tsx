@@ -9,6 +9,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import type { Table } from "@/types";
+import { tableLabel } from "@/lib/tableLabel";
 
 interface Props {
   open: boolean;
@@ -39,7 +40,7 @@ export function MoveTableDialog({ open, onOpenChange, currentTableName, emptyTab
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>ย้ายโต๊ะ {currentTableName ? `จากโต๊ะ ${currentTableName}` : ""}</DialogTitle>
+          <DialogTitle>ย้ายโต๊ะ {currentTableName ? `จาก${tableLabel(currentTableName)}` : ""}</DialogTitle>
         </DialogHeader>
 
         <div className="grid gap-2">

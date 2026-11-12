@@ -24,6 +24,7 @@ import { auditLogRepository } from "@/repositories/auditLogRepository";
 import { orderRepository } from "@/repositories/orderRepository";
 import { shopRepository } from "@/repositories/shopRepository";
 import type { AuditReason, Order, OrderStatus } from "@/types";
+import { tableLabel } from "@/lib/tableLabel";
 
 const STATUS_LABEL: Record<OrderStatus, string> = {
   OPEN: "เปิดอยู่",
@@ -188,7 +189,7 @@ export default function AdminOrdersPage() {
               onClick={() => setSelected(order)}
             >
               <TableCell>{order.orderNumber || "—"}</TableCell>
-              <TableCell>{order.tableName ? `โต๊ะ ${order.tableName}` : order.channelName}{order.customerLabel ? ` · ${order.customerLabel}` : ""}</TableCell>
+              <TableCell>{order.tableName ? tableLabel(order.tableName) : order.channelName}{order.customerLabel ? ` · ${order.customerLabel}` : ""}</TableCell>
               <TableCell>{formatCurrency(order.total, currency)}</TableCell>
               <TableCell>
                 <Badge variant={STATUS_VARIANT[order.status]}>{STATUS_LABEL[order.status]}</Badge>
@@ -218,7 +219,7 @@ export default function AdminOrdersPage() {
         <DialogContent>
           <DialogHeader>
             <DialogTitle>
-              {selected?.orderNumber} — {selected?.tableName ? `โต๊ะ ${selected.tableName}` : selected?.channelName}{selected?.customerLabel ? ` · ${selected.customerLabel}` : ""}
+              {selected?.orderNumber} — {selected?.tableName ? tableLabel(selected.tableName) : selected?.channelName}{selected?.customerLabel ? ` · ${selected.customerLabel}` : ""}
             </DialogTitle>
           </DialogHeader>
           <div className="grid gap-3">

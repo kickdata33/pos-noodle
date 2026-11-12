@@ -1,5 +1,6 @@
 import { formatCurrency, formatTime } from "@/lib/format";
 import type { Order, ShopSettings } from "@/types";
+import { tableLabel } from "@/lib/tableLabel";
 
 /**
  * A printer-agnostic representation of a receipt's content — built once from an `Order` +
@@ -49,7 +50,7 @@ export function buildOrderReceipt(
   if (options.title) lines.push({ text: options.title, align: "center", bold: true });
 
   lines.push({ text: `เลขที่ออเดอร์ ${order.orderNumber}` });
-  lines.push({ text: order.tableName ? `โต๊ะ ${order.tableName}` : order.channelName });
+  lines.push({ text: order.tableName ? tableLabel(order.tableName) : order.channelName });
   if (order.customerLabel) lines.push({ text: order.customerLabel });
   // A Print Station prints its own local time instead (see `types/printJob.ts`), so check bills
   // pass `includeTime: false`; every existing caller keeps the default.

@@ -37,6 +37,7 @@ import { buildOrderReceipt } from "@/lib/pos/receipt";
 import { auditLogRepository } from "@/repositories/auditLogRepository";
 import { orderRepository } from "@/repositories/orderRepository";
 import type { AuditReason, Order, OrderItem, Product, ShopSettings, Table } from "@/types";
+import { tableLabel } from "@/lib/tableLabel";
 
 type DraftOrder = Omit<Order, "id"> & { id: string | null };
 
@@ -576,7 +577,7 @@ export function OrderScreen({ orderId, initialTableId, initialChannelId }: Props
       shopId,
       action: "ORDER_TABLE_MOVED",
       orderId: current.id,
-      description: `ย้ายออเดอร์ ${current.orderNumber} จากโต๊ะ ${fromTableName} ไปโต๊ะ ${newTable.name}`,
+      description: `ย้ายออเดอร์ ${current.orderNumber} จาก${tableLabel(fromTableName)} ไป${tableLabel(newTable.name)}`,
       reason: null,
       reasonNote: null,
       performedBy: appUser!.id,
@@ -1009,7 +1010,7 @@ export function OrderScreen({ orderId, initialTableId, initialChannelId }: Props
         <div className="flex items-start justify-between border-b border-border p-3">
           <div>
             <p className="font-medium">
-              {order.tableName ? `โต๊ะ ${order.tableName}` : order.channelName}
+              {order.tableName ? tableLabel(order.tableName) : order.channelName}
               {order.customerLabel ? ` · ${order.customerLabel}` : ""}
             </p>
             {order.orderNumber ? (
