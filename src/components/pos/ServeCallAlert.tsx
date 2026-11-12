@@ -37,6 +37,7 @@ export function ServeCallAlert() {
   const [calls, setCalls] = useState<ServeCall[]>([]);
   const [soundBlocked, setSoundBlocked] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [ackError, setAckError] = useState<string | null>(null);
 
   // Device switch lives in localStorage; follow changes made on PosHome.
   useEffect(() => {
@@ -95,13 +96,24 @@ export function ServeCallAlert() {
 
   if (!ringing) return null;
 
-  async function acknowledge(call: ServeCall) {
-    if (!appUser) return;
-    setBusyId(call.id);
+  // A failed acknowledge must never fail silently — the alarm would just keep ringing with no
+  // explanation (reported on iPhone). Show why, and offer "รับทราบทั้งหมด" when calls pile up.
+  async function acknowledge(calls: ServeCall[]) {
+    if (!appUser) {
+      setAckError("ยังโหลดบัญชีผู้ใช้ไม่เสร็จ รอ 2–3 วินาทีแล้วกดใหม่ ถ้ายังไม่ได้ให้ปิดแล้วเปิดแอปใหม่");
+      return;
+    }
+    setBusyId(calls.length === 1 ? calls[0].id : "all");
+    setAckError(null);
     try {
-      const won = await serveCallRepository.acknowledge(call.id, appUser);
-      // Replace the lock-screen alert on every phone with a quiet "มีคนรับแล้ว".
-      if (won) notifyServeCall(call.id, "done");
+      for (const call of calls) {
+        const won = await serveCallRepository.acknowledge(call.id, appUser);
+        // Replace the lock-screen alert on every phone with a quiet "มีคนรับแล้ว".
+        if (won) notifyServeCall(call.id, "done");
+      }
+    } catch (err) {
+      console.error("acknowledge serve call failed", err);
+      setAckError("กดรับทราบไม่สำเร็จ ตรวจอินเทอร์เน็ตแล้วกดใหม่");
     } finally {
       setBusyId(null);
     }
@@ -114,7 +126,20 @@ export function ServeCallAlert() {
       aria-live="assertive"
       onPointerDown={() => unlockAudio()}
     >
-      <p className="text-center text-2xl font-bold">🔔 อาหารพร้อมเสิร์ฟ</p>
+      <p className="text-center text-2xl font-bold">
+        🔔 อาหารพร้อมเสิร์ฟ{calls.length > 1 ? ` (${calls.length} โต๊ะ)` : ""}
+      </p>
+      {ackError ? <p className="rounded-lg bg-white p-3 text-center text-sm font-semibold text-destructive">{ackError}</p> : null}
+      {calls.length > 1 ? (
+        <Button
+          variant="outline"
+          className="h-12 w-full border-white bg-white/15 text-base font-bold text-white hover:bg-white/25"
+          disabled={busyId !== null}
+          onClick={() => acknowledge(calls)}
+        >
+          {busyId === "all" ? "กำลังบันทึก..." : `รับทราบทั้งหมด ${calls.length} รายการ`}
+        </Button>
+      ) : null}
       {soundBlocked ? (
         <p className="rounded-lg bg-white/20 p-2 text-center text-sm">แตะหน้าจอ 1 ครั้งเพื่อเปิดเสียง</p>
       ) : null}
@@ -134,7 +159,7 @@ export function ServeCallAlert() {
           <Button
             className="mt-4 h-14 w-full text-lg font-bold"
             disabled={busyId === call.id}
-            onClick={() => acknowledge(call)}
+            onClick={() => acknowledge([call])}
           >
             {busyId === call.id ? "กำลังบันทึก..." : "รับทราบ ไปเสิร์ฟ"}
           </Button>
