@@ -10,7 +10,14 @@ import { formatTime } from "@/lib/format";
 import { detectNewKitchenItems, isNewKitchenItem } from "@/lib/pos/kitchenAlerts";
 import { playOrderAlertSound } from "@/lib/pos/notificationSound";
 import { notifyServeCall } from "@/lib/pos/pushClient";
-import { awaitingServeCall, linesToCall, staysOnKitchenScreen } from "@/lib/pos/serveCalls";
+import {
+  awaitingServeCall,
+  linesToCall,
+  recentlyServedOrders,
+  staysOnKitchenScreen,
+  undoServeCall,
+} from "@/lib/pos/serveCalls";
+import { tableLabel } from "@/lib/tableLabel";
 import { orderRepository } from "@/repositories/orderRepository";
 import { serveCallRepository } from "@/repositories/serveCallRepository";
 import type { Order, OrderItem, ServeCall } from "@/types";
@@ -34,6 +41,20 @@ export function KitchenScreen() {
   // hasn't responded.
   const [openCalls, setOpenCalls] = useState<ServeCall[]>([]);
   const [callingId, setCallingId] = useState<string | null>(null);
+  // The last "เรียกเสิร์ฟ", undoable for a short while (item: "ครัวกดผิด ออเดอร์หายไป").
+  const [lastCall, setLastCall] = useState<{
+    orderId: string;
+    callId: string;
+    label: string;
+    before: OrderItem[];
+    calledIds: string[];
+  } | null>(null);
+  const [showServed, setShowServed] = useState(false);
+  useEffect(() => {
+    if (!lastCall) return;
+    const t = setTimeout(() => setLastCall(null), 20_000);
+    return () => clearTimeout(t);
+  }, [lastCall]);
   useEffect(() => serveCallRepository.subscribeOpen(shopId, setOpenCalls), [shopId]);
 
   // Item ids already on screen — anything unprepared that isn't in here is new food to cook, so
@@ -90,13 +111,39 @@ export function KitchenScreen() {
       const callId = await serveCallRepository.callToServe(order, lines, appUser);
       // Lock-screen notification on every subscribed staff phone (Web Push).
       notifyServeCall(callId, "call");
+      setLastCall({
+        orderId: order.id,
+        callId,
+        label: order.tableName ? tableLabel(order.tableName) : (order.customerLabel ?? order.channelName),
+        before: order.items,
+        calledIds: lines.map((l) => l.id),
+      });
     } finally {
       setCallingId(null);
     }
   }
 
+  /** Pressed "เรียกเสิร์ฟ" by mistake: lines go back as they were, and the call is closed so the
+   * staff phones stop ringing (marked as cancelled by the kitchen). */
+  async function undoLastCall() {
+    if (!lastCall || !appUser) return;
+    const current = openOrders.find((o) => o.id === lastCall.orderId);
+    const call = lastCall;
+    setLastCall(null);
+    if (current) {
+      await orderRepository.update(current.id, {
+        items: undoServeCall(current.items, call.before, call.calledIds),
+        updatedAt: Date.now(),
+      });
+    }
+    const won = await serveCallRepository.acknowledge(call.callId, { id: appUser.id, name: `${appUser.name} (ครัวยกเลิก)` });
+    if (won) notifyServeCall(call.callId, "done");
+  }
+
+  const servedRecently = recentlyServedOrders(openOrders, now);
+
   return (
-    <main className="mx-auto max-w-3xl p-4 sm:p-6">
+    <main className="mx-auto max-w-3xl p-4 pb-28 sm:p-6 sm:pb-28">
       <PosBackLink />
       <h1 className="mb-4 text-lg font-semibold">หน้าจอครัว</h1>
 
@@ -193,6 +240,61 @@ export function KitchenScreen() {
           <p className="text-center text-muted-foreground">ไม่มีออเดอร์ที่ต้องทำตอนนี้</p>
         ) : null}
       </div>
+
+      {servedRecently.length > 0 ? (
+        <section className="mt-8">
+          <button
+            type="button"
+            onClick={() => setShowServed((v) => !v)}
+            className="flex h-12 w-full items-center justify-between rounded-lg border border-border bg-card px-4 text-left font-semibold"
+            aria-expanded={showServed}
+          >
+            <span>เสิร์ฟแล้วล่าสุด ({servedRecently.length}) — กดผิด? ดึงกลับได้</span>
+            <span aria-hidden>{showServed ? "▲" : "▼"}</span>
+          </button>
+          {showServed ? (
+            <div className="mt-3 grid gap-3">
+              {servedRecently.map((order) => (
+                <div key={order.id} className="rounded-lg border border-border bg-muted/40 p-4">
+                  <p className="mb-2 font-semibold">
+                    {order.tableName ? tableLabel(order.tableName) : (order.customerLabel ?? order.channelName)} · {order.orderNumber}
+                  </p>
+                  <p className="mb-2 text-sm text-muted-foreground">แตะรายการที่ยังไม่ได้ทำจริง เพื่อดึงกลับขึ้นด้านบน</p>
+                  <div className="grid gap-2">
+                    {order.items.map((item) => (
+                      <button
+                        key={item.id}
+                        type="button"
+                        onClick={() => toggleItemPrepared(order, item)}
+                        disabled={!item.prepared}
+                        className="flex min-h-12 w-full items-center justify-between gap-3 rounded-lg border border-border bg-card px-4 py-2 text-left disabled:opacity-60"
+                      >
+                        <span className="text-base">
+                          {item.quantity}× {item.productName}
+                        </span>
+                        <span className="shrink-0 rounded-md border border-destructive px-3 py-1.5 text-sm font-bold text-destructive">
+                          ดึงกลับ ยังไม่ทำ
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : null}
+        </section>
+      ) : null}
+
+      {lastCall ? (
+        <div className="fixed inset-x-0 bottom-0 z-40 border-t border-border bg-foreground p-3 text-background">
+          <div className="mx-auto flex max-w-3xl items-center justify-between gap-3">
+            <span className="font-medium">เรียกเสิร์ฟ {lastCall.label} แล้ว</span>
+            <Button variant="secondary" className="h-12 px-6 text-base font-bold" onClick={undoLastCall}>
+              ย้อนกลับ
+            </Button>
+          </div>
+        </div>
+      ) : null}
     </main>
   );
 }

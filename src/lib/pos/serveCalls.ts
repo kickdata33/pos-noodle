@@ -38,3 +38,35 @@ export function serveCallLabel(order: Pick<Order, "tableName" | "customerLabel" 
   if (order.tableName) return tableLabel(order.tableName);
   return order.customerLabel ? `${order.channelName} ${order.customerLabel}` : order.channelName;
 }
+
+/** How long a fully served order stays in the kitchen screen's "เสิร์ฟแล้วล่าสุด" list, so a
+ * mistaken "ทำแล้ว" / "เรียกเสิร์ฟ" can still be pulled back. */
+export const RECENTLY_SERVED_MS = 60 * 60 * 1000;
+
+/** Open orders that just left the kitchen list (everything cooked and called), newest first. */
+export function recentlyServedOrders<T extends Pick<Order, "items">>(orders: T[], now: number): T[] {
+  const lastCall = (o: T) => Math.max(0, ...o.items.map((i) => i.serveCalledAt ?? 0));
+  return orders
+    .filter((o) => !staysOnKitchenScreen(o) && now - lastCall(o) <= RECENTLY_SERVED_MS && lastCall(o) > 0)
+    .sort((a, b) => lastCall(b) - lastCall(a));
+}
+
+/**
+ * Undo a "เรียกเสิร์ฟ": puts the called lines back exactly as they were before (ticked or not),
+ * on top of the order's CURRENT lines — anything added meanwhile is kept.
+ */
+export function undoServeCall(current: OrderItem[], before: OrderItem[], calledIds: string[]): OrderItem[] {
+  const ids = new Set(calledIds);
+  const prior = new Map(before.map((i) => [i.id, i]));
+  return current.map((i) => {
+    if (!ids.has(i.id)) return i;
+    const was = prior.get(i.id);
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    const { prepared, preparedAt, serveCalledAt, ...rest } = i;
+    return {
+      ...rest,
+      prepared: Boolean(was?.prepared),
+      ...(was?.preparedAt ? { preparedAt: was.preparedAt } : {}),
+    };
+  });
+}
