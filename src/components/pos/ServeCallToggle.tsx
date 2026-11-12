@@ -37,8 +37,14 @@ export function ServeCallToggle() {
   // notification arrives. The answer from Apple/Google is kept for when they unlock.
   async function sendTest() {
     setTestNote("กำลังส่ง... ควรมีแจ้งเตือน “ทดสอบแจ้งเตือน” เด้งภายในไม่กี่วินาที");
+    let res: Response;
     try {
-      const res = await fetch("/api/push/test", { method: "POST" });
+      res = await fetch("/api/push/test", { method: "POST" });
+    } catch (err) {
+      setTestNote(`ส่งไม่ได้ (เชื่อมต่อไม่ได้): ${err instanceof Error ? err.message : String(err)}`);
+      return;
+    }
+    try {
       const data = (await res.json()) as { results?: { host: string; ok: boolean; status: number | null; detail: string }[]; error?: string };
       if (!res.ok) {
         setTestNote(`ส่งไม่ได้: ${data.error ?? res.status}`);
@@ -53,7 +59,8 @@ export function ServeCallToggle() {
               .join(" · ")
       );
     } catch {
-      setTestNote("ส่งไม่ได้ ตรวจอินเทอร์เน็ต");
+      // Not JSON back — usually an old deployment without this route, or a login redirect.
+      setTestNote(`ส่งไม่ได้: เซิร์ฟเวอร์ตอบ HTTP ${res.status} (ยังไม่ได้อัปเดตเว็บ หรือหลุดจากระบบ)`);
     }
   }
 
