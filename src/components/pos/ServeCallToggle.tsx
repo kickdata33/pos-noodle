@@ -36,7 +36,7 @@ export function ServeCallToggle() {
   // Lock-screen test: the server waits ~6 s, so staff can lock the phone and see whether the
   // notification arrives. The answer from Apple/Google is kept for when they unlock.
   async function sendTest() {
-    setTestNote("ล็อกจอภายใน 5 วินาที แล้วรอแจ้งเตือน...");
+    setTestNote("กำลังส่ง... ควรมีแจ้งเตือน “ทดสอบแจ้งเตือน” เด้งภายในไม่กี่วินาที");
     try {
       const res = await fetch("/api/push/test", { method: "POST" });
       const data = (await res.json()) as { results?: { host: string; ok: boolean; status: number | null; detail: string }[]; error?: string };
@@ -112,7 +112,7 @@ export function ServeCallToggle() {
           onClick={sendTest}
           className="self-start text-xs font-medium text-primary underline underline-offset-2"
         >
-          ทดสอบแจ้งเตือนตอนล็อกจอ
+          ส่งแจ้งเตือนทดสอบ
         </button>
       ) : null}
       {testNote ? <p className="max-w-md break-words text-xs text-muted-foreground">{testNote}</p> : null}
