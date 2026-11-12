@@ -70,12 +70,21 @@ export async function sendToShop(shopId: string, payload: ServeCallPushPayload):
         await webpush.sendNotification(
           { endpoint: sub.endpoint, keys: sub.keys },
           JSON.stringify(payload),
-          // A serve call is stale after a few minutes; "high" wakes a sleeping phone.
-          { TTL: 300, urgency: "high", topic: payload.callId.slice(0, 32) }
+          // A serve call is stale after a few minutes; "high" wakes a sleeping phone. (No Topic
+          // header: not every push service accepts it, and the notification tag already
+          // collapses repeats on the phone.)
+          { TTL: 300, urgency: "high" }
         );
         sent++;
       } catch (err) {
         const status = (err as { statusCode?: number }).statusCode;
+        // Visible in Vercel → Logs: the push service's own reason (e.g. Apple's BadJwtToken).
+        console.error("web push failed", {
+          host: safeHost(sub.endpoint),
+          user: sub.userName,
+          status,
+          body: (err as { body?: string }).body,
+        });
         if (status === 404 || status === 410) {
           await doc.ref.delete().catch(() => undefined);
           removed++;
@@ -84,4 +93,53 @@ export async function sendToShop(shopId: string, payload: ServeCallPushPayload):
     })
   );
   return { sent, removed };
+}
+
+function safeHost(endpoint: string): string {
+  try {
+    return new URL(endpoint).host;
+  } catch {
+    return "?";
+  }
+}
+
+/**
+ * Diagnostic: sends one test notification to the given user's own phones only, and reports what
+ * each push service answered — so "ไม่เด้ง" can be told apart from "Apple rejected it".
+ */
+export async function sendTestToUser(
+  shopId: string,
+  userId: string
+): Promise<{ host: string; ok: boolean; status: number | null; detail: string }[]> {
+  if (!pushConfigured()) return [];
+  ensureConfigured();
+  const db = getAdminDb();
+  const snap = await db
+    .collection(COLLECTIONS.pushSubscriptions)
+    .where("shopId", "==", shopId)
+    .where("userId", "==", userId)
+    .get();
+  return Promise.all(
+    snap.docs.map(async (doc) => {
+      const sub = doc.data() as StoredPushSubscription;
+      const host = safeHost(sub.endpoint);
+      try {
+        const res = await webpush.sendNotification(
+          { endpoint: sub.endpoint, keys: sub.keys },
+          JSON.stringify({
+            kind: "serveCall",
+            callId: "test-" + Date.now(),
+            title: "🔔 ทดสอบแจ้งเตือน",
+            body: "ถ้าเห็นข้อความนี้ตอนล็อกจอ แปลว่าใช้ได้",
+          } satisfies ServeCallPushPayload),
+          { TTL: 120, urgency: "high" }
+        );
+        return { host, ok: true, status: res.statusCode, detail: "ส่งถึงผู้ให้บริการแจ้งเตือนแล้ว" };
+      } catch (err) {
+        const status = (err as { statusCode?: number }).statusCode ?? null;
+        if (status === 404 || status === 410) await doc.ref.delete().catch(() => undefined);
+        return { host, ok: false, status, detail: String((err as { body?: string }).body ?? (err as Error).message ?? "") };
+      }
+    })
+  );
 }
