@@ -7,7 +7,7 @@ import { ServeCallToggle } from "@/components/pos/ServeCallToggle";
 import { TableQrDialog } from "@/components/shared/TableQrDialog";
 import { Badge } from "@/components/ui/badge";
 import { useAuth } from "@/hooks/useAuth";
-import { formatCurrency } from "@/lib/format";
+import { formatCurrency, formatTime } from "@/lib/format";
 import { isLowStock } from "@/lib/pos/stock";
 import { printQrForTable } from "@/lib/pos/tableQrPrint";
 import { orderRepository } from "@/repositories/orderRepository";
@@ -95,7 +95,7 @@ export function PosHome() {
   const orderForTable = (tableId: string) => openOrders.find((o) => o.tableId === tableId);
 
   return (
-    <main className="mx-auto max-w-4xl p-4 sm:p-6">
+    <main className="mx-auto max-w-6xl p-4 sm:p-6">
       {lowStock.length > 0 ? (
         <Link
           href="/pos/inventory"
@@ -107,107 +107,127 @@ export function PosHome() {
       ) : null}
       <section>
         <h1 className="mb-3 text-lg font-semibold">โต๊ะ</h1>
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
           {activeTables.map((table) => {
             const order = orderForTable(table.id);
             const waitingMinutes = order ? null : seatedMinutes(table);
+            // Card look by state (approved design "1 · หน้าโต๊ะ"): white = ว่าง, amber = รอสั่ง,
+            // filled accent = มีบิล, deep blue = กำลังคิดเงิน; a customer's new QR order blinks green.
+            const look = order?.pendingReview
+              ? "border-success bg-card text-foreground"
+              : order?.billRequestedAt
+                ? "border-[#23407A] bg-[#23407A] text-white"
+                : order
+                  ? "border-primary bg-primary text-primary-foreground"
+                  : waitingMinutes !== null
+                    ? "border-amber-400 bg-amber-200 text-amber-950 dark:bg-amber-900 dark:text-amber-50"
+                    : "border-border bg-card text-foreground hover:bg-accent";
+            const itemCount = order ? order.items.reduce((sum, i) => sum + i.quantity, 0) : 0;
+            const statusText = order?.pendingReview
+              ? "ออเดอร์ใหม่จาก QR"
+              : order?.billRequestedAt
+                ? "กำลังคิดเงิน"
+                : order
+                  ? `มีบิล · ${itemCount} รายการ`
+                  : waitingMinutes !== null
+                    ? "รอสั่ง"
+                    : "ว่าง";
             return (
               <Link
                 key={table.id}
-                href={
-                  order
-                    ? `/pos/order/${order.id}`
-                    : `/pos/order/new?tableId=${table.id}`
-                }
+                href={order ? `/pos/order/${order.id}` : `/pos/order/new?tableId=${table.id}`}
                 className={
-                  "relative isolate flex flex-col items-center justify-center gap-1 overflow-hidden rounded-lg border p-4 " +
-                  // Taller with the "พิมพ์ QR" button so it never sits on top of the table name.
-                  (qrPrintEnabled ? "h-28 pt-8 " : "h-24 ") +
-                  (order?.pendingReview
-                    ? "border-success"
-                    : order
-                      ? "border-primary bg-primary/10"
-                      : waitingMinutes !== null
-                        ? "border-amber-500 bg-amber-100 hover:bg-amber-200 dark:bg-amber-950 dark:hover:bg-amber-900"
-                        : "border-border bg-card hover:bg-accent")
+                  "relative isolate flex h-32 flex-col justify-between overflow-hidden rounded-xl border p-3.5 text-left " +
+                  look
                 }
               >
                 {order?.pendingReview ? (
                   // The whole card blinks green until staff opens this order (see globals.css)
-                  // — a full-card background layer, not just a corner dot, so it reads across
-                  // the room. Sits behind the content below (`-z-10`) so text stays fully legible.
+                  // — a full-card background layer, so it reads across the room. Behind the
+                  // content (`-z-10`) so text stays legible.
                   <span className="animate-order-alert absolute inset-0 -z-10 bg-success" aria-hidden />
                 ) : null}
-                {table.qrMode === "session" ? (
-                  <button
-                    type="button"
-                    onClick={(e) => {
-                      e.preventDefault();
-                      e.stopPropagation();
-                      setQrTable(table);
-                    }}
-                    className="absolute right-1 top-1 z-10 rounded border border-border bg-card/90 px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground hover:bg-accent"
-                  >
-                    QR
-                  </button>
-                ) : null}
-                {qrPrintEnabled ? (
-                  <button
-                    type="button"
-                    onClick={(e) => {
-                      e.preventDefault();
-                      e.stopPropagation();
-                      void handlePrintQr(table);
-                    }}
-                    disabled={qrPrintState[table.id] === "sending"}
-                    className={
-                      "absolute left-1 top-1 z-10 rounded-md border px-2 py-1 text-xs font-semibold " +
-                      (qrPrintState[table.id] === "error"
-                        ? "border-destructive bg-destructive/10 text-destructive"
-                        : qrPrintState[table.id] === "sent"
-                          ? "border-success bg-success/10 text-success"
-                          : "border-primary/40 bg-card text-primary hover:bg-primary/10")
-                    }
-                  >
-                    {qrPrintState[table.id] === "sending"
-                      ? "กำลังส่ง..."
-                      : qrPrintState[table.id] === "sent"
-                        ? "ส่งพิมพ์แล้ว ✓"
-                        : qrPrintState[table.id] === "error"
-                          ? "พิมพ์ไม่สำเร็จ"
-                          : "พิมพ์ QR"}
-                  </button>
-                ) : null}
-                <span className="text-lg font-semibold">{table.name}</span>
-                {order ? (
-                  <Badge variant={order.pendingReview ? "success" : "default"}>
-                    {order.pendingReview ? "ออเดอร์ใหม่จาก QR" : formatCurrency(order.total, currency)}
-                  </Badge>
-                ) : waitingMinutes !== null ? (
-                  <span className="flex items-center gap-1">
-                    <span className="rounded-md bg-amber-500 px-2 py-0.5 text-xs font-semibold text-white">
-                      รอสั่ง {waitingMinutes} นาที
-                    </span>
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0">
+                    <span className="block truncate text-2xl font-bold leading-tight">โต๊ะ {table.name}</span>
+                    <span className="block text-sm font-medium opacity-90">{statusText}</span>
+                  </div>
+                  {table.qrMode === "session" ? (
                     <button
                       type="button"
-                      aria-label={`โต๊ะ ${table.name} ลูกค้าออกแล้ว ล้างสถานะรอสั่ง`}
-                      title="ลูกค้าออกแล้ว"
+                      aria-label={`QR ของโต๊ะ ${table.name}`}
                       onClick={(e) => {
                         e.preventDefault();
                         e.stopPropagation();
-                        const note = table.qrMode === "session" ? " QR ที่พิมพ์ไว้จะใช้ไม่ได้" : "";
-                        if (window.confirm(`โต๊ะ ${table.name}: ลูกค้าออกไปแล้วโดยไม่สั่ง?${note}`)) {
-                          void clearSeated(table);
-                        }
+                        setQrTable(table);
                       }}
-                      className="z-10 rounded px-1.5 text-sm font-bold text-amber-800 hover:bg-amber-200 dark:text-amber-200"
+                      className="z-10 shrink-0 rounded-md border border-current/30 bg-white/80 px-1.5 py-0.5 text-[11px] font-semibold text-foreground hover:bg-white"
                     >
-                      ×
+                      QR
                     </button>
-                  </span>
-                ) : (
-                  <Badge variant="muted">ว่าง</Badge>
-                )}
+                  ) : null}
+                </div>
+                <div className="flex items-end justify-between gap-2">
+                  <div className="min-w-0">
+                    {order && !order.pendingReview ? (
+                      <span className="block text-lg font-bold">{formatCurrency(order.total, currency)}</span>
+                    ) : null}
+                    <span className="block text-xs opacity-85">
+                      {order
+                        ? `เปิด ${formatTime(order.createdAt)}`
+                        : waitingMinutes !== null
+                          ? `รอ ${waitingMinutes} นาที`
+                          : ""}
+                    </span>
+                  </div>
+                  <div className="flex shrink-0 items-center gap-1">
+                    {waitingMinutes !== null && !order ? (
+                      <button
+                        type="button"
+                        aria-label={`โต๊ะ ${table.name} ลูกค้าออกแล้ว ล้างสถานะรอสั่ง`}
+                        title="ลูกค้าออกแล้ว"
+                        onClick={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          const note = table.qrMode === "session" ? " QR ที่พิมพ์ไว้จะใช้ไม่ได้" : "";
+                          if (window.confirm(`โต๊ะ ${table.name}: ลูกค้าออกไปแล้วโดยไม่สั่ง?${note}`)) {
+                            void clearSeated(table);
+                          }
+                        }}
+                        className="z-10 h-9 rounded-md px-2 text-base font-bold hover:bg-black/10"
+                      >
+                        ×
+                      </button>
+                    ) : null}
+                    {qrPrintEnabled ? (
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          void handlePrintQr(table);
+                        }}
+                        disabled={qrPrintState[table.id] === "sending"}
+                        className={
+                          "z-10 h-9 rounded-md border px-2 text-xs font-semibold " +
+                          (qrPrintState[table.id] === "error"
+                            ? "border-destructive bg-destructive/10 text-destructive"
+                            : qrPrintState[table.id] === "sent"
+                              ? "border-success bg-success/15 text-success"
+                              : "border-current/40 bg-white/80 text-foreground hover:bg-white")
+                        }
+                      >
+                        {qrPrintState[table.id] === "sending"
+                          ? "กำลังส่ง..."
+                          : qrPrintState[table.id] === "sent"
+                            ? "ส่งแล้ว ✓"
+                            : qrPrintState[table.id] === "error"
+                              ? "ไม่สำเร็จ"
+                              : "พิมพ์ QR"}
+                      </button>
+                    ) : null}
+                  </div>
+                </div>
               </Link>
             );
           })}
@@ -216,6 +236,13 @@ export function PosHome() {
               ยังไม่มีโต๊ะ — ไปเพิ่มที่หน้า Admin ก่อน
             </p>
           ) : null}
+        </div>
+        <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
+          <span className="flex items-center gap-1.5"><span className="h-3 w-3 rounded border border-border bg-card" />ว่าง</span>
+          <span className="flex items-center gap-1.5"><span className="h-3 w-3 rounded bg-amber-300" />รอสั่ง</span>
+          <span className="flex items-center gap-1.5"><span className="h-3 w-3 rounded bg-primary" />มีบิล</span>
+          <span className="flex items-center gap-1.5"><span className="h-3 w-3 rounded bg-[#23407A]" />กำลังคิดเงิน</span>
+          <span className="flex items-center gap-1.5"><span className="h-3 w-3 rounded bg-success" />ออเดอร์ใหม่จาก QR</span>
         </div>
       </section>
 

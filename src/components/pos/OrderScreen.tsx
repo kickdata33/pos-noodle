@@ -26,6 +26,7 @@ import {
 import { resolveItemName } from "@/lib/pos/itemName";
 import { increaseItemQuantity } from "@/lib/pos/kitchenAlerts";
 import { generateOrderNumber } from "@/lib/pos/orderNumber";
+import { LINE_STATUS_CLASS, LINE_STATUS_LABEL, lineKitchenStatus } from "@/lib/pos/lineStatus";
 import { confirmPaymentOnce } from "@/lib/pos/payOrder";
 import { createOrJoinTableOrder } from "@/lib/pos/tableOrder";
 import { printQrForTable } from "@/lib/pos/tableQrPrint";
@@ -132,6 +133,8 @@ export function OrderScreen({ orderId, initialTableId, initialChannelId }: Props
   // "This table was already opened on another device" — shown after this screen was switched
   // onto that device's order instead of creating a second one.
   const [joinedNotice, setJoinedNotice] = useState(false);
+  // Phone layout only: the menu and the bill take turns on screen (md+ shows both).
+  const [mobileView, setMobileView] = useState<"menu" | "bill">("menu");
   // Shop clock for which promotion buttons are live (`activeDealsAt`) — refreshed every 30s so a
   // "ก่อน 20:00" button disappears and its "ตั้งแต่ 20:00" one appears without a reload. Starts
   // at 0 (no deals shown) until the first tick right after mount.
@@ -330,6 +333,7 @@ export function OrderScreen({ orderId, initialTableId, initialChannelId }: Props
     const current = orderRef.current;
     if (!current) return;
     const newTotals = computeOrderTotals(newItems, settings);
+    // eslint-disable-next-line react-hooks/purity -- event handler, not render; the compiler loses track once the bill lines render their kitchen status (see lineStatusOf)
     const updatedAt = Date.now();
     const updatedDraft: DraftOrder = { ...current, items: newItems, ...newTotals, updatedAt };
     orderRef.current = updatedDraft;
@@ -445,6 +449,7 @@ export function OrderScreen({ orderId, initialTableId, initialChannelId }: Props
       modifiers,
       note,
       lineTotal,
+      // eslint-disable-next-line react-hooks/purity -- event handler, not render; the compiler loses track once the bill lines render their kitchen status (see lineStatusOf)
       addedAt: Date.now(),
     };
     applyItems([...current.items, item]);
@@ -460,6 +465,7 @@ export function OrderScreen({ orderId, initialTableId, initialChannelId }: Props
     }
     // A line the kitchen already marked "ทำแล้ว" gets its extra portions as a separate fresh line
     // (see `increaseItemQuantity`) — otherwise the kitchen screen would never show them.
+    // eslint-disable-next-line react-hooks/purity -- event handler, not render; the compiler loses track once the bill lines render their kitchen status (see lineStatusOf)
     const newItems = increaseItemQuantity(current.items, item, delta, crypto.randomUUID(), Date.now(), computeLineTotal);
     applyItems(newItems);
   }
@@ -507,6 +513,7 @@ export function OrderScreen({ orderId, initialTableId, initialChannelId }: Props
       reasonNote: reason === "อื่น ๆ" ? note : null,
       performedBy: appUser!.id,
       performedByName: appUser!.name,
+      // eslint-disable-next-line react-hooks/purity -- event handler, not render; the compiler loses track once the bill lines render their kitchen status (see lineStatusOf)
       createdAt: Date.now(),
     });
     setRemoveTarget(null);
@@ -733,6 +740,7 @@ export function OrderScreen({ orderId, initialTableId, initialChannelId }: Props
     if (orderRef.current && orderRef.current.items.length > 0 && !orderRef.current.billRequestedAt) {
       try {
         const id = await ensureSaved();
+        // eslint-disable-next-line react-hooks/purity -- event handler, not render; the compiler loses track once the bill lines render their kitchen status (see lineStatusOf)
         const billRequestedAt = Date.now();
         await orderRepository.update(id, { billRequestedAt });
         if (orderRef.current) {
@@ -846,98 +854,158 @@ export function OrderScreen({ orderId, initialTableId, initialChannelId }: Props
     return <main className="p-6 text-muted-foreground">กำลังโหลด...</main>;
   }
 
+  // Kitchen progress label per bill line (ยังไม่ส่งครัว / รอครัว / ครัวทำแล้ว / เรียกเสิร์ฟแล้ว).
+  const kitchenTicketsOn = Boolean(catalogSettings?.printStation?.kitchenEnabled);
+  // Kitchen progress per bill line — see `lineKitchenStatus` (lib/pos/lineStatus.ts).
+  const lineStatusOf = (item: OrderItem) => lineKitchenStatus(item, kitchenTicketsOn);
+
   return (
     <div className="flex h-full flex-col md:flex-row">
-      {/* Left: category tabs + product grid (item 24: ~55-60% on tablet landscape) */}
-      <div className="flex min-h-0 flex-1 flex-col md:w-[58%]">
-        <div className="flex gap-2 overflow-x-auto border-b border-border p-3">
+      {/* Left: category rail + product grid (approved design "2 · สั่งอาหาร"). On a phone this and
+          the bill take turns (`mobileView`); from md up they sit side by side. */}
+      <div
+        className={
+          "min-h-0 flex-1 flex-col md:flex md:w-[60%] md:flex-row " + (mobileView === "bill" ? "hidden" : "flex")
+        }
+      >
+        <nav
+          aria-label="หมวดหมู่"
+          className="flex shrink-0 gap-2 overflow-x-auto border-b border-border p-3 md:w-36 md:flex-col md:overflow-x-visible md:overflow-y-auto md:border-b-0 md:border-r"
+        >
           {activeCategories.map((c) => (
             <button
               key={c.id}
               onClick={() => setActiveCategoryId(c.id)}
               className={
-                "shrink-0 rounded-lg px-4 py-2 text-sm font-medium " +
-                (c.id === currentCategoryId ? "bg-primary text-primary-foreground" : "bg-card border border-border")
+                "shrink-0 rounded-xl px-4 py-2.5 text-left text-[15px] md:min-h-12 md:w-full " +
+                (c.id === currentCategoryId
+                  ? "bg-foreground font-semibold text-background"
+                  : "border border-border bg-card md:border-0 md:bg-transparent md:hover:bg-accent")
               }
             >
               {c.name}
             </button>
           ))}
-        </div>
-        <div className="grid flex-1 auto-rows-min grid-cols-2 gap-3 overflow-y-auto p-3 sm:grid-cols-3">
-          {visibleProducts.map((product) => (
-            <div
-              key={product.id}
-              className={
-                "flex flex-col gap-1.5 rounded-lg border p-3 " +
-                (product.active ? "border-border bg-card" : "border-border bg-muted/40 opacity-60")
-              }
-            >
-              <button
-                disabled={!product.active}
-                onClick={() => handleAddProduct(product)}
-                className={"flex flex-col items-start gap-1 text-left " + (product.active ? "hover:opacity-80" : "cursor-not-allowed")}
+        </nav>
+        <div className="grid flex-1 auto-rows-min grid-cols-2 gap-3 overflow-y-auto p-3 sm:grid-cols-3 xl:grid-cols-4">
+          {visibleProducts.map((product) => {
+            const unitPrice = resolveChannelPrice(product, currentChannel);
+            const hasOptions = product.modifierGroupIds.length > 0;
+            return (
+              <div
+                key={product.id}
+                className={
+                  "flex flex-col overflow-hidden rounded-xl border " +
+                  (product.active ? "border-border bg-card" : "border-border bg-muted/40 opacity-60")
+                }
               >
-                <span className={"font-medium" + (product.active ? "" : " line-through")}>{product.name}</span>
-                {product.active ? (
-                  <span className="text-sm text-muted-foreground">
-                    {formatCurrency(resolveChannelPrice(product, currentChannel), settings.currency)}
+                <button
+                  disabled={!product.active}
+                  onClick={() => handleAddProduct(product)}
+                  className={"flex flex-col text-left " + (product.active ? "hover:opacity-90" : "cursor-not-allowed")}
+                >
+                  {product.imageUrl ? (
+                    // eslint-disable-next-line @next/next/no-img-element -- shop-uploaded menu photo
+                    <img src={product.imageUrl} alt="" className="h-24 w-full object-cover" />
+                  ) : (
+                    <span className="flex h-24 w-full items-center justify-center bg-muted text-3xl font-bold text-muted-foreground/60" aria-hidden>
+                      {product.name.slice(0, 1)}
+                    </span>
+                  )}
+                  <span className="flex flex-col gap-0.5 px-2.5 pb-2 pt-2">
+                    <span className={"text-[15px] font-semibold leading-snug" + (product.active ? "" : " line-through")}>
+                      {product.name}
+                    </span>
+                    {product.active ? (
+                      <span className="flex items-baseline justify-between gap-1">
+                        <span className="text-[15px] font-bold text-primary">{formatCurrency(unitPrice, settings.currency)}</span>
+                        <span className="text-[11px] text-muted-foreground">{hasOptions ? "แตะเพื่อเลือกเอง" : "แตะ = เพิ่ม 1"}</span>
+                      </span>
+                    ) : (
+                      <span className="text-sm font-medium text-destructive">ของหมด</span>
+                    )}
                   </span>
-                ) : (
-                  <span className="text-sm font-medium text-destructive">ของหมด</span>
-                )}
-              </button>
-              {product.active
-                ? activeDealsAt(product, resolveChannelPrice(product, currentChannel), clock).map((deal) => {
-                    const window = dealWindowLabel(deal);
-                    return (
-                      <button
-                        key={`${deal.qty}-${deal.price}-${deal.fromTime ?? ""}-${deal.toTime ?? ""}`}
-                        onClick={() => addDealToCart(product, deal)}
-                        className="flex w-full items-center justify-between gap-2 rounded-md border border-success bg-success/10 px-3 py-2 text-left text-sm font-semibold text-success hover:bg-success/20"
-                      >
-                        <span>
-                          โปร {deal.qty} ชิ้น {formatCurrency(deal.price, settings.currency)}
-                        </span>
-                        {window ? <span className="text-xs font-normal">{window}</span> : null}
-                      </button>
-                    );
-                  })
-                : null}
-              {/* Staff-only quick-add shortcuts (Product.posQuickPresets) — one tap adds the item
-                  with its modifiers already picked, no popup. Never shown on the customer-facing
-                  self-order screens, which don't read this field at all. */}
-              {product.active && product.posQuickPresets && product.posQuickPresets.length > 0 ? (
-                <div className="flex flex-wrap gap-1">
-                  {product.posQuickPresets.map((preset) => {
-                    const groups = product.modifierGroupIds
-                      .map((id) => modifierGroups.find((g) => g.id === id))
-                      .filter((g): g is (typeof modifierGroups)[number] => Boolean(g && g.active));
-                    const modifiers = resolveModifiersFromSelections(groups, preset.selections, modifierOptions, product.id);
-                    const presetPrice =
-                      resolveChannelPrice(product, currentChannel) + modifiers.reduce((sum, m) => sum + m.priceDelta, 0);
-                    return (
-                      <button
-                        key={preset.id}
-                        onClick={() => handleAddPreset(product, preset)}
-                        className="rounded-full border border-primary/40 bg-primary/5 px-2.5 py-1 text-xs font-medium text-primary hover:bg-primary/10"
-                      >
-                        {preset.label} · {formatCurrency(presetPrice, settings.currency)}
-                      </button>
-                    );
-                  })}
-                </div>
-              ) : null}
-            </div>
-          ))}
+                </button>
+                {/* Staff-only quick-add shortcuts (Product.posQuickPresets) — one tap adds the item
+                    with its options already picked, no popup. Never shown on the customer-facing
+                    self-order screens, which don't read this field at all. */}
+                {product.active && product.posQuickPresets && product.posQuickPresets.length > 0 ? (
+                  <div className="flex flex-wrap gap-1.5 px-2.5 pb-2">
+                    {product.posQuickPresets.map((preset) => {
+                      const groups = product.modifierGroupIds
+                        .map((id) => modifierGroups.find((g) => g.id === id))
+                        .filter((g): g is (typeof modifierGroups)[number] => Boolean(g && g.active));
+                      const modifiers = resolveModifiersFromSelections(groups, preset.selections, modifierOptions, product.id);
+                      const presetPrice = unitPrice + modifiers.reduce((sum, m) => sum + m.priceDelta, 0);
+                      return (
+                        <button
+                          key={preset.id}
+                          onClick={() => handleAddPreset(product, preset)}
+                          title={formatCurrency(presetPrice, settings.currency)}
+                          className="min-h-10 min-w-0 flex-1 basis-[45%] truncate rounded-lg border border-foreground bg-card px-2 text-sm font-semibold hover:bg-accent"
+                        >
+                          + {preset.label}
+                        </button>
+                      );
+                    })}
+                  </div>
+                ) : null}
+                {product.active
+                  ? activeDealsAt(product, unitPrice, clock).map((deal) => {
+                      const window = dealWindowLabel(deal);
+                      return (
+                        <div key={`${deal.qty}-${deal.price}-${deal.fromTime ?? ""}-${deal.toTime ?? ""}`} className="px-2.5 pb-2">
+                          <button
+                            onClick={() => addDealToCart(product, deal)}
+                            className="flex min-h-10 w-full items-center justify-between gap-2 rounded-lg border border-success bg-success/10 px-2.5 py-1.5 text-left text-sm font-bold text-success hover:bg-success/20"
+                          >
+                            <span>
+                              โปร {deal.qty} ชิ้น {formatCurrency(deal.price, settings.currency)}
+                            </span>
+                            {window ? <span className="text-xs font-normal">{window}</span> : null}
+                          </button>
+                        </div>
+                      );
+                    })
+                  : null}
+              </div>
+            );
+          })}
           {visibleProducts.length === 0 ? (
             <p className="col-span-full text-sm text-muted-foreground">ยังไม่มีเมนูในหมวดนี้</p>
           ) : null}
         </div>
+        {/* Phone only: the bill is one tap away, with its count and total always in sight. */}
+        <div className="shrink-0 border-t border-border bg-card p-3 md:hidden">
+          <button
+            type="button"
+            onClick={() => setMobileView("bill")}
+            className="flex h-14 w-full items-center justify-between rounded-xl bg-primary px-4 text-primary-foreground"
+          >
+            <span className="flex items-center gap-2 text-base font-semibold">
+              <span className="flex h-7 min-w-7 items-center justify-center rounded-full bg-white/25 px-1.5 text-sm">
+                {order.items.reduce((sum, i) => sum + i.quantity, 0)}
+              </span>
+              ดูบิล
+            </span>
+            <span className="text-lg font-bold">{formatCurrency(totals.total, settings.currency)}</span>
+          </button>
+        </div>
       </div>
 
       {/* Right: current order (item 24: ~40-45%) */}
-      <div className="flex min-h-0 flex-col border-t border-border md:w-[42%] md:border-l md:border-t-0">
+      <div
+        className={
+          "min-h-0 flex-1 flex-col border-t border-border md:flex md:w-[40%] md:flex-none md:border-l md:border-t-0 " +
+          (mobileView === "bill" ? "flex" : "hidden")
+        }
+      >
+        <div className="flex items-center justify-between gap-2 border-b border-border p-3 md:hidden">
+          <span className="text-base font-bold">บิล · {order.items.reduce((sum, i) => sum + i.quantity, 0)} ชิ้น</span>
+          <Button variant="outline" onClick={() => setMobileView("menu")}>
+            + สั่งเพิ่ม
+          </Button>
+        </div>
         <div className="flex items-start justify-between border-b border-border p-3">
           <div>
             <p className="font-medium">
@@ -1058,9 +1126,12 @@ export function OrderScreen({ orderId, initialTableId, initialChannelId }: Props
                       <Button variant="ghost" size="sm" onClick={() => setNoteTarget(item)}>
                         หมายเหตุ
                       </Button>
-                      <Button variant="ghost" size="sm" onClick={() => requestRemove(item)} className="ml-auto text-destructive">
+                      <Button variant="ghost" size="sm" onClick={() => requestRemove(item)} className="text-destructive">
                         ลบ
                       </Button>
+                      <span className={"ml-auto text-xs font-semibold " + LINE_STATUS_CLASS[lineStatusOf(item)]}>
+                        {LINE_STATUS_LABEL[lineStatusOf(item)]}
+                      </span>
                     </div>
                   </div>
                 ))}
@@ -1096,25 +1167,25 @@ export function OrderScreen({ orderId, initialTableId, initialChannelId }: Props
                 <span>{formatCurrency(totals.tax, settings.currency)}</span>
               </div>
             ) : null}
-            <div className="flex justify-between text-base font-semibold">
-              <span>ยอดสุทธิ</span>
-              <span>{formatCurrency(totals.total, settings.currency)}</span>
+            <div className="flex items-baseline justify-between">
+              <span className="text-base font-semibold">ยอดสุทธิ</span>
+              <span className="text-3xl font-bold">{formatCurrency(totals.total, settings.currency)}</span>
             </div>
           </div>
           {error ? <p className="mb-2 text-sm text-destructive">{error}</p> : null}
           {printError ? <p className="mb-2 text-sm text-destructive">{printError}</p> : null}
           {kitchenPrintingOn && countUnsentToKitchen(order.items) > 0 ? (
-            <Button variant="secondary" className="mb-2 w-full" onClick={sendToKitchen} disabled={saving}>
+            <Button variant="secondary" className="mb-2 h-12 w-full text-base font-semibold" onClick={sendToKitchen} disabled={saving}>
               ส่งครัว ({countUnsentToKitchen(order.items)} ที่)
             </Button>
           ) : null}
           <div className="grid grid-cols-2 gap-2">
             {/* No manual "บันทึกออเดอร์" step — every menu tap saves itself (see `applyItems`).
                 This button is just navigation, available whether or not anything's been added yet. */}
-            <Button variant="outline" onClick={handleBackToHome}>
+            <Button variant="outline" className="h-14 text-base font-semibold" onClick={handleBackToHome}>
               กลับหน้าแรก
             </Button>
-            <Button onClick={handleOpenCheckout} disabled={saving || order.items.length === 0}>
+            <Button className="h-14 text-base font-bold" onClick={handleOpenCheckout} disabled={saving || order.items.length === 0}>
               คิดเงิน
             </Button>
           </div>
@@ -1155,6 +1226,8 @@ export function OrderScreen({ orderId, initialTableId, initialChannelId }: Props
           modifierGroups={modifierGroups}
           modifierOptions={modifierOptions}
           currency={settings.currency}
+          unitPrice={resolveChannelPrice(pickerProduct, currentChannel)}
+          confirmLabel="เพิ่มลงบิล"
           onConfirm={({ quantity, modifiers, note }) =>
             addItemToCart(pickerProduct, quantity, modifiers, note)
           }

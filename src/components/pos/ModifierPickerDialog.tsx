@@ -31,6 +31,9 @@ interface Props {
   initialSelection?: { quantity: number; modifiers: OrderItemModifier[]; note: string };
   /** "บันทึกการแก้ไข" when editing an existing line, vs the default "เพิ่มลงตะกร้า". */
   confirmLabel?: string;
+  /** The product's price on this order's channel — shows the live total on the add button.
+   * Omitted (customer screens): the button shows no price. */
+  unitPrice?: number;
 }
 
 /**
@@ -48,6 +51,7 @@ export function ModifierPickerDialog({
   onConfirm,
   initialSelection,
   confirmLabel,
+  unitPrice,
 }: Props) {
   // No reset effect needed: the parent only mounts this component while a product is picked
   // (`{pickerProduct ? <ModifierPickerDialog key={...}.../> }`), keyed by product id *and* by
@@ -109,6 +113,17 @@ export function ModifierPickerDialog({
   }
 
   const missingRequired = groups.some((g) => g.required && (selections[g.id] ?? []).length === 0);
+  // Live total for the add button (approved design "3 · เลือกตัวเลือกเมนู"): the same modifier
+  // resolution the cart uses, so tiered groups price exactly as they will on the bill.
+  const liveTotal =
+    unitPrice === undefined
+      ? null
+      : (unitPrice +
+          resolveModifiersFromSelections(groups, selections, modifierOptions, product.id).reduce(
+            (sum, m) => sum + m.priceDelta,
+            0
+          )) *
+        quantity;
 
   function handleConfirm() {
     const modifiers = resolveModifiersFromSelections(groups, selections, modifierOptions, product.id);
@@ -131,7 +146,7 @@ export function ModifierPickerDialog({
             const currentTierPrice = tiered ? resolveTieredGroupPrice(group.tierPricing, groupSelections.length) : 0;
             return (
             <div key={group.id} className="grid gap-2">
-              <p className="text-sm font-medium">
+              <p className="text-base font-bold">
                 {group.name}
                 {group.required ? <span className="text-destructive"> *จำเป็น</span> : null}
                 {group.maxSelect ? (
@@ -154,7 +169,7 @@ export function ModifierPickerDialog({
                     .join(" / ")}
                 </p>
               ) : null}
-              <div className="grid gap-2">
+              <div className="flex flex-wrap gap-2">
                 {optionsFor(group.id).map((option) => {
                   const selected = groupSelections.includes(option.id);
                   const disabled = !option.active || (atCap && !selected);
@@ -165,11 +180,11 @@ export function ModifierPickerDialog({
                       disabled={disabled}
                       onClick={() => toggleOption(group, option.id)}
                       className={
-                        "flex items-center justify-between rounded-lg border px-4 py-3 text-left " +
+                        "flex min-h-12 items-center gap-2 rounded-xl border-2 px-4 text-left text-[15px] " +
                         (disabled
                           ? "cursor-not-allowed border-border bg-muted/40 opacity-60"
                           : selected
-                            ? "border-primary bg-primary/10"
+                            ? "border-foreground bg-foreground font-semibold text-background"
                             : "border-border bg-card hover:bg-accent")
                       }
                     >
@@ -177,7 +192,7 @@ export function ModifierPickerDialog({
                       {!option.active ? (
                         <span className="text-xs font-medium text-destructive">ของหมด</span>
                       ) : tiered ? null : option.priceDelta !== 0 ? (
-                        <span className="text-sm text-muted-foreground">
+                        <span className={"text-sm " + (selected ? "opacity-80" : "text-muted-foreground")}>
                           +{formatCurrency(option.priceDelta, currency)}
                         </span>
                       ) : null}
@@ -195,13 +210,20 @@ export function ModifierPickerDialog({
               <Button
                 type="button"
                 variant="outline"
-                size="icon"
+                className="h-12 w-12 text-xl"
+                aria-label="ลดจำนวน"
                 onClick={() => setQuantity((q) => Math.max(1, q - 1))}
               >
                 −
               </Button>
-              <span className="w-8 text-center text-lg font-medium">{quantity}</span>
-              <Button type="button" variant="outline" size="icon" onClick={() => setQuantity((q) => q + 1)}>
+              <span className="w-10 text-center text-xl font-bold">{quantity}</span>
+              <Button
+                type="button"
+                variant="outline"
+                className="h-12 w-12 text-xl"
+                aria-label="เพิ่มจำนวน"
+                onClick={() => setQuantity((q) => q + 1)}
+              >
                 +
               </Button>
             </div>
@@ -221,8 +243,13 @@ export function ModifierPickerDialog({
           <Button variant="outline" onClick={() => onOpenChange(false)}>
             ยกเลิก
           </Button>
-          <Button onClick={handleConfirm} disabled={missingRequired}>
-            {confirmLabel ?? "เพิ่มลงตะกร้า"}
+          <Button
+            className="h-12 min-w-48 justify-between gap-4 text-base font-bold"
+            onClick={handleConfirm}
+            disabled={missingRequired}
+          >
+            <span>{confirmLabel ?? "เพิ่มลงตะกร้า"}</span>
+            {liveTotal !== null ? <span>{formatCurrency(liveTotal, currency)}</span> : null}
           </Button>
         </DialogFooter>
       </DialogContent>
