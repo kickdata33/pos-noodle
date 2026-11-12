@@ -21,7 +21,7 @@ class ServeCallRepository extends FirestoreRepository<ServeCall> {
   }
 
   /** Kitchen "เรียกเสิร์ฟ": marks the lines as called on the order and raises the call, together. */
-  async callToServe(order: Order, lines: OrderItem[], by: Pick<AppUser, "name">): Promise<void> {
+  async callToServe(order: Order, lines: OrderItem[], by: Pick<AppUser, "name">): Promise<string> {
     const now = Date.now();
     const call: Omit<ServeCall, "id"> = {
       shopId: order.shopId,
@@ -36,17 +36,21 @@ class ServeCallRepository extends FirestoreRepository<ServeCall> {
     };
     const batch = writeBatch(db);
     batch.update(doc(db, COLLECTIONS.orders, order.id), { items: applyServeCall(order.items, lines, now), updatedAt: now });
-    batch.set(doc(collection(db, COLLECTIONS.serveCalls)), call);
+    const ref = doc(collection(db, COLLECTIONS.serveCalls));
+    batch.set(ref, call);
     await batch.commit();
+    return ref.id;
   }
 
   /** First tap wins; a second phone acknowledging a moment later changes nothing. */
-  async acknowledge(callId: string, by: Pick<AppUser, "id" | "name">): Promise<void> {
+  /** Returns true only for the tap that actually acknowledged it. */
+  async acknowledge(callId: string, by: Pick<AppUser, "id" | "name">): Promise<boolean> {
     const ref = doc(db, COLLECTIONS.serveCalls, callId);
-    await runTransaction(db, async (tx) => {
+    return runTransaction(db, async (tx) => {
       const snap = await tx.get(ref);
-      if (!snap.exists() || snap.data().acknowledgedAt) return;
+      if (!snap.exists() || snap.data().acknowledgedAt) return false;
       tx.update(ref, { acknowledgedAt: Date.now(), acknowledgedById: by.id, acknowledgedByName: by.name });
+      return true;
     });
   }
 }

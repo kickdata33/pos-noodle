@@ -31,6 +31,9 @@ export const COLLECTIONS = {
   tableOccupancy: "tableOccupancy",
   /** Kitchen "เรียกเสิร์ฟ" calls — types/serveCall.ts. */
   serveCalls: "serveCalls",
+  /** Web Push subscriptions of staff phones that turned on "รับเรียกเสิร์ฟ" (doc id = hash of the
+   * push endpoint). Server-only: no client rule allows it — lib/push/webPush.ts. */
+  pushSubscriptions: "pushSubscriptions",
   stockLevels: "stockLevels",
   stockMovements: "stockMovements",
   /** One doc per shop — the daily-sequence counter behind `generateOrderNumber` (lib/pos). */

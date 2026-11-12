@@ -9,6 +9,7 @@ import { useAuth } from "@/hooks/useAuth";
 import { formatTime } from "@/lib/format";
 import { detectNewKitchenItems, isNewKitchenItem } from "@/lib/pos/kitchenAlerts";
 import { playOrderAlertSound } from "@/lib/pos/notificationSound";
+import { notifyServeCall } from "@/lib/pos/pushClient";
 import { awaitingServeCall, linesToCall, staysOnKitchenScreen } from "@/lib/pos/serveCalls";
 import { orderRepository } from "@/repositories/orderRepository";
 import { serveCallRepository } from "@/repositories/serveCallRepository";
@@ -86,7 +87,9 @@ export function KitchenScreen() {
     if (lines.length === 0) return;
     setCallingId(order.id);
     try {
-      await serveCallRepository.callToServe(order, lines, appUser);
+      const callId = await serveCallRepository.callToServe(order, lines, appUser);
+      // Lock-screen notification on every subscribed staff phone (Web Push).
+      notifyServeCall(callId, "call");
     } finally {
       setCallingId(null);
     }

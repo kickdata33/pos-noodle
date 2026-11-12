@@ -7,6 +7,7 @@ import { usePosCatalog } from "@/components/pos/PosCatalogContext";
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/hooks/useAuth";
 import { formatTime } from "@/lib/format";
+import { notifyServeCall } from "@/lib/pos/pushClient";
 import {
   audioReady,
   holdScreenAwake,
@@ -98,7 +99,9 @@ export function ServeCallAlert() {
     if (!appUser) return;
     setBusyId(call.id);
     try {
-      await serveCallRepository.acknowledge(call.id, appUser);
+      const won = await serveCallRepository.acknowledge(call.id, appUser);
+      // Replace the lock-screen alert on every phone with a quiet "มีคนรับแล้ว".
+      if (won) notifyServeCall(call.id, "done");
     } finally {
       setBusyId(null);
     }
