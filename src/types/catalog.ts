@@ -52,6 +52,19 @@ export interface Product extends WithId {
    */
   bundleDeals?: BundleDeal[] | null;
   /**
+   * A per-piece price that overrides `price` during a time window, e.g. "หลัง 20:00 ลดเหลือ 599"
+   * or a lunch-only special — the single-item counterpart to `bundleDeals` above, for a shop that
+   * wants a time-based price without requiring a multi-piece purchase (item: "โปรราคาพิเศษ
+   * ช่วงเวลา สำหรับซื้อ 1 ชิ้น"). See `resolveTimeBasedPrice` in `lib/pos/pricing.ts`. Only applies
+   * to the plain storefront price (same restriction as `bundleDeals` — a channel with its own
+   * `channelPrices` override or markup is unaffected), and, like `bundleDeals`, only while this
+   * product has no option groups selected through `activeDealsAt`'s unit-price check (a time
+   * price simply becomes the new `price` those comparisons run against). Windows must not overlap
+   * each other (validated on save — only one price can be in effect at any one moment). Empty/
+   * absent = no override, exactly like every product before this field existed.
+   */
+  timePrices?: TimePriceRule[] | null;
+  /**
    * Hidden from the customer QR menus (dine-in and pickup) and refused by their order APIs, but
    * still on the staff POS — for items staff recommend or that must be ordered through staff.
    * `false`/absent = shown to customers as before.
@@ -113,6 +126,19 @@ export interface BundleDeal {
    * ("20:00"–"02:00"). Blank `fromTime` = from 00:00, blank `toTime` = until midnight, both blank
    * = all day (every deal before this field existed).
    */
+  fromTime?: string | null;
+  toTime?: string | null;
+}
+
+/**
+ * One time-based price override — see `Product.timePrices`. Same "HH:MM", shop-time (Bangkok),
+ * window rules as `BundleDeal.fromTime`/`toTime` (may cross midnight; blank = open-ended on that
+ * side). Unlike a `BundleDeal`, `price` here isn't required to be a discount — a shop may also
+ * use this for a time-based surcharge — so nothing compares it against `Product.price` to decide
+ * whether it "counts"; whatever window is active simply replaces the price outright.
+ */
+export interface TimePriceRule {
+  price: number;
   fromTime?: string | null;
   toTime?: string | null;
 }

@@ -897,7 +897,9 @@ export function OrderScreen({ orderId, initialTableId, initialChannelId }: Props
         </nav>
         <div className="grid flex-1 auto-rows-min grid-cols-2 gap-3 overflow-y-auto p-3 sm:grid-cols-3 xl:grid-cols-4">
           {visibleProducts.map((product) => {
-            const unitPrice = resolveChannelPrice(product, currentChannel);
+            // `clock`, not `Date.now()` directly — this runs during render (purity rule), and it's
+            // the same ticking value `activeDealsAt` below already uses for this same grid.
+            const unitPrice = resolveChannelPrice(product, currentChannel, clock);
             const hasOptions = product.modifierGroupIds.length > 0;
             return (
               <div
@@ -1234,7 +1236,7 @@ export function OrderScreen({ orderId, initialTableId, initialChannelId }: Props
           modifierGroups={modifierGroups}
           modifierOptions={modifierOptions}
           currency={settings.currency}
-          unitPrice={resolveChannelPrice(pickerProduct, currentChannel)}
+          unitPrice={resolveChannelPrice(pickerProduct, currentChannel, clock)}
           confirmLabel="เพิ่มลงบิล"
           onConfirm={({ quantity, modifiers, note }) =>
             addItemToCart(pickerProduct, quantity, modifiers, note)

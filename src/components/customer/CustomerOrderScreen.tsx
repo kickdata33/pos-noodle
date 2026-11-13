@@ -6,7 +6,7 @@ import { ModifierPickerDialog } from "@/components/pos/ModifierPickerDialog";
 import { Button } from "@/components/ui/button";
 import { formatCurrency, formatTime } from "@/lib/format";
 import { resolveItemName } from "@/lib/pos/itemName";
-import { computeLineTotal } from "@/lib/pos/pricing";
+import { computeLineTotal, resolveTimeBasedPrice } from "@/lib/pos/pricing";
 import type { Category, ModifierGroup, ModifierOption, OrderItem, OrderItemModifier, Product } from "@/types";
 import { tableLabel } from "@/lib/tableLabel";
 
@@ -116,6 +116,22 @@ export function CustomerOrderScreen({
   // too — the polling below must never mistake "never ordered" for "just got closed out".
   const [hasActiveOrder, setHasActiveOrder] = useState(false);
 
+  // Shop clock for `resolveTimeBasedPrice` (`Product.timePrices`) — same ticking-every-30s
+  // pattern as the staff order screen's own `clock`, so a happy-hour price appears/disappears on
+  // this menu without the customer needing to reload, and the lint rule against calling
+  // `Date.now()` directly in render is satisfied. Starts at 0 (plain price shown) until the first
+  // tick right after mount, same as the staff screen.
+  const [clock, setClock] = useState(0);
+  useEffect(() => {
+    const tick = () => setClock(Date.now());
+    const first = setTimeout(tick, 0);
+    const timer = setInterval(tick, 30_000);
+    return () => {
+      clearTimeout(first);
+      clearInterval(timer);
+    };
+  }, []);
+
   // The moment staff checks out this bill, the "ขอบคุณ" screen below is shown — but that's just
   // React state, never a real page navigation, so there's normally nothing for the browser's
   // back button to undo. The one way back into the ordering screen anyway: mobile browsers can
@@ -204,6 +220,10 @@ export function CustomerOrderScreen({
   );
 
   function addToCart(product: Product, quantity: number, modifiers: OrderItemModifier[], note: string) {
+    // Date.now() directly here is fine — an event handler, not render (same as OrderScreen's own
+    // addItemToCart) — and it's the actual moment this line is being added, not a stale tick.
+    // eslint-disable-next-line react-hooks/purity
+    const unitPrice = resolveTimeBasedPrice(product, Date.now());
     setCart((prev) => [
       ...prev,
       {
@@ -211,10 +231,10 @@ export function CustomerOrderScreen({
         productId: product.id,
         productName: menu ? resolveItemName(product, modifiers, menu.modifierOptions) : product.name,
         quantity,
-        unitPrice: product.price,
+        unitPrice,
         modifiers,
         note,
-        lineTotal: computeLineTotal(product.price, modifiers, quantity),
+        lineTotal: computeLineTotal(unitPrice, modifiers, quantity),
         addedAt: Date.now(),
       },
     ]);
@@ -500,7 +520,9 @@ export function CustomerOrderScreen({
             ) : null}
             <span className={"font-medium" + (product.active ? "" : " line-through")}>{product.name}</span>
             {product.active ? (
-              <span className="text-sm text-muted-foreground">{formatCurrency(product.price, currency)}</span>
+              <span className="text-sm text-muted-foreground">
+                {formatCurrency(resolveTimeBasedPrice(product, clock), currency)}
+              </span>
             ) : (
               <span className="text-sm font-medium text-destructive">ของหมด</span>
             )}

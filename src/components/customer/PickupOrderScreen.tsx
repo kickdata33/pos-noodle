@@ -15,7 +15,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { formatCurrency, formatTime } from "@/lib/format";
 import { resolveItemName } from "@/lib/pos/itemName";
-import { computeLineTotal } from "@/lib/pos/pricing";
+import { computeLineTotal, resolveTimeBasedPrice } from "@/lib/pos/pricing";
 import type { Category, ModifierGroup, ModifierOption, OrderItemModifier, Product } from "@/types";
 
 interface MenuResponse {
@@ -87,6 +87,19 @@ export function PickupOrderScreen() {
   const [notifying, setNotifying] = useState(false);
   const [orderId, setOrderId] = useState<string | null>(null);
 
+  // Shop clock for `resolveTimeBasedPrice` (`Product.timePrices`) — same pattern as
+  // `CustomerOrderScreen`'s own `clock`; see that component's comment.
+  const [clock, setClock] = useState(0);
+  useEffect(() => {
+    const tick = () => setClock(Date.now());
+    const first = setTimeout(tick, 0);
+    const timer = setInterval(tick, 30_000);
+    return () => {
+      clearTimeout(first);
+      clearInterval(timer);
+    };
+  }, []);
+
   useEffect(() => {
     let cancelled = false;
     fetch("/api/customer/menu")
@@ -133,6 +146,10 @@ export function PickupOrderScreen() {
   const currency = menu?.currency ?? "THB";
 
   function addToCart(product: Product, quantity: number, modifiers: OrderItemModifier[], note: string) {
+    // Date.now() directly here is fine — an event handler, not render (same as OrderScreen's own
+    // addItemToCart) — and it's the actual moment this line is being added, not a stale tick.
+    // eslint-disable-next-line react-hooks/purity
+    const unitPrice = resolveTimeBasedPrice(product, Date.now());
     setCart((prev) => [
       ...prev,
       {
@@ -140,10 +157,10 @@ export function PickupOrderScreen() {
         productId: product.id,
         productName: menu ? resolveItemName(product, modifiers, menu.modifierOptions) : product.name,
         quantity,
-        unitPrice: product.price,
+        unitPrice,
         modifiers,
         note,
-        lineTotal: computeLineTotal(product.price, modifiers, quantity),
+        lineTotal: computeLineTotal(unitPrice, modifiers, quantity),
         addedAt: Date.now(),
       },
     ]);
@@ -419,7 +436,9 @@ export function PickupOrderScreen() {
             ) : null}
             <span className={"font-medium" + (product.active ? "" : " line-through")}>{product.name}</span>
             {product.active ? (
-              <span className="text-sm text-muted-foreground">{formatCurrency(product.price, currency)}</span>
+              <span className="text-sm text-muted-foreground">
+                {formatCurrency(resolveTimeBasedPrice(product, clock), currency)}
+              </span>
             ) : (
               <span className="text-sm font-medium text-destructive">ของหมด</span>
             )}

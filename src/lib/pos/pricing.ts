@@ -104,22 +104,46 @@ export function resolveModifiersFromSelections(
  * 1. A manual per-item override in `Product.channelPrices[channel.id]` always wins outright —
  *    an admin who set an exact price for this one item on this one channel meant it literally,
  *    markup or not.
- * 2. Otherwise apply the channel's `markupPercent` on top of the plain `Product.price`, rounded
- *    UP to the nearest 5 baht (the shop's rounding rule) — rounding up, never down, so the shop
- *    is never left quietly eating part of the platform's commission from a rounding loss.
- * 3. No channel (`null` — dine-in draft still resolving its channel) or a channel with no
- *    markup set falls straight through to the plain price, unchanged from before this feature.
+ * 2. Otherwise, a channel with a nonzero `markupPercent` applies it on top of the plain
+ *    `Product.price`, rounded UP to the nearest 5 baht (the shop's rounding rule) — rounding up,
+ *    never down, so the shop is never left quietly eating part of the platform's commission from
+ *    a rounding loss.
+ * 3. Every other case — no channel at all (`null`, a dine-in draft still resolving its channel),
+ *    or a real channel with no override and no markup (the dine-in/"หน้าร้าน" channel itself,
+ *    which is exactly this case in every shop today) — resolves through `resolveTimeBasedPrice`
+ *    instead of straight to `Product.price`. This is "the plain storefront price" in the same
+ *    sense `bundleDeals`/`activeDealsAt` mean it: a time-based price only ever applies here, never
+ *    to a marked-up or individually-overridden channel (delivery channels quote off the listed
+ *    price, not a dine-in happy-hour rate).
+ *
+ * `now` defaults to the current time so ordinary callers don't have to pass it — it exists as a
+ * parameter purely so this stays callable deterministically from tests and from React render
+ * (pass the screen's own ticking clock state, never `Date.now()` directly in render).
  */
 export function resolveChannelPrice(
-  product: Pick<Product, "price" | "channelPrices">,
-  channel: Pick<SalesChannel, "id" | "markupPercent"> | null
+  product: Pick<Product, "price" | "channelPrices" | "timePrices">,
+  channel: Pick<SalesChannel, "id" | "markupPercent"> | null,
+  now: number = Date.now()
 ): number {
-  if (!channel) return product.price;
-  const override = product.channelPrices?.[channel.id];
+  const override = channel ? product.channelPrices?.[channel.id] : undefined;
   if (override !== undefined) return override;
-  const markupPercent = channel.markupPercent ?? 0;
-  if (markupPercent === 0) return product.price;
+  const markupPercent = channel?.markupPercent ?? 0;
+  if (markupPercent === 0) return resolveTimeBasedPrice(product, now);
   return roundUpToNearest5(product.price * (1 + markupPercent / 100));
+}
+
+/**
+ * The storefront price right now — `Product.price`, unless a `Product.timePrices` window covers
+ * this moment (shop/Bangkok time), in which case that rule's price replaces it outright. Windows
+ * are validated not to overlap when saved (`parseTimePrices` in the admin products page), so at
+ * most one can ever match; if more than one somehow did, the first match wins. See
+ * `Product.timePrices`'s own comment for why this doesn't compare against the normal price the
+ * way `activeDealsAt` does for `bundleDeals` — a time price isn't required to be a discount.
+ */
+export function resolveTimeBasedPrice(product: Pick<Product, "price" | "timePrices">, now: number): number {
+  const minute = bangkokMinuteOfDay(now);
+  const active = (product.timePrices ?? []).find((r) => isDealActiveAt(r, minute));
+  return active ? active.price : product.price;
 }
 
 function roundUpToNearest5(value: number): number {

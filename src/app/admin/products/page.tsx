@@ -27,12 +27,29 @@ import { categoryRepository } from "@/repositories/categoryRepository";
 import { channelRepository } from "@/repositories/channelRepository";
 import { modifierGroupRepository, modifierOptionRepository } from "@/repositories/modifierRepository";
 import { productRepository } from "@/repositories/productRepository";
-import type { BundleDeal, Category, ModifierGroup, ModifierOption, Product, ProductQuickPreset, SalesChannel } from "@/types";
+import type {
+  BundleDeal,
+  Category,
+  ModifierGroup,
+  ModifierOption,
+  Product,
+  ProductQuickPreset,
+  SalesChannel,
+  TimePriceRule,
+} from "@/types";
 import { QuickPresetEditor } from "./QuickPresetEditor";
 
 /** One promotion row in the form — all text inputs; `fromTime`/`toTime` are "HH:MM" or "". */
 interface DealRow {
   qty: string;
+  price: string;
+  fromTime: string;
+  toTime: string;
+}
+
+/** One time-based price row in the form — all text inputs, same shape as `DealRow` but with no
+ * quantity, parsed into `Product.timePrices` (`TimePriceRule[]`) on save. */
+interface TimePriceRow {
   price: string;
   fromTime: string;
   toTime: string;
@@ -51,6 +68,8 @@ interface FormState {
   staffOnly: boolean;
   /** `Product.bundleDeals` as text inputs; rows left fully blank are dropped on save. */
   deals: DealRow[];
+  /** `Product.timePrices` as text inputs; rows left fully blank are dropped on save. */
+  timePrices: TimePriceRow[];
   modifierGroupIds: string[];
   /** One string per channel id — blank means "no override, use the channel's automatic markup
    * (or plain price)". Kept as strings in form state the same way `price` is, converted to
@@ -68,6 +87,7 @@ const EMPTY_FORM: FormState = {
   menuNameBase: "",
   staffOnly: false,
   deals: [],
+  timePrices: [],
   modifierGroupIds: [],
   channelPrices: {},
   presets: [],
@@ -99,6 +119,7 @@ export default function ProductsPage() {
   const [saving, setSaving] = useState(false);
   const [imageError, setImageError] = useState<string | null>(null);
   const [dealsError, setDealsError] = useState<string | null>(null);
+  const [timePricesError, setTimePricesError] = useState<string | null>(null);
   // Category chip above the list ("all" = every category, each as its own section).
   const [categoryFilter, setCategoryFilter] = useState<string>("all");
 
@@ -140,6 +161,7 @@ export default function ProductsPage() {
     setEditing(null);
     // Adding while a category chip is selected → the new item lands in that category.
     setDealsError(null);
+    setTimePricesError(null);
     setForm({
       ...EMPTY_FORM,
       categoryId: categoryFilter !== "all" ? categoryFilter : (categories[0]?.id ?? ""),
@@ -151,6 +173,7 @@ export default function ProductsPage() {
   function openEdit(product: Product) {
     setEditing(product);
     setDealsError(null);
+    setTimePricesError(null);
     setForm({
       name: product.name,
       categoryId: product.categoryId,
@@ -163,6 +186,11 @@ export default function ProductsPage() {
         price: String(d.price),
         fromTime: d.fromTime ?? "",
         toTime: d.toTime ?? "",
+      })),
+      timePrices: (product.timePrices ?? []).map((r) => ({
+        price: String(r.price),
+        fromTime: r.fromTime ?? "",
+        toTime: r.toTime ?? "",
       })),
       modifierGroupIds: product.modifierGroupIds,
       channelPrices: Object.fromEntries(
@@ -207,6 +235,14 @@ export default function ProductsPage() {
     setForm((f) => ({ ...f, deals: f.deals.filter((_, i) => i !== index) }));
   }
 
+  function updateTimePrice(index: number, patch: Partial<TimePriceRow>) {
+    setForm((f) => ({ ...f, timePrices: f.timePrices.map((r, i) => (i === index ? { ...r, ...patch } : r)) }));
+  }
+
+  function removeTimePrice(index: number) {
+    setForm((f) => ({ ...f, timePrices: f.timePrices.filter((_, i) => i !== index) }));
+  }
+
   function setChannelPriceInput(channelId: string, value: string) {
     setForm((f) => ({ ...f, channelPrices: { ...f.channelPrices, [channelId]: value } }));
   }
@@ -236,6 +272,14 @@ export default function ProductsPage() {
     const bundleDeals = parsedDeals.deals;
     setDealsError(null);
 
+    const parsedTimePrices = parseTimePrices(form.timePrices);
+    if (!parsedTimePrices.ok) {
+      setTimePricesError(parsedTimePrices.error);
+      return;
+    }
+    const timePrices = parsedTimePrices.rules;
+    setTimePricesError(null);
+
     // A preset only saves if it has a label and a selection for every currently-required group
     // on this product — same check `QuickPresetEditor` shows inline, enforced again here so a
     // half-filled preset (e.g. abandoned mid-edit) never silently reaches the POS grid as a
@@ -258,6 +302,7 @@ export default function ProductsPage() {
           menuNameBase: form.menuNameBase.trim() || null,
           staffOnly: form.staffOnly,
           bundleDeals,
+          timePrices,
           modifierGroupIds: form.modifierGroupIds,
           channelPrices,
           posQuickPresets: presets,
@@ -273,6 +318,7 @@ export default function ProductsPage() {
           menuNameBase: form.menuNameBase.trim() || null,
           staffOnly: form.staffOnly,
           bundleDeals,
+          timePrices,
           modifierGroupIds: form.modifierGroupIds,
           channelPrices,
           posQuickPresets: presets,
@@ -386,6 +432,17 @@ export default function ProductsPage() {
                             .map((d) => {
                               const window = dealWindowLabel(d);
                               return `${d.qty}/${d.price.toLocaleString("th-TH")}${window ? ` (${window})` : ""}`;
+                            })
+                            .join(", ")}
+                        </Badge>
+                      ) : null}
+                      {product.timePrices && product.timePrices.length > 0 ? (
+                        <Badge variant="default">
+                          ราคาพิเศษ{" "}
+                          {product.timePrices
+                            .map((r) => {
+                              const window = dealWindowLabel(r);
+                              return `${r.price.toLocaleString("th-TH")}${window ? ` (${window})` : ""}`;
                             })
                             .join(", ")}
                         </Badge>
@@ -658,6 +715,78 @@ export default function ProductsPage() {
               </div>
             </div>
 
+            <div className="grid gap-2">
+              <Label>ราคาพิเศษตามช่วงเวลา สำหรับซื้อ 1 ชิ้น (ไม่บังคับ)</Label>
+              <p className="text-xs text-muted-foreground">
+                เช่น หลัง 20:00 ลดเหลือ 599 บาท — ราคาเมนูนี้จะเปลี่ยนเป็นราคานี้เองอัตโนมัติตามช่วงเวลาที่ตั้งไว้
+                ไม่ต้องกดเลือกอะไรเพิ่มที่หน้า POS คนละอันกับโปรโมชั่นซื้อหลายชิ้นด้านบน และใช้กับราคาหน้าร้านเท่านั้น
+              </p>
+              <div className="grid gap-2 rounded-lg border border-border p-3">
+                {form.timePrices.map((row, i) => {
+                  const price = Number(row.price);
+                  const normal = Number(form.price);
+                  const valid = row.price.trim() !== "" && Number.isFinite(price) && price >= 0;
+                  return (
+                    <div key={i} className="flex flex-wrap items-center gap-2">
+                      <span className="text-sm">ราคาพิเศษ</span>
+                      <Input
+                        aria-label="ราคาพิเศษ"
+                        inputMode="decimal"
+                        className="w-28"
+                        value={row.price}
+                        onChange={(e) => updateTimePrice(i, { price: e.target.value })}
+                      />
+                      <span className="text-sm">บาท</span>
+                      <Button variant="ghost" size="sm" className="text-destructive" onClick={() => removeTimePrice(i)}>
+                        ลบ
+                      </Button>
+                      <div className="flex w-full flex-wrap items-center gap-2">
+                        <span className="text-sm text-muted-foreground">ช่วงเวลา</span>
+                        <Input
+                          aria-label="ตั้งแต่เวลา"
+                          type="time"
+                          className="w-32"
+                          value={row.fromTime}
+                          onChange={(e) => updateTimePrice(i, { fromTime: e.target.value })}
+                        />
+                        <span className="text-sm">ถึง</span>
+                        <Input
+                          aria-label="ถึงเวลา"
+                          type="time"
+                          className="w-32"
+                          value={row.toTime}
+                          onChange={(e) => updateTimePrice(i, { toTime: e.target.value })}
+                        />
+                        <span className="text-xs text-muted-foreground">
+                          {row.fromTime || row.toTime ? dealWindowLabel(row) : "เว้นว่าง = ทั้งวัน"}
+                        </span>
+                      </div>
+                      {valid && Number.isFinite(normal) && normal > 0 ? (
+                        <span className={"w-full text-xs " + (price < normal ? "text-success" : "text-muted-foreground")}>
+                          {price < normal
+                            ? `ถูกกว่าราคาปกติ (${normal.toLocaleString("th-TH")} บาท) ${(normal - price).toLocaleString("th-TH")} บาท`
+                            : price > normal
+                              ? `แพงกว่าราคาปกติ (${normal.toLocaleString("th-TH")} บาท) ${(price - normal).toLocaleString("th-TH")} บาท`
+                              : "เท่ากับราคาปกติ"}
+                        </span>
+                      ) : null}
+                    </div>
+                  );
+                })}
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="justify-self-start"
+                  onClick={() =>
+                    setForm((f) => ({ ...f, timePrices: [...f.timePrices, { price: "", fromTime: "", toTime: "" }] }))
+                  }
+                >
+                  + เพิ่มช่วงราคาพิเศษ
+                </Button>
+                {timePricesError ? <p className="text-sm text-destructive">{timePricesError}</p> : null}
+              </div>
+            </div>
+
             {channels.length > 0 ? (
               <div className="grid gap-2">
                 <Label>ราคาเฉพาะช่องทาง (ไม่บังคับ)</Label>
@@ -727,4 +856,30 @@ function parseDeals(rows: DealRow[]): { ok: true; deals: BundleDeal[] } | { ok: 
     deals.push(deal);
   }
   return { ok: true, deals: deals.sort((a, b) => a.qty - b.qty) };
+}
+
+/**
+ * Form rows → `Product.timePrices`. Fully blank rows are dropped; anything half-filled or invalid
+ * blocks the save with a message. Unlike `parseDeals`, there's no quantity to group by — any two
+ * rows at all with overlapping windows are ambiguous (two different prices claiming the same
+ * minute of the day), so every row is checked against every other one.
+ */
+function parseTimePrices(rows: TimePriceRow[]): { ok: true; rules: TimePriceRule[] } | { ok: false; error: string } {
+  const rules: TimePriceRule[] = [];
+  for (const row of rows) {
+    if (row.price.trim() === "" && !row.fromTime && !row.toTime) continue;
+    const price = Number(row.price);
+    if (row.price.trim() === "" || !Number.isFinite(price) || price < 0) {
+      return { ok: false, error: "กรอกราคาพิเศษตามช่วงเวลาเป็นตัวเลข" };
+    }
+    if ((row.fromTime && parseClock(row.fromTime) === null) || (row.toTime && parseClock(row.toTime) === null)) {
+      return { ok: false, error: "เวลาของราคาพิเศษไม่ถูกต้อง" };
+    }
+    const rule: TimePriceRule = { price, fromTime: row.fromTime || null, toTime: row.toTime || null };
+    if (rules.some((r) => dealWindowsOverlap(r, rule))) {
+      return { ok: false, error: "ราคาพิเศษตามช่วงเวลามีช่วงเวลาซ้อนกัน ตั้งเวลาให้ไม่ทับกัน เช่น ถึง 20:00 กับ ตั้งแต่ 20:00" };
+    }
+    rules.push(rule);
+  }
+  return { ok: true, rules };
 }
