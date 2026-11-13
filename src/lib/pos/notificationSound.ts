@@ -11,6 +11,34 @@ export function playOrderAlertSound(): void {
   speakNewOrderAlert();
 }
 
+/**
+ * Shared, reused AudioContext for the chime (`playAttentionTone`, below) — mirrors
+ * `serveCallAlarm.ts`'s `unlockAudio()`/`ctx`, but kept separate and unconditional rather than
+ * gated behind the opt-in "รับเรียกเสิร์ฟ" toggle, since the order chime has to work on every
+ * `/pos/*` device (the cashier tablet, a table-grid PC) not just phones that turned that on.
+ *
+ * Browsers only start playing Web Audio once the page has had a user gesture — an AudioContext
+ * created with no gesture on the call stack (which is exactly what happens here: the chime fires
+ * from a Firestore `onSnapshot` callback, see `PosOrderAlertListener`) starts "suspended" and
+ * never makes a sound, silently. `unlockOrderAlertAudio` is wired to a tap/keypress listener for
+ * the whole `/pos/*` session (see `PosOrderAlertListener`) so by the time an order actually
+ * lands, this context already exists and is running — reused and resumed on every call rather
+ * than recreated, so it also recovers if the browser auto-suspends an idle context to save power.
+ */
+let sharedChimeCtx: AudioContext | null = null;
+
+export function unlockOrderAlertAudio(): void {
+  try {
+    const AudioContextClass =
+      window.AudioContext ?? (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+    if (!AudioContextClass) return;
+    if (!sharedChimeCtx) sharedChimeCtx = new AudioContextClass();
+    if (sharedChimeCtx.state === "suspended") void sharedChimeCtx.resume();
+  } catch {
+    // no audio on this device
+  }
+}
+
 /** The exact phrase/rate/pitch spoken for a new order — shared with the "ทดสอบ" preview button
  * on `/pos/alert-voice` so testing a voice there sounds exactly like the real alert. */
 const ALERT_TEXT = "You have a new order";
@@ -136,7 +164,16 @@ function playAttentionTone(): void {
   try {
     const AudioContextClass = window.AudioContext ?? (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
     if (!AudioContextClass) return;
-    const ctx = new AudioContextClass();
+    // Reuse the shared, already-unlocked context (see `unlockOrderAlertAudio` above) instead of
+    // creating a new one here — a context created right at this point, with no user gesture on
+    // the call stack, starts "suspended" on most browsers and plays nothing, audibly failing
+    // exactly the way this was reported ("ไม่มีเสียงแจ้งออเดอร์"). Falls back to an ad-hoc context
+    // only if nothing has unlocked audio yet (e.g. this device never got a single tap this
+    // session) — same best-effort spirit as the rest of this file: won't crash, just may not be
+    // audible in that one case.
+    if (!sharedChimeCtx) sharedChimeCtx = new AudioContextClass();
+    const ctx = sharedChimeCtx;
+    if (ctx.state === "suspended") void ctx.resume();
 
     const playNote = (frequency: number, startTime: number, peakGain: number) => {
       const duration = 0.9; // long, soft decay — most of what makes it read as "a chime" not "a beep"
@@ -171,10 +208,8 @@ function playAttentionTone(): void {
     playNote(659.25, now, 0.45);
     playNote(783.99, now + 0.16, 0.42);
     playNote(1046.5, now + 0.32, 0.45);
-
-    // Release the audio context after the longest note's tail finishes — this fires rarely
-    // enough (a new QR order) that leaving one open per call would leak them over a long shift.
-    setTimeout(() => ctx.close(), 1400);
+    // No ctx.close() here anymore — this context is the shared one (see `unlockOrderAlertAudio`),
+    // reused for every future chime this session, not a one-off created per call.
   } catch {
     // Browsers that block audio without a user gesture, or don't support the Web Audio API at
     // all, still have the visual badge — a missed beep is never worth crashing the table grid over.
