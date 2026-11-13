@@ -17,6 +17,7 @@ import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { computeSwap } from "@/lib/admin/sortOrder";
 import { modifierOptionRepository } from "@/repositories/modifierRepository";
+import { productRepository } from "@/repositories/productRepository";
 import type { ModifierGroup, ModifierOption, Product } from "@/types";
 
 /**
@@ -70,6 +71,14 @@ export function GroupCard({
   const [restrictOption, setRestrictOption] = useState<ModifierOption | null>(null);
   const [restrictEnabled, setRestrictEnabled] = useState(false);
   const [restrictDraft, setRestrictDraft] = useState<string[]>([]);
+
+  // "ผูกกับเมนู" dialog — attaches/detaches this group from several products at once, instead of
+  // opening each product's edit form and ticking the group's checkbox one at a time (the only way
+  // to do this before). Draft set of product ids while the dialog is open, same
+  // separate-from-the-live-subscription reasoning as `restrictDraft` above.
+  const [assignOpen, setAssignOpen] = useState(false);
+  const [assignDraft, setAssignDraft] = useState<string[]>([]);
+  const [assignSaving, setAssignSaving] = useState(false);
 
   // Only products that actually offer this group are meaningful choices — restricting an option
   // to a product that doesn't even list this group would just make it disappear everywhere.
@@ -150,6 +159,42 @@ export function GroupCard({
     setRestrictOption(null);
   }
 
+  function openAssignDialog() {
+    setAssignDraft(eligibleProducts.map((p) => p.id));
+    setAssignOpen(true);
+  }
+
+  function toggleAssignProduct(productId: string) {
+    setAssignDraft((prev) =>
+      prev.includes(productId) ? prev.filter((id) => id !== productId) : [...prev, productId]
+    );
+  }
+
+  /** Writes only to products whose checked state actually changed — ticking 30 of 40 products
+   * shouldn't issue 40 writes. */
+  async function saveAssignDialog() {
+    setAssignSaving(true);
+    try {
+      const changed = products.filter((p) => {
+        const had = p.modifierGroupIds.includes(group.id);
+        const wants = assignDraft.includes(p.id);
+        return had !== wants;
+      });
+      await Promise.all(
+        changed.map((p) => {
+          const wants = assignDraft.includes(p.id);
+          const modifierGroupIds = wants
+            ? [...p.modifierGroupIds, group.id]
+            : p.modifierGroupIds.filter((id) => id !== group.id);
+          return productRepository.update(p.id, { modifierGroupIds });
+        })
+      );
+      setAssignOpen(false);
+    } finally {
+      setAssignSaving(false);
+    }
+  }
+
   async function deleteOption(option: ModifierOption) {
     if (!confirm(`ลบตัวเลือก "${option.name}" ใช่หรือไม่? ลบแล้วกู้คืนไม่ได้`)) return;
     await modifierOptionRepository.remove(option.id);
@@ -200,6 +245,9 @@ export function GroupCard({
         </button>
 
         <Switch checked={group.active} onCheckedChange={onToggleActive} />
+        <Button variant="outline" size="sm" onClick={openAssignDialog} title="เลือกหลายเมนูพร้อมกันเพื่อผูก/เลิกผูกกลุ่มนี้">
+          ผูกกับเมนู ({eligibleProducts.length})
+        </Button>
         <Button variant="outline" size="sm" onClick={onEdit}>
           แก้ไข
         </Button>
@@ -364,6 +412,39 @@ export function GroupCard({
               ยกเลิก
             </Button>
             <Button onClick={saveRestrictDialog}>บันทึก</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={assignOpen} onOpenChange={(open) => !open && setAssignOpen(false)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>ผูกกลุ่ม &quot;{group.name}&quot; กับเมนู</DialogTitle>
+          </DialogHeader>
+          <div className="grid max-h-80 gap-2 overflow-y-auto rounded-lg border border-border p-3">
+            {products.map((p) => (
+              <label key={p.id} className="flex items-center gap-2 text-sm">
+                <Checkbox
+                  checked={assignDraft.includes(p.id)}
+                  onCheckedChange={() => toggleAssignProduct(p.id)}
+                />
+                {p.name}
+              </label>
+            ))}
+            {products.length === 0 ? (
+              <p className="text-sm text-muted-foreground">ร้านนี้ยังไม่มีเมนู</p>
+            ) : null}
+          </div>
+          <p className="text-xs text-muted-foreground">
+            ติ๊กเลือกได้หลายเมนูพร้อมกัน — เมนูที่ติ๊กจะได้กลุ่มนี้เพิ่ม เมนูที่ปลดติ๊กจะเอากลุ่มนี้ออก
+          </p>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setAssignOpen(false)}>
+              ยกเลิก
+            </Button>
+            <Button onClick={saveAssignDialog} disabled={assignSaving}>
+              บันทึก
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
