@@ -24,10 +24,11 @@ import { userRepository } from "@/repositories/userRepository";
 import type { AppUser, UserRole } from "@/types";
 
 /**
- * Staff management (item 17). Creating an account and resetting a PIN both need the Admin SDK
- * (PIN hashing + Firebase Auth user creation), so those two actions call the server routes from
- * Milestone 2's plan (`/api/admin/staff`, `/api/admin/staff/[id]/pin`); everything else
- * (name/role/active) is a plain client write, already scoped to `isAdmin()` by `firestore.rules`.
+ * Staff management (item 17). Creating an account, resetting a PIN, and deleting an account all
+ * need the Admin SDK (PIN hashing, Firebase Auth user creation/deletion, and the Auth-only
+ * `userSecrets` collection), so those three actions call server routes (`/api/admin/staff`,
+ * `/api/admin/staff/[id]/pin`, `/api/admin/staff/[id]`); everything else (name/role/active/
+ * allowedPosPages) is a plain client write, already scoped to `isAdmin()` by `firestore.rules`.
  */
 export default function StaffPage() {
   const { appUser } = useAuth();
@@ -43,6 +44,7 @@ export default function StaffPage() {
   const [pinTarget, setPinTarget] = useState<AppUser | null>(null);
   const [resetPin, setResetPin] = useState("");
   const [resetError, setResetError] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
   // "สิทธิ์การเข้าหน้า" dialog — restricts one staff member to a subset of the secondary /pos/*
   // pages (POS_SECONDARY_PAGES). `restrictEnabled` off (the default for every account) means
@@ -96,6 +98,32 @@ export default function StaffPage() {
   async function toggleActive(user: AppUser) {
     await userRepository.update(user.id, { active: !user.active });
     refresh();
+  }
+
+  /**
+   * Real delete, not just "ปิดใช้งาน" — goes through the server route (not `userRepository`
+   * directly) because it also has to remove the Firebase Auth user and the `userSecrets` doc,
+   * neither of which a client write can touch. `/api/admin/staff/[id]` itself blocks deleting
+   * your own account or the shop's last active admin; this confirm is just the first line of
+   * defense against a stray click on an irreversible action (same `confirm()` pattern as
+   * Categories' own delete).
+   */
+  async function handleDelete(user: AppUser) {
+    if (!confirm(`ลบพนักงาน "${user.name}" ใช่หรือไม่? ลบแล้วกู้คืนไม่ได้ และ PIN เดิมจะใช้ล็อกอินไม่ได้อีก`)) {
+      return;
+    }
+    setDeletingId(user.id);
+    try {
+      const response = await fetch(`/api/admin/staff/${user.id}`, { method: "DELETE" });
+      if (!response.ok) {
+        const data = (await response.json().catch(() => null)) as { error?: string } | null;
+        alert(data?.error ?? "ลบพนักงานไม่สำเร็จ");
+        return;
+      }
+      refresh();
+    } finally {
+      setDeletingId(null);
+    }
   }
 
   function openPermDialog(user: AppUser) {
@@ -194,6 +222,19 @@ export default function StaffPage() {
                   >
                     รีเซ็ต PIN
                   </Button>
+                  {/* Hidden for your own row rather than shown-then-rejected — the server route
+                   * blocks this too (can't delete the account you're signed in as), but there's
+                   * no reason to invite the click at all. */}
+                  {user.id !== appUser?.id ? (
+                    <Button
+                      variant="destructive"
+                      size="sm"
+                      onClick={() => handleDelete(user)}
+                      disabled={deletingId === user.id}
+                    >
+                      ลบ
+                    </Button>
+                  ) : null}
                 </div>
               </TableCell>
             </TableRow>
