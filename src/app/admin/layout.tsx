@@ -1,7 +1,9 @@
+import Link from "next/link";
 import { redirect } from "next/navigation";
 import type { ReactNode } from "react";
 
 import { AdminNav } from "@/components/admin/AdminNav";
+import { Button } from "@/components/ui/button";
 import { SignOutButton } from "@/components/shared/SignOutButton";
 import { SuspensionBanner } from "@/components/shared/SuspensionBanner";
 import { getServerSession } from "@/lib/auth/session";
@@ -43,7 +45,15 @@ export default async function AdminLayout({ children }: { children: ReactNode })
           <p className="text-sm text-muted-foreground">Admin</p>
           <p className="font-medium">{session.appUser.name}</p>
         </div>
-        <SignOutButton />
+        {/* "สลับไปสลับมาได้เลย" — one app, one PIN, no separate POS link/shortcut needed to use
+         * both sides. `/pos` itself shows the matching button back to here (see pos/layout.tsx),
+         * since an Admin's own account is never subject to the staff lock-to-one-page flow. */}
+        <div className="flex items-center gap-2">
+          <Button asChild variant="outline" size="sm">
+            <Link href="/pos">ไปหน้า POS</Link>
+          </Button>
+          <SignOutButton />
+        </div>
       </header>
       <div className="flex flex-1 flex-col sm:flex-row">
         <AdminNav />

@@ -51,7 +51,7 @@ function SetPinPageInner() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ pin: firstPin }),
       });
-      const data = (await response.json()) as { error?: string };
+      const data = (await response.json()) as { error?: string; allowedPosPages?: string[] | null };
       if (!response.ok) {
         setError(data.error ?? "ตั้ง PIN ไม่สำเร็จ");
         setStep("enter");
@@ -59,7 +59,7 @@ function SetPinPageInner() {
         setConfirmPin("");
         return;
       }
-      router.push(resolveRedirect(next, role));
+      router.push(resolveRedirect(next, role, data.allowedPosPages));
       router.refresh();
     } catch {
       setError("เชื่อมต่อไม่ได้ กรุณาลองใหม่");

@@ -1,3 +1,5 @@
+import { resolveLockedPosPage } from "@/lib/pos/posPages";
+
 /**
  * Where to send someone right after they finish signing in — shared by `/login` and `/set-pin`
  * (the forced first-PIN-change screen), so both resolve a `?next=` the same, safe way.
@@ -10,8 +12,21 @@
  * an arbitrary URL. Staff never get sent to `/admin` even if `next` says so — `role === "admin"`
  * (item 17) still applies, and `/admin/layout.tsx`'s own gate would just bounce them right back
  * out anyway.
+ *
+ * A *locked* staff account (`resolveLockedPosPage` — restricted to exactly one secondary `/pos/*`
+ * page) always wins over everything else here, `next` included: the whole point of a dedicated
+ * kitchen-tablet-style account is that it goes straight to its one page every time, never to
+ * wherever a stale bookmark or deep link happened to point.
  */
-export function resolveRedirect(next: string | null, role: "admin" | "staff"): string {
+export function resolveRedirect(
+  next: string | null,
+  role: "admin" | "staff",
+  allowedPosPages?: string[] | null
+): string {
+  if (role === "staff") {
+    const locked = resolveLockedPosPage(allowedPosPages);
+    if (locked) return locked;
+  }
   const allowedPrefix = role === "admin" ? ["/admin", "/pos"] : ["/pos"];
   if (next && allowedPrefix.some((prefix) => next === prefix || next.startsWith(`${prefix}/`))) {
     return next;

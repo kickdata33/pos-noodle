@@ -43,6 +43,7 @@ function LoginPageInner() {
         customToken?: string;
         role?: "admin" | "staff";
         mustChangePin?: boolean;
+        allowedPosPages?: string[] | null;
         error?: string;
       };
 
@@ -77,7 +78,7 @@ function LoginPageInner() {
         if (next) params.set("next", next);
         router.push(`/set-pin?${params.toString()}`);
       } else {
-        router.push(resolveRedirect(next, role));
+        router.push(resolveRedirect(next, role, data.allowedPosPages));
       }
       router.refresh();
     } catch {

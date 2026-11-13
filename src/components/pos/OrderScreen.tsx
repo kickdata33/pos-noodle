@@ -13,6 +13,7 @@ import { RemoveItemDialog } from "@/components/pos/RemoveItemDialog";
 import { Button } from "@/components/ui/button";
 import { formatCurrency, formatTime } from "@/lib/format";
 import { useAuth } from "@/hooks/useAuth";
+import { usePosLockRedirect } from "@/hooks/usePosLockRedirect";
 import { printReceiptViaEpos } from "@/lib/pos/eposPrint";
 import {
   activeDealsAt,
@@ -95,6 +96,10 @@ const DEFAULT_SETTINGS: Pick<
 export function OrderScreen({ orderId, initialTableId, initialChannelId }: Props) {
   const router = useRouter();
   const { appUser } = useAuth();
+  // Same locked-account bail-out as `PosHome` — a kitchen-only tablet, say, has no business
+  // taking orders either. Hook call unconditional up here; the actual early return is below,
+  // after every other hook in this component.
+  const lockedPage = usePosLockRedirect();
 
   // Shared across every /pos/* screen (see `PosCatalogProvider`'s comment) — this screen used to
   // subscribe to all of it itself, meaning every tap into an order re-fetched all seven of these
@@ -850,6 +855,8 @@ export function OrderScreen({ orderId, initialTableId, initialChannelId }: Props
       setSaving(false);
     }
   }
+
+  if (lockedPage) return null;
 
   if (!order || !totals) {
     return <main className="p-6 text-muted-foreground">กำลังโหลด...</main>;

@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { redirect } from "next/navigation";
 import type { ReactNode } from "react";
 
@@ -5,6 +6,7 @@ import { PosCatalogProvider } from "@/components/pos/PosCatalogContext";
 import { PosOrderAlertListener } from "@/components/pos/PosOrderAlertListener";
 import { PrintStatusBanner } from "@/components/pos/PrintStatusBanner";
 import { ServeCallAlert } from "@/components/pos/ServeCallAlert";
+import { Button } from "@/components/ui/button";
 import { SignOutButton } from "@/components/shared/SignOutButton";
 import { SuspensionBanner } from "@/components/shared/SuspensionBanner";
 import { getServerSession } from "@/lib/auth/session";
@@ -42,7 +44,19 @@ export default async function PosLayout({ children }: { children: ReactNode }) {
         )}
         <header className="flex items-center justify-between border-b border-border bg-card px-4 py-3">
           <p className="font-medium">{session.appUser.name}</p>
-          <SignOutButton />
+          <div className="flex items-center gap-2">
+            {/* Toggle back to Admin — same "สลับไปสลับมาได้เลย" button as admin/layout.tsx's own
+             * comment. Admin-only: a locked staff account (see PosHome/OrderScreen's
+             * usePosLockRedirect) never gets this far with a choice to make anyway, but hiding
+             * it from every non-admin avoids a dead "ไปหน้า Admin" link that just bounces staff
+             * straight back here via /admin/layout.tsx's own role gate. */}
+            {session.appUser.role === "admin" ? (
+              <Button asChild variant="outline" size="sm">
+                <Link href="/admin">ไปหน้า Admin</Link>
+              </Button>
+            ) : null}
+            <SignOutButton />
+          </div>
         </header>
         <PrintStatusBanner />
         <ServeCallAlert />

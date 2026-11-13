@@ -22,13 +22,18 @@ export interface AppUser extends WithId {
   active: boolean;
   createdAt: EpochMillis;
   /**
-   * Which secondary `/pos/*` pages (beyond the table-grid home and order screens, which every
-   * signed-in staff member can always reach) this account may open — the actual key list and
-   * labels live in `lib/pos/posPages.ts` (kept out of `types/` the same way `ShopModuleKey`
-   * stays out of `ShopSettings` below). `undefined`/`null` means unrestricted — every existing
-   * account before this field existed, and every account an Admin hasn't deliberately narrowed,
-   * keeps seeing every page exactly like before this existed. An Admin sets a specific array to
-   * limit one account to just those pages (e.g. a kitchen-only staff member).
+   * Which secondary `/pos/*` pages this account may open — the actual key list and labels live
+   * in `lib/pos/posPages.ts` (kept out of `types/` the same way `ShopModuleKey` stays out of
+   * `ShopSettings` below). `undefined`/`null` means unrestricted — every existing account before
+   * this field existed, and every account an Admin hasn't deliberately narrowed, keeps seeing
+   * every page exactly like before this existed.
+   *
+   * Exactly one entry is a special case, not just "restricted to one of six" — see
+   * `resolveLockedPosPage` in `lib/pos/posPages.ts`: that one account is *locked* to that one
+   * page, including being barred from the table-grid home and order screen that every other
+   * staff account can always reach. This is what makes a dedicated single-purpose device (a
+   * kitchen tablet, say) land straight on its one screen on login with no way back but signing
+   * out. Two or more entries behaves like before — the table grid, filtered to just those links.
    */
   allowedPosPages?: string[] | null;
   /**

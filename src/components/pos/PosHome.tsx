@@ -7,6 +7,7 @@ import { ServeCallToggle } from "@/components/pos/ServeCallToggle";
 import { TableQrDialog } from "@/components/shared/TableQrDialog";
 import { Badge } from "@/components/ui/badge";
 import { useAuth } from "@/hooks/useAuth";
+import { usePosLockRedirect } from "@/hooks/usePosLockRedirect";
 import { formatCurrency, formatTime } from "@/lib/format";
 import { canSeePosPage, POS_SECONDARY_PAGES } from "@/lib/pos/posPages";
 import { isLowStock } from "@/lib/pos/stock";
@@ -36,6 +37,11 @@ export function PosHome() {
   // `TableQrDialog`'s own comment for how it branches on `qrMode`.
   const [qrTable, setQrTable] = useState<PosTable | null>(null);
   const { appUser } = useAuth();
+  // A staff account locked to exactly one secondary page (see `usePosLockRedirect`'s comment —
+  // e.g. a dedicated kitchen tablet) never actually sees this table grid; it's bounced to its
+  // one page instead. Hook call stays unconditional up here with the others; the actual bail-out
+  // happens below, after every other hook in this component has run.
+  const lockedPage = usePosLockRedirect();
   // One-tap "พิมพ์ QR" on each table card (item: "ต้องสร้างแล้วปริ้นให้ลูกค้าได้ก่อน") — works on an
   // empty table, so staff can seat a party and hand them the QR before anything is ordered; the
   // customer's first order opens the bill. Only in shops that switched it on.
@@ -90,6 +96,8 @@ export function PosHome() {
   const [stockLevels, setStockLevels] = useState<StockLevel[]>([]);
   useEffect(() => stockLevelRepository.subscribeForShop(shopId, setStockLevels), [shopId]);
   const lowStock = stockLevels.filter(isLowStock);
+
+  if (lockedPage) return null;
 
   const activeTables = tables.filter((t) => t.active);
   const otherChannels = channels.filter((c) => c.active && !c.requiresTable);

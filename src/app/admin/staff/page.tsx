@@ -306,6 +306,12 @@ export default function StaffPage() {
                 ))}
               </div>
             ) : null}
+            {permEnabled && permDraft.length === 1 ? (
+              <p className="text-sm text-muted-foreground">
+                เลือกไว้หน้าเดียว — ล็อกอินแล้วจะเข้าหน้านี้ตรงทันที เข้าหน้าโต๊ะ/หน้าอื่นไม่ได้เลย
+                (ออกจากระบบได้อย่างเดียว) เหมาะกับแท็บเล็ตที่ตั้งไว้ใช้งานแค่หน้าเดียว เช่น จอครัว
+              </p>
+            ) : null}
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setPermTarget(null)}>

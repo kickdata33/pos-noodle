@@ -37,5 +37,8 @@ export async function POST(request: NextRequest) {
 
   await getAdminDb().collection(COLLECTIONS.users).doc(session.uid).update({ mustChangePin: false });
 
-  return NextResponse.json({ ok: true });
+  // So the client can resolve a locked account's one-and-only page the same way `/api/auth/pin`
+  // does — `session.appUser` here is the pre-login snapshot, but `allowedPosPages` isn't touched
+  // by this route, so it's still accurate.
+  return NextResponse.json({ ok: true, allowedPosPages: session.appUser.allowedPosPages ?? null });
 }

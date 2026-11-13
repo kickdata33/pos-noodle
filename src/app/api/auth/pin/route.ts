@@ -105,5 +105,6 @@ export async function POST(request: NextRequest) {
     role: appUser.role,
     name: appUser.name,
     mustChangePin: appUser.mustChangePin ?? false,
+    allowedPosPages: appUser.allowedPosPages ?? null,
   });
 }
