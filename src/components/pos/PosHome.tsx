@@ -8,6 +8,7 @@ import { TableQrDialog } from "@/components/shared/TableQrDialog";
 import { Badge } from "@/components/ui/badge";
 import { useAuth } from "@/hooks/useAuth";
 import { formatCurrency, formatTime } from "@/lib/format";
+import { canSeePosPage, POS_SECONDARY_PAGES } from "@/lib/pos/posPages";
 import { isLowStock } from "@/lib/pos/stock";
 import { printQrForTable } from "@/lib/pos/tableQrPrint";
 import { orderRepository } from "@/repositories/orderRepository";
@@ -302,24 +303,15 @@ export function PosHome() {
         <ServeCallToggle />
       </div>
       <div className="mt-4 flex flex-wrap gap-x-4 gap-y-2">
-        <Link href="/pos/kitchen" className="text-sm text-muted-foreground underline">
-          หน้าจอครัว
-        </Link>
-        <Link href="/pos/history" className="text-sm text-muted-foreground underline">
-          ประวัติออเดอร์
-        </Link>
-        <Link href="/pos/stock" className="text-sm text-muted-foreground underline">
-          ของหมด
-        </Link>
-        <Link href="/pos/inventory" className="text-sm text-muted-foreground underline">
-          สต๊อก
-        </Link>
-        <Link href="/pos/alert-voice" className="text-sm text-muted-foreground underline">
-          เสียงแจ้งเตือน
-        </Link>
-        <Link href="/pos/print-station" className="text-sm text-muted-foreground underline">
-          สถานีพิมพ์
-        </Link>
+        {/* Hides a link an Admin has restricted this account from — same "don't show it then
+         * bounce back" courtesy AdminNav gives the Admin-only modules. PosPageGate (on each
+         * page itself) is the actual enforcement; this is just so a restricted staff member
+         * doesn't see a dead-end link at all. */}
+        {POS_SECONDARY_PAGES.filter((p) => canSeePosPage(appUser?.allowedPosPages, p.path)).map((p) => (
+          <Link key={p.path} href={p.path} className="text-sm text-muted-foreground underline">
+            {p.label}
+          </Link>
+        ))}
       </div>
 
       <TableQrDialog table={qrTable} onOpenChange={(open) => !open && setQrTable(null)} />

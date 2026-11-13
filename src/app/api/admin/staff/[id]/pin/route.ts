@@ -33,5 +33,9 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     throw error;
   }
 
+  // Same reasoning as the create route: this is a temporary PIN the Admin just picked, not the
+  // account's real one — force the set-your-own-PIN screen again on the next login.
+  await db.collection(COLLECTIONS.users).doc(id).update({ mustChangePin: true });
+
   return NextResponse.json({ ok: true });
 }

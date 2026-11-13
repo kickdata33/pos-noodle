@@ -53,6 +53,10 @@ export async function POST(request: NextRequest) {
     role,
     active: true,
     createdAt: Date.now(),
+    // The PIN just assigned above is a temporary one the Admin picked and can see on screen —
+    // not this account's real working PIN (see AppUser.mustChangePin's comment for why). Forces
+    // the set-your-own-PIN screen on first login.
+    mustChangePin: true,
   });
 
   return NextResponse.json({ id: created.uid });

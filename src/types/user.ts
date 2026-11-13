@@ -21,6 +21,27 @@ export interface AppUser extends WithId {
   role: UserRole;
   active: boolean;
   createdAt: EpochMillis;
+  /**
+   * Which secondary `/pos/*` pages (beyond the table-grid home and order screens, which every
+   * signed-in staff member can always reach) this account may open — the actual key list and
+   * labels live in `lib/pos/posPages.ts` (kept out of `types/` the same way `ShopModuleKey`
+   * stays out of `ShopSettings` below). `undefined`/`null` means unrestricted — every existing
+   * account before this field existed, and every account an Admin hasn't deliberately narrowed,
+   * keeps seeing every page exactly like before this existed. An Admin sets a specific array to
+   * limit one account to just those pages (e.g. a kitchen-only staff member).
+   */
+  allowedPosPages?: string[] | null;
+  /**
+   * True right after an Admin creates this account or resets its PIN — the PIN that action just
+   * set is a temporary one the Admin picked and can see on screen, not the account's real
+   * working PIN (PINs are stored as a one-way hash — see `UserSecret` below — so once set, not
+   * even the system itself can show it again). The next successful login with it is redirected
+   * to `/set-pin` to choose a PIN only that person knows, which clears this flag. Absent/false
+   * for every account that has completed that step, including every account that predates this
+   * field (no migration needed — the same `undefined`-is-the-safe-default pattern as
+   * `allowedPosPages` above).
+   */
+  mustChangePin?: boolean;
 }
 
 /**

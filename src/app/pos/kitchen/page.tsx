@@ -1,5 +1,10 @@
 import { KitchenScreen } from "@/components/pos/KitchenScreen";
+import { PosPageGate } from "@/components/pos/PosPageGate";
 
 export default function KitchenPage() {
-  return <KitchenScreen />;
+  return (
+    <PosPageGate page="/pos/kitchen">
+      <KitchenScreen />
+    </PosPageGate>
+  );
 }

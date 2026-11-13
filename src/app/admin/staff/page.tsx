@@ -14,10 +14,12 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { useAuth } from "@/hooks/useAuth";
+import { POS_SECONDARY_PAGES } from "@/lib/pos/posPages";
 import { userRepository } from "@/repositories/userRepository";
 import type { AppUser, UserRole } from "@/types";
 
@@ -41,6 +43,16 @@ export default function StaffPage() {
   const [pinTarget, setPinTarget] = useState<AppUser | null>(null);
   const [resetPin, setResetPin] = useState("");
   const [resetError, setResetError] = useState<string | null>(null);
+
+  // "สิทธิ์การเข้าหน้า" dialog — restricts one staff member to a subset of the secondary /pos/*
+  // pages (POS_SECONDARY_PAGES). `restrictEnabled` off (the default for every account) means
+  // `allowedPosPages: null` — unrestricted, same as before this feature existed; switching it on
+  // and saving an empty selection is deliberately allowed (e.g. a brand-new kitchen hire who
+  // shouldn't see any secondary page yet, just the table grid and order screen).
+  const [permTarget, setPermTarget] = useState<AppUser | null>(null);
+  const [permEnabled, setPermEnabled] = useState(false);
+  const [permDraft, setPermDraft] = useState<string[]>([]);
+  const [permSaving, setPermSaving] = useState(false);
 
   useEffect(() => {
     if (!shopId) return;
@@ -84,6 +96,28 @@ export default function StaffPage() {
   async function toggleActive(user: AppUser) {
     await userRepository.update(user.id, { active: !user.active });
     refresh();
+  }
+
+  function openPermDialog(user: AppUser) {
+    setPermTarget(user);
+    setPermEnabled(user.allowedPosPages != null);
+    setPermDraft(user.allowedPosPages ?? []);
+  }
+
+  function togglePermPage(path: string) {
+    setPermDraft((prev) => (prev.includes(path) ? prev.filter((p) => p !== path) : [...prev, path]));
+  }
+
+  async function savePermDialog() {
+    if (!permTarget) return;
+    setPermSaving(true);
+    try {
+      await userRepository.update(permTarget.id, { allowedPosPages: permEnabled ? permDraft : null });
+      setPermTarget(null);
+      refresh();
+    } finally {
+      setPermSaving(false);
+    }
   }
 
   async function handleResetPin() {
@@ -134,13 +168,21 @@ export default function StaffPage() {
                 </Badge>
               </TableCell>
               <TableCell>
-                <Badge variant={user.active ? "success" : "muted"}>
-                  {user.active ? "ใช้งานได้" : "ปิดใช้งาน"}
-                </Badge>
+                <div className="flex flex-wrap items-center gap-1">
+                  <Badge variant={user.active ? "success" : "muted"}>
+                    {user.active ? "ใช้งานได้" : "ปิดใช้งาน"}
+                  </Badge>
+                  {user.mustChangePin ? (
+                    <Badge variant="muted">รอตั้ง PIN เอง</Badge>
+                  ) : null}
+                </div>
               </TableCell>
               <TableCell className="text-right">
                 <div className="flex justify-end gap-2">
                   <Switch checked={user.active} onCheckedChange={() => toggleActive(user)} />
+                  <Button variant="outline" size="sm" onClick={() => openPermDialog(user)}>
+                    สิทธิ์การเข้าหน้า
+                  </Button>
                   <Button
                     variant="outline"
                     size="sm"
@@ -189,7 +231,7 @@ export default function StaffPage() {
               </Select>
             </div>
             <div className="grid gap-2">
-              <Label htmlFor="staff-pin">รหัส PIN (6 หลัก)</Label>
+              <Label htmlFor="staff-pin">PIN ชั่วคราว (6 หลัก) — พนักงานจะตั้งรหัสของตัวเองตอนล็อกอินครั้งแรก</Label>
               <Input
                 id="staff-pin"
                 inputMode="numeric"
@@ -217,7 +259,7 @@ export default function StaffPage() {
             <DialogTitle>รีเซ็ต PIN — {pinTarget?.name}</DialogTitle>
           </DialogHeader>
           <div className="grid gap-2">
-            <Label htmlFor="reset-pin">รหัส PIN ใหม่ (6 หลัก)</Label>
+            <Label htmlFor="reset-pin">PIN ชั่วคราวใหม่ (6 หลัก) — พนักงานจะตั้งรหัสของตัวเองตอนล็อกอินครั้งถัดไป</Label>
             <Input
               id="reset-pin"
               inputMode="numeric"
@@ -233,6 +275,43 @@ export default function StaffPage() {
               ยกเลิก
             </Button>
             <Button onClick={handleResetPin} disabled={saving || resetPin.length !== 6}>
+              บันทึก
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={permTarget !== null} onOpenChange={(open) => !open && setPermTarget(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>สิทธิ์การเข้าหน้า — {permTarget?.name}</DialogTitle>
+          </DialogHeader>
+          <div className="grid gap-4">
+            <div className="flex items-center justify-between gap-4">
+              <Label htmlFor="perm-restrict" className="flex-1">
+                จำกัดหน้าที่เข้าได้ (ปิด = เข้าได้ทุกหน้าเหมือนเดิม)
+              </Label>
+              <Switch id="perm-restrict" checked={permEnabled} onCheckedChange={setPermEnabled} />
+            </div>
+            {permEnabled ? (
+              <div className="grid gap-2 rounded-md border border-border p-3">
+                {POS_SECONDARY_PAGES.map((p) => (
+                  <label key={p.path} className="flex items-center gap-2 text-sm">
+                    <Checkbox
+                      checked={permDraft.includes(p.path)}
+                      onCheckedChange={() => togglePermPage(p.path)}
+                    />
+                    {p.label}
+                  </label>
+                ))}
+              </div>
+            ) : null}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setPermTarget(null)}>
+              ยกเลิก
+            </Button>
+            <Button onClick={savePermDialog} disabled={permSaving}>
               บันทึก
             </Button>
           </DialogFooter>

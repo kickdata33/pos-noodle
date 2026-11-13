@@ -19,6 +19,10 @@ import { getServerSession } from "@/lib/auth/session";
 export default async function PosLayout({ children }: { children: ReactNode }) {
   const session = await getServerSession();
   if (!session) redirect("/login");
+  // Forced first-PIN-change (AppUser.mustChangePin) — belt-and-suspenders alongside /login's own
+  // redirect there, so someone can't reach /pos on a still-temporary PIN by hitting Back or a
+  // bookmark instead of going through the login screen.
+  if (session.appUser.mustChangePin) redirect(`/set-pin?role=${session.appUser.role}`);
   // SaaS Phase 3: same suspension gate as /admin — see that layout's comment.
   if (session.subscription?.status === "suspended") redirect("/suspended");
 

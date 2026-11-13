@@ -8,6 +8,7 @@ import { Suspense, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { auth } from "@/lib/firebase/client";
 import { PIN_LENGTH } from "@/lib/auth/pinConstants";
+import { resolveRedirect } from "@/lib/auth/redirect";
 import { cn } from "@/lib/utils";
 
 /**
@@ -19,24 +20,6 @@ import { cn } from "@/lib/utils";
  * never decides whether a PIN is valid.
  */
 const KEYS = ["1", "2", "3", "4", "5", "6", "7", "8", "9"];
-
-/**
- * Where to send someone right after a successful login. `next` is the page `src/proxy.ts`
- * bounced them from before they even reached this screen (e.g. an admin who opened `/pos`
- * directly while logged out used to always land back on `/admin` afterwards, no matter which
- * page they actually wanted — this is the fix). Deliberately narrow: only ever returns `/admin`
- * or `/pos` (with an optional sub-path), never anything else, so a crafted `?next=` query param
- * can't be used to redirect a freshly-authenticated session to an arbitrary URL. Staff never get
- * sent to `/admin` even if `next` says so — `role === "admin"` (item 17) still applies, and
- * `/admin/layout.tsx`'s own gate would just bounce them right back out anyway.
- */
-function resolveRedirect(next: string | null, role: "admin" | "staff"): string {
-  const allowedPrefix = role === "admin" ? ["/admin", "/pos"] : ["/pos"];
-  if (next && allowedPrefix.some((prefix) => next === prefix || next.startsWith(`${prefix}/`))) {
-    return next;
-  }
-  return role === "admin" ? "/admin" : "/pos";
-}
 
 function LoginPageInner() {
   const router = useRouter();
@@ -59,6 +42,7 @@ function LoginPageInner() {
       const data = (await response.json()) as {
         customToken?: string;
         role?: "admin" | "staff";
+        mustChangePin?: boolean;
         error?: string;
       };
 
@@ -84,7 +68,17 @@ function LoginPageInner() {
         return;
       }
 
-      router.push(resolveRedirect(next, data.role === "admin" ? "admin" : "staff"));
+      const role = data.role === "admin" ? "admin" : "staff";
+      if (data.mustChangePin) {
+        // First login with a temporary PIN an Admin just set (new account, or a reset) — force
+        // choosing a real PIN only this person knows before going anywhere else. `next` carries
+        // through so this doesn't strand them away from wherever they were actually headed.
+        const params = new URLSearchParams({ role });
+        if (next) params.set("next", next);
+        router.push(`/set-pin?${params.toString()}`);
+      } else {
+        router.push(resolveRedirect(next, role));
+      }
       router.refresh();
     } catch {
       setError("เชื่อมต่อไม่ได้ กรุณาลองใหม่");

@@ -104,5 +104,6 @@ export async function POST(request: NextRequest) {
     customToken,
     role: appUser.role,
     name: appUser.name,
+    mustChangePin: appUser.mustChangePin ?? false,
   });
 }

@@ -18,6 +18,8 @@ export default async function AdminLayout({ children }: { children: ReactNode })
   const session = await getServerSession();
   if (!session) redirect("/login");
   if (session.appUser.role !== "admin") redirect("/pos");
+  // Forced first-PIN-change — see pos/layout.tsx's identical comment.
+  if (session.appUser.mustChangePin) redirect(`/set-pin?role=${session.appUser.role}`);
   // SaaS Phase 3: a suspended shop is locked out of everything except /billing (which isn't
   // nested under this layout, so a suspended admin can still reach it to recover access).
   if (session.subscription?.status === "suspended") redirect("/suspended");
