@@ -1,5 +1,5 @@
 import { formatCurrency, formatTime } from "@/lib/format";
-import type { Order, ShopSettings } from "@/types";
+import type { Order, OrderItem, ShopSettings } from "@/types";
 import { tableLabel } from "@/lib/tableLabel";
 
 /**
@@ -27,6 +27,50 @@ const SEPARATOR = "--------------------------------"; // 32 chars — safe on bo
 /** e.g. "หมูสด (+฿10.00)" / "หมูสด" when there's no price delta — reused for every modifier line. */
 function formatModifierLine(name: string, priceDelta: number, currency: string): string {
   return priceDelta !== 0 ? `  ${name} (+${formatCurrency(priceDelta, currency)})` : `  ${name}`;
+}
+
+/** Stable key for `mergeReceiptLines` — two lines combine only when every one of these matches,
+ * so a merge never blends anything the printed bill would otherwise show differently. */
+function receiptMergeKey(item: OrderItem): string {
+  const modifiersKey = item.modifiers
+    .map((m) => `${m.groupId}:${m.optionId}:${m.priceDelta}`)
+    .sort()
+    .join("|");
+  return [item.productId, item.unitPrice, item.note, item.bundleUnits ?? 0, modifiersKey].join("::");
+}
+
+/**
+ * Collapses order lines that would otherwise print as identical repeats — e.g. a customer or
+ * staff tapping "โซดาสิงห์" three separate times (three `OrderItem`s, each `quantity: 1`) becomes
+ * one printed line "โซดาสิงห์ x3" instead of three "x1" lines (item: "ถ้าของเป็นชนิดเดียวกัน ให้เพิ่ม
+ * จำนวนเข้าไป เวลาปริ้น ... ถึงจะกดคนละเวลาก็เถอะ"). **Receipt-only**: this never mutates
+ * `order.items` itself or anything read from it elsewhere (the POS cart, kitchen tickets, per-line
+ * kitchen status) — those all keep every line exactly as added, timing included; only the printed
+ * bill's line list goes through this first. Two lines merge only when product, modifiers, note,
+ * `bundleUnits`, and `unitPrice` all match (see `receiptMergeKey`) — a price that changed between
+ * the two taps (a time-based special switching over mid-service, say) correctly keeps them apart
+ * instead of blending two different prices into one combined line. Order of first appearance is
+ * preserved, so the bill's item order doesn't jump around based on merges.
+ */
+function mergeReceiptLines(items: OrderItem[]): OrderItem[] {
+  const merged: OrderItem[] = [];
+  const indexByKey = new Map<string, number>();
+  for (const item of items) {
+    const key = receiptMergeKey(item);
+    const existingIndex = indexByKey.get(key);
+    if (existingIndex === undefined) {
+      indexByKey.set(key, merged.length);
+      merged.push(item);
+      continue;
+    }
+    const existing = merged[existingIndex];
+    merged[existingIndex] = {
+      ...existing,
+      quantity: existing.quantity + item.quantity,
+      lineTotal: existing.lineTotal + item.lineTotal,
+    };
+  }
+  return merged;
 }
 
 /**
@@ -57,7 +101,7 @@ export function buildOrderReceipt(
   if (options.includeTime !== false) lines.push({ text: formatTime(order.paidAt ?? order.createdAt) });
   lines.push({ text: SEPARATOR, align: "center" });
 
-  for (const item of order.items) {
+  for (const item of mergeReceiptLines(order.items)) {
     lines.push({ text: `${item.productName} x${item.quantity}` });
     for (const m of item.modifiers) lines.push({ text: formatModifierLine(m.optionName, m.priceDelta, currency) });
     if (item.note) lines.push({ text: `  หมายเหตุ: ${item.note}` });

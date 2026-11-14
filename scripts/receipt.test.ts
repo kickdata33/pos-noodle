@@ -121,6 +121,47 @@ test("buildOrderReceipt: lists each item's modifiers and note indented under it"
   assert.ok(texts.some((t) => t.includes("หมายเหตุ: ไม่ผัก")));
 });
 
+test("buildOrderReceipt: identical lines added separately merge into one with the summed quantity", () => {
+  const withRepeats = order({
+    items: [
+      item({ id: "i1", productId: "soda", productName: "โซดาสิงห์", unitPrice: 20, lineTotal: 20 }),
+      item({ id: "i2", productId: "soda", productName: "โซดาสิงห์", unitPrice: 20, lineTotal: 20, addedAt: 500 }),
+      item({ id: "i3", productId: "soda", productName: "โซดาสิงห์", unitPrice: 20, lineTotal: 20, addedAt: 1500 }),
+    ],
+  });
+  const receipt = buildOrderReceipt(withRepeats, settings());
+  const texts = receipt.lines.map((l) => l.text);
+  assert.ok(texts.includes("โซดาสิงห์ x3"));
+  assert.ok(!texts.some((t) => t.includes("x1")));
+  assert.equal(texts.filter((t) => t.startsWith("โซดาสิงห์")).length, 1);
+  // The underlying order is never touched — only what gets printed changes.
+  assert.equal(withRepeats.items.length, 3);
+});
+
+test("buildOrderReceipt: lines only merge when everything that affects the printed line matches", () => {
+  const mixed = order({
+    items: [
+      item({ id: "i1", productId: "soda", productName: "โซดาสิงห์", unitPrice: 20, lineTotal: 20 }),
+      // Different unit price (e.g. a time-based special switched over mid-service) — stays separate.
+      item({ id: "i2", productId: "soda", productName: "โซดาสิงห์", unitPrice: 25, lineTotal: 25 }),
+      // Different note — stays separate.
+      item({ id: "i3", productId: "soda", productName: "โซดาสิงห์", unitPrice: 20, lineTotal: 20, note: "แก้วเดียว" }),
+      // Different modifiers — stays separate.
+      item({
+        id: "i4",
+        productId: "soda",
+        productName: "โซดาสิงห์",
+        unitPrice: 20,
+        lineTotal: 25,
+        modifiers: [{ groupId: "g1", groupName: "น้ำแข็ง", optionId: "o1", optionName: "ใส่น้ำแข็ง", priceDelta: 5 }],
+      }),
+    ],
+  });
+  const receipt = buildOrderReceipt(mixed, settings());
+  const texts = receipt.lines.map((l) => l.text);
+  assert.equal(texts.filter((t) => t.startsWith("โซดาสิงห์")).length, 4);
+});
+
 test("buildOrderReceipt: omits discount/service charge/VAT lines when they're zero", () => {
   const receipt = buildOrderReceipt(order(), settings());
   const texts = receipt.lines.map((l) => l.text);
