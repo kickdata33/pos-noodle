@@ -111,7 +111,14 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     newSinceReview: true,
     ...(kitchenPrintingOn ? { kitchenSentQty: item.quantity } : {}),
   }));
-  const kitchenSend = { added: newItems.map((item) => ({ item, quantity: item.quantity })), cancelled: [] };
+  // `Category.sendToKitchen === false` lines (see that field's comment) never go on this ticket —
+  // unlike `computeKitchenSend`'s usual delta logic, there's no "before" state to diff against
+  // here (these are brand-new lines, already marked fully sent above), so the filter is just a
+  // plain exclusion instead. `kitchenJobsNeeded` stays false when every new line opted out, so no
+  // print job — not even an empty one — gets queued for an order of drinks alone.
+  const kitchenSendItems = newItems.filter((item) => item.sendToKitchen !== false);
+  const kitchenSend = { added: kitchenSendItems.map((item) => ({ item, quantity: item.quantity })), cancelled: [] };
+  const kitchenJobsNeeded = kitchenPrintingOn && kitchenSendItems.length > 0;
   const printJobsRef = db.collection(COLLECTIONS.printJobs);
 
   const throttleRef = db.collection(COLLECTIONS.customerOrderThrottle).doc(tableId);
@@ -160,7 +167,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
           pendingReview: true,
           ...(kitchenPrintingOn ? { kitchenTicketCount: round } : {}),
         });
-        if (kitchenPrintingOn) {
+        if (kitchenJobsNeeded) {
           tx.set(printJobsRef.doc(), {
             ...kitchenJobFields({ ...order, id: orderDoc.id }, kitchenSend, round),
             shopId: table.shopId,
@@ -211,7 +218,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
         orderId: newOrderRef.id,
         updatedAt: now,
       });
-      if (kitchenPrintingOn) {
+      if (kitchenJobsNeeded) {
         tx.set(printJobsRef.doc(), {
           ...kitchenJobFields({ ...orderData, id: newOrderRef.id }, kitchenSend, 1),
           shopId: table.shopId,

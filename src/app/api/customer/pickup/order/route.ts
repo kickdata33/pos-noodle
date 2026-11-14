@@ -159,8 +159,11 @@ export async function POST(request: NextRequest) {
   const orderRef = db.collection(COLLECTIONS.orders).doc();
   const batch = db.batch();
   batch.set(orderRef, orderData);
-  if (kitchenPrintingOn) {
-    const send = { added: newItems.map((item) => ({ item, quantity: item.quantity })), cancelled: [] };
+  // See the identical comment in the dine-in QR route: `Category.sendToKitchen === false` lines
+  // never go on this ticket, and no job at all gets queued if every line opted out.
+  const kitchenSendItems = newItems.filter((item) => item.sendToKitchen !== false);
+  if (kitchenPrintingOn && kitchenSendItems.length > 0) {
+    const send = { added: kitchenSendItems.map((item) => ({ item, quantity: item.quantity })), cancelled: [] };
     batch.set(db.collection(COLLECTIONS.printJobs).doc(), {
       ...kitchenJobFields({ ...orderData, id: orderRef.id }, send, 1),
       shopId,
