@@ -159,6 +159,14 @@ export function OrderScreen({ orderId, initialTableId, initialChannelId }: Props
   const [qrPrintMessage, setQrPrintMessage] = useState<{ ok: boolean; text: string } | null>(null);
   // Latches true while `sendToKitchen` is writing a ticket — same plain-boolean pattern.
   const sendingToKitchenRef = useRef(false);
+  // Latches true while "พิมพ์บิลอีกครั้ง" is in flight — the button has no other busy indicator,
+  // so a mobile tap that doesn't feel instant gets re-tapped before the first write lands, and
+  // unlike `sendToKitchen` each call here is `printCheckBill(..., false)` — a brand-new job every
+  // time, not a diffed send — so extra taps while one is in flight must be dropped, not queued,
+  // or every repeat tap becomes its own duplicate paper slip (item: "กดปริ้นในมือถือแล้วมันเด้งออก
+  // 3 บิลซ้ำ").
+  const reprintingCheckBillRef = useRef(false);
+  const [reprintingCheckBill, setReprintingCheckBill] = useState(false);
   const [activeCategoryId, setActiveCategoryId] = useState<string | null>(null);
   const [pickerProduct, setPickerProduct] = useState<Product | null>(null);
   const [removeTarget, setRemoveTarget] = useState<OrderItem | null>(null);
@@ -785,12 +793,20 @@ export function OrderScreen({ orderId, initialTableId, initialChannelId }: Props
   }
 
   async function handleReprintCheckBill() {
+    // Already printing one — a repeat tap (double-tap, or a mobile tap thrown again while
+    // waiting for feedback) is dropped here instead of queuing a second job.
+    if (reprintingCheckBillRef.current) return;
     const current = orderRef.current;
     if (!current?.id || !appUser) return;
+    reprintingCheckBillRef.current = true;
+    setReprintingCheckBill(true);
     try {
       await printCheckBill({ ...current, id: current.id }, catalogSettings, appUser.id, false);
     } catch {
       setPrintError("พิมพ์ใบแจ้งค่าอาหารไม่สำเร็จ");
+    } finally {
+      reprintingCheckBillRef.current = false;
+      setReprintingCheckBill(false);
     }
   }
 
@@ -1297,6 +1313,7 @@ export function OrderScreen({ orderId, initialTableId, initialChannelId }: Props
         saving={saving}
         onConfirm={handleConfirmPayment}
         onReprintCheckBill={catalogSettings?.printStation?.checkBillEnabled && order.id ? handleReprintCheckBill : undefined}
+        reprintingCheckBill={reprintingCheckBill}
       />
     </div>
   );

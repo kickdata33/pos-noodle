@@ -32,6 +32,10 @@ interface Props {
   }) => void;
   /** Present only when check-bill printing is on — shows a "พิมพ์บิลอีกครั้ง" button. */
   onReprintCheckBill?: () => void;
+  /** True while a "พิมพ์บิลอีกครั้ง" tap is still being sent — disables the button so a slow
+   * connection (mobile data, especially) can't turn a second impatient tap into a second
+   * duplicate print job. Defaults to false since most callers don't pass it. */
+  reprintingCheckBill?: boolean;
 }
 
 /**
@@ -50,6 +54,7 @@ export function CheckoutDialog({
   saving,
   onConfirm,
   onReprintCheckBill,
+  reprintingCheckBill = false,
 }: Props) {
   const groupedItems = groupItemsByProduct(items);
   // เงินสด/QR are the overwhelming majority of orders (item request: "เลือก เงินสด หรือ QR
@@ -208,8 +213,13 @@ export function CheckoutDialog({
 
         <DialogFooter>
           {onReprintCheckBill ? (
-            <Button variant="ghost" onClick={onReprintCheckBill} disabled={saving} className="sm:mr-auto">
-              พิมพ์บิลอีกครั้ง
+            <Button
+              variant="ghost"
+              onClick={onReprintCheckBill}
+              disabled={saving || reprintingCheckBill}
+              className="sm:mr-auto"
+            >
+              {reprintingCheckBill ? "กำลังส่งพิมพ์..." : "พิมพ์บิลอีกครั้ง"}
             </Button>
           ) : null}
           <Button variant="outline" onClick={() => onOpenChange(false)} disabled={saving}>
