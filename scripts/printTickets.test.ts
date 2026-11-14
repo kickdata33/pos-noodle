@@ -108,6 +108,23 @@ test("nothing new → null, so callers write nothing", () => {
   assert.equal(computeKitchenSend([]), null);
 });
 
+test("a line whose category opts out of kitchen tickets never prints, added or cancelled, and never counts as unsent", () => {
+  const items = [item({ id: "a", quantity: 2 }), item({ id: "b", productName: "ชาเย็น", sendToKitchen: false })];
+  const send = computeKitchenSend(items)!;
+  assert.deepEqual(send.added.map((l) => l.item.id), ["a"]);
+  assert.equal(send.cancelled.length, 0);
+  assert.equal(countUnsentToKitchen(items), 2);
+
+  // Lowering its quantity afterwards is still never a cancellation line, either.
+  const afterLower = computeKitchenSend([item({ id: "a", quantity: 2, kitchenSentQty: 2 }), item({ id: "b", quantity: 0, kitchenSentQty: 1, sendToKitchen: false })]);
+  assert.equal(afterLower, null);
+});
+
+test("when every unsent line opts out of kitchen tickets, there's nothing to send at all", () => {
+  assert.equal(computeKitchenSend([item({ id: "a", quantity: 2, sendToKitchen: false })]), null);
+  assert.equal(countUnsentToKitchen([item({ id: "a", quantity: 2, sendToKitchen: false })]), 0);
+});
+
 test("lowered quantity after sending becomes a cancellation", () => {
   const send = computeKitchenSend([item({ id: "a", quantity: 1, kitchenSentQty: 3 })])!;
   assert.equal(send.added.length, 0);

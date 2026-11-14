@@ -13,6 +13,10 @@ test("kitchen-screen shops: a new line is already with the kitchen", () => {
   assert.equal(lineKitchenStatus({ quantity: 1 }, false), "cooking");
 });
 
+test("a line whose category opts out of kitchen tickets never shows ยังไม่ส่งครัว", () => {
+  assert.equal(lineKitchenStatus({ quantity: 2, kitchenSentQty: 0, sendToKitchen: false }, true), "cooking");
+});
+
 test("prepared and called-out lines", () => {
   assert.equal(lineKitchenStatus({ quantity: 1, prepared: true }, false), "ready");
   assert.equal(lineKitchenStatus({ quantity: 1, prepared: true, serveCalledAt: 5 }, true), "served");

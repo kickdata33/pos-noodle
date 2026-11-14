@@ -70,6 +70,12 @@ test("raising quantity on a done line adds a separate fresh line instead", () =>
   assert.equal(result[1].addedAt, 5);
 });
 
+test("raising quantity on a done line carries sendToKitchen: false forward onto the split-off line", () => {
+  const done = item({ id: "a", quantity: 2, lineTotal: 100, prepared: true, kitchenSentQty: 2, sendToKitchen: false });
+  const result = increaseItemQuantity([done], done, 1, "new", 5, lineTotal);
+  assert.equal(result[1].sendToKitchen, false);
+});
+
 test("raising quantity on a line not yet done bumps it in place", () => {
   const pending = item({ id: "a", quantity: 1 });
   const result = increaseItemQuantity([pending], pending, 2, "new", 5, lineTotal);

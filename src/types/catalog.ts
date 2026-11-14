@@ -6,6 +6,18 @@ export interface Category extends WithId {
   name: string;
   sortOrder: number;
   active: boolean;
+  /**
+   * When `false`, products in this category never go out on a kitchen ticket (item:
+   * "เครื่องดื่ม มิกเซอร์ อย่าให้เข้าครัว" — drinks/mixers the bar makes, not the kitchen).
+   * Snapshotted onto `OrderItem.sendToKitchen` the moment a line is added, same reasoning as
+   * every other order-item snapshot in this codebase (price, name): changing this toggle later
+   * never rewrites lines already on an open bill. Only affects the printed kitchen ticket
+   * (`computeKitchenSend`/`countUnsentToKitchen`) and this line's own "ยังไม่ส่งครัว" status
+   * (`lineKitchenStatus`) — the live `/pos/kitchen` screen and its new-item alert are unchanged.
+   * `null`/`undefined` (every category before this field existed, and the default for a new one)
+   * means "send to kitchen as normal", same as today.
+   */
+  sendToKitchen?: boolean | null;
   createdAt: EpochMillis;
 }
 

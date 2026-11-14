@@ -446,6 +446,9 @@ export function OrderScreen({ orderId, initialTableId, initialChannelId }: Props
     const channel = channels.find((c) => c.id === current.channelId) ?? null;
     const unitPrice = resolveChannelPrice(product, channel);
     const lineTotal = computeLineTotal(unitPrice, modifiers, quantity);
+    // See `Category.sendToKitchen`'s comment — snapshotted at add-time like every other field
+    // here, so toggling it later never rewrites a line already on an open bill.
+    const category = categories.find((c) => c.id === product.categoryId);
     const item: OrderItem = {
       id: crypto.randomUUID(),
       productId: product.id,
@@ -457,6 +460,7 @@ export function OrderScreen({ orderId, initialTableId, initialChannelId }: Props
       lineTotal,
       // eslint-disable-next-line react-hooks/purity -- event handler, not render; the compiler loses track once the bill lines render their kitchen status (see lineStatusOf)
       addedAt: Date.now(),
+      ...(category?.sendToKitchen === false ? { sendToKitchen: false as const } : {}),
     };
     applyItems([...current.items, item]);
   }

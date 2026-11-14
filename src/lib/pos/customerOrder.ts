@@ -1,4 +1,4 @@
-import type { ModifierGroup, ModifierOption, OrderItem, OrderItemModifier, Product, SalesChannel } from "@/types";
+import type { Category, ModifierGroup, ModifierOption, OrderItem, OrderItemModifier, Product, SalesChannel } from "@/types";
 import {
   computeLineTotal,
   distributeTieredPriceDeltas,
@@ -28,6 +28,12 @@ export interface CustomerOrderCatalog {
   products: Product[];
   modifierGroups: ModifierGroup[];
   modifierOptions: ModifierOption[];
+  /**
+   * Only read for `Category.sendToKitchen` — see `resolveCustomerOrderItem`'s use of it below.
+   * Optional, like `channel`, so existing tests that don't care about kitchen routing don't need
+   * to pass any; absent behaves exactly as before this field existed (every line sent to kitchen).
+   */
+  categories?: Pick<Category, "id" | "sendToKitchen">[];
   /**
    * The channel this order is on — QR ordering is dine-in only (see the API route's comment),
    * so this is always the shop's dine-in `SalesChannel`, passed through to `resolveChannelPrice`
@@ -110,6 +116,9 @@ export function resolveCustomerOrderItem(
   const note = selection.note.trim().slice(0, 200);
   const unitPrice = resolveChannelPrice(product, catalog.channel ?? null);
   const lineTotal = computeLineTotal(unitPrice, modifiers, selection.quantity);
+  // See `Category.sendToKitchen`'s comment — snapshotted here, same as every other order-item
+  // field, so an Admin toggle later never rewrites a line already on an open bill.
+  const category = catalog.categories?.find((c) => c.id === product.categoryId);
 
   return {
     ok: true,
@@ -122,6 +131,7 @@ export function resolveCustomerOrderItem(
       note,
       lineTotal,
       addedAt: Date.now(),
+      ...(category?.sendToKitchen === false ? { sendToKitchen: false as const } : {}),
     },
   };
 }

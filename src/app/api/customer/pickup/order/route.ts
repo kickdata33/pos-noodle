@@ -13,6 +13,7 @@ import { generatePromptPayPayload } from "@/lib/pos/promptpay";
 import { generateQueueNumberAdmin } from "@/lib/pos/queueNumberAdmin";
 import { resolveShopIdFromHost } from "@/lib/shop/shopLookupAdmin";
 import type {
+  Category,
   ModifierGroup,
   ModifierOption,
   Order,
@@ -66,18 +67,20 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "กรุณาเลือกวิธีชำระเงิน" }, { status: 400 });
   }
 
-  const [productsSnap, groupsSnap, optionsSnap, channelsSnap, settingsSnap] = await Promise.all([
+  const [productsSnap, groupsSnap, optionsSnap, channelsSnap, settingsSnap, categoriesSnap] = await Promise.all([
     db.collection(COLLECTIONS.products).where("shopId", "==", shopId).where("active", "==", true).get(),
     db.collection(COLLECTIONS.modifierGroups).where("shopId", "==", shopId).where("active", "==", true).get(),
     db.collection(COLLECTIONS.modifierOptions).where("shopId", "==", shopId).where("active", "==", true).get(),
     db.collection(COLLECTIONS.salesChannels).where("shopId", "==", shopId).where("active", "==", true).get(),
     db.collection(COLLECTIONS.shopSettings).doc(shopId).get(),
+    db.collection(COLLECTIONS.categories).where("shopId", "==", shopId).get(),
   ]);
 
   const catalog = {
     products: productsSnap.docs.map((d) => ({ ...d.data(), id: d.id }) as Product),
     modifierGroups: groupsSnap.docs.map((d) => ({ ...d.data(), id: d.id }) as ModifierGroup),
     modifierOptions: optionsSnap.docs.map((d) => ({ ...d.data(), id: d.id }) as ModifierOption),
+    categories: categoriesSnap.docs.map((d) => ({ ...d.data(), id: d.id }) as Category),
   };
   const settings = settingsSnap.exists ? ({ ...settingsSnap.data(), id: settingsSnap.id } as ShopSettings) : null;
   // "กลับบ้าน" is a fixed, seeded channel (`code: "takeaway"`) — looked up by code, never

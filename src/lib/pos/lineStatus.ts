@@ -8,14 +8,16 @@ import type { OrderItem } from "@/types";
 export type LineKitchenStatus = "notSent" | "cooking" | "ready" | "served";
 
 export function lineKitchenStatus(
-  item: Pick<OrderItem, "quantity" | "kitchenSentQty" | "prepared" | "serveCalledAt">,
+  item: Pick<OrderItem, "quantity" | "kitchenSentQty" | "prepared" | "serveCalledAt" | "sendToKitchen">,
   kitchenPrintingOn: boolean
 ): LineKitchenStatus {
   if (item.serveCalledAt) return "served";
   if (item.prepared) return "ready";
   // With kitchen tickets, a line isn't in the kitchen until its ticket went out. Without them the
-  // kitchen screen shows every line the moment it's added.
-  if (kitchenPrintingOn && (item.kitchenSentQty ?? 0) < item.quantity) return "notSent";
+  // kitchen screen shows every line the moment it's added. A line whose category opts out of
+  // kitchen tickets (`sendToKitchen === false`) never shows "ยังไม่ส่งครัว" — it was never going
+  // to print one, so there's nothing to wait on.
+  if (kitchenPrintingOn && item.sendToKitchen !== false && (item.kitchenSentQty ?? 0) < item.quantity) return "notSent";
   return "cooking";
 }
 

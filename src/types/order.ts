@@ -63,6 +63,15 @@ export interface OrderItem extends WithId {
    * feature and on every item not sent yet — read as 0.
    */
   kitchenSentQty?: number;
+  /**
+   * Snapshot of the product's category's `Category.sendToKitchen` at add-time — `false` means
+   * this line never prints on a kitchen ticket and never shows "ยังไม่ส่งครัว", however its
+   * `kitchenSentQty` happens to sit (see that field's comment and `lib/pos/printTickets.ts`'s
+   * `computeKitchenSend`). Absent/`true` on every item from before this feature, and on any line
+   * whose category doesn't opt out — every read must treat `undefined` the same as "send as
+   * normal", matching `Category.sendToKitchen`'s own default.
+   */
+  sendToKitchen?: boolean;
   /** `Product.bundleDeals` as they were when this line was added (only on lines added at the
    * product's normal price — channel markups don't get shop promotions). */
   bundleDeals?: BundleDeal[];

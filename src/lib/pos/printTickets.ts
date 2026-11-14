@@ -34,6 +34,9 @@ export function computeKitchenSend(items: OrderItem[]): KitchenSend | null {
   const added: KitchenLine[] = [];
   const cancelled: KitchenLine[] = [];
   for (const item of items) {
+    // `Category.sendToKitchen === false` (see that field's comment) — this line never goes on a
+    // kitchen ticket at all, added or cancelled, regardless of its `kitchenSentQty`.
+    if (item.sendToKitchen === false) continue;
     const delta = item.quantity - (item.kitchenSentQty ?? 0);
     if (delta > 0) added.push({ item, quantity: delta });
     else if (delta < 0) cancelled.push({ item, quantity: -delta });
@@ -43,9 +46,13 @@ export function computeKitchenSend(items: OrderItem[]): KitchenSend | null {
   return { added, cancelled, updatedItems };
 }
 
-/** Number of portions not yet sent to the kitchen — drives the "ส่งครัว (N)" button. */
+/** Number of portions not yet sent to the kitchen — drives the "ส่งครัว (N)" button. Lines whose
+ * category opts out of kitchen tickets (`sendToKitchen === false`) never count here either. */
 export function countUnsentToKitchen(items: OrderItem[]): number {
-  return items.reduce((sum, i) => sum + Math.max(0, i.quantity - (i.kitchenSentQty ?? 0)), 0);
+  return items.reduce(
+    (sum, i) => (i.sendToKitchen === false ? sum : sum + Math.max(0, i.quantity - (i.kitchenSentQty ?? 0))),
+    0
+  );
 }
 
 type OrderHeader = Pick<Order, "orderNumber" | "tableName" | "channelName" | "customerLabel">;

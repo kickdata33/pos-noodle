@@ -11,6 +11,7 @@ import { generateOrderNumberAdmin } from "@/lib/pos/orderNumberAdmin";
 import { computeOrderTotals } from "@/lib/pos/pricing";
 import { kitchenJobFields } from "@/lib/pos/printTickets";
 import type {
+  Category,
   ModifierGroup,
   ModifierOption,
   Order,
@@ -66,18 +67,23 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     return NextResponse.json({ error: `สั่งได้ไม่เกิน ${MAX_LINES_PER_SUBMISSION} รายการต่อครั้ง` }, { status: 400 });
   }
 
-  const [productsSnap, groupsSnap, optionsSnap, channelsSnap, settingsSnap] = await Promise.all([
+  const [productsSnap, groupsSnap, optionsSnap, channelsSnap, settingsSnap, categoriesSnap] = await Promise.all([
     db.collection(COLLECTIONS.products).where("shopId", "==", table.shopId).where("active", "==", true).get(),
     db.collection(COLLECTIONS.modifierGroups).where("shopId", "==", table.shopId).where("active", "==", true).get(),
     db.collection(COLLECTIONS.modifierOptions).where("shopId", "==", table.shopId).where("active", "==", true).get(),
     db.collection(COLLECTIONS.salesChannels).where("shopId", "==", table.shopId).where("active", "==", true).get(),
     db.collection(COLLECTIONS.shopSettings).doc(table.shopId).get(),
+    db.collection(COLLECTIONS.categories).where("shopId", "==", table.shopId).get(),
   ]);
 
   const catalog = {
     products: productsSnap.docs.map((d) => ({ ...d.data(), id: d.id }) as Product),
     modifierGroups: groupsSnap.docs.map((d) => ({ ...d.data(), id: d.id }) as ModifierGroup),
     modifierOptions: optionsSnap.docs.map((d) => ({ ...d.data(), id: d.id }) as ModifierOption),
+    // Unfiltered by `active` — even a disabled category's `sendToKitchen` snapshot should still
+    // apply to lines of a product that's (oddly) still orderable, same "don't second-guess it"
+    // reasoning as every other snapshot field here.
+    categories: categoriesSnap.docs.map((d) => ({ ...d.data(), id: d.id }) as Category),
   };
   const settings = settingsSnap.exists ? ({ ...settingsSnap.data(), id: settingsSnap.id } as ShopSettings) : null;
   const dineInChannel = channelsSnap.docs

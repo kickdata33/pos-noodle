@@ -90,6 +90,13 @@ export default function CategoriesPage() {
     await categoryRepository.update(category.id, { active: !category.active });
   }
 
+  async function toggleSendToKitchen(category: Category) {
+    // Absent/`true` both read as "send as normal" (see `Category.sendToKitchen`'s comment), so
+    // the toggle flips to `false` from either and back to `true` (not just clearing the field) —
+    // a plain, unambiguous on/off switch rather than a three-state one.
+    await categoryRepository.update(category.id, { sendToKitchen: category.sendToKitchen === false });
+  }
+
   async function move(index: number, direction: "up" | "down") {
     const swap = computeSwap(items, index, direction);
     if (!swap) return;
@@ -119,6 +126,7 @@ export default function CategoriesPage() {
             <TableHead className="w-10" />
             <TableHead>ชื่อหมวดหมู่</TableHead>
             <TableHead>สถานะ</TableHead>
+            <TableHead>พิมพ์ใบครัว</TableHead>
             <TableHead className="text-right">จัดการ</TableHead>
           </TableRow>
         </TableHeader>
@@ -139,6 +147,17 @@ export default function CategoriesPage() {
                   {category.active ? "เปิดใช้งาน" : "ปิดใช้งาน"}
                 </Badge>
               </TableCell>
+              <TableCell>
+                <div className="flex items-center gap-2">
+                  <Switch
+                    checked={category.sendToKitchen !== false}
+                    onCheckedChange={() => toggleSendToKitchen(category)}
+                  />
+                  <span className="text-sm text-muted-foreground">
+                    {category.sendToKitchen === false ? "ไม่พิมพ์ (บาร์/อื่น ๆ)" : "พิมพ์เข้าครัว"}
+                  </span>
+                </div>
+              </TableCell>
               <TableCell className="text-right">
                 <div className="flex justify-end gap-2">
                   <Switch checked={category.active} onCheckedChange={() => toggleActive(category)} />
@@ -154,7 +173,7 @@ export default function CategoriesPage() {
           ))}
           {items.length === 0 ? (
             <TableRow>
-              <TableCell colSpan={4} className="text-center text-muted-foreground">
+              <TableCell colSpan={5} className="text-center text-muted-foreground">
                 ยังไม่มีหมวดหมู่
               </TableCell>
             </TableRow>

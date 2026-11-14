@@ -7,7 +7,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { resolveCustomerOrder, resolveCustomerOrderItem, type CustomerOrderCatalog } from "../src/lib/pos/customerOrder";
-import type { ModifierGroup, ModifierOption, Product } from "../src/types";
+import type { Category, ModifierGroup, ModifierOption, Product } from "../src/types";
 
 function product(overrides: Partial<Product> & Pick<Product, "id" | "price">): Product {
   return {
@@ -34,6 +34,10 @@ function group(overrides: Partial<ModifierGroup> & Pick<ModifierGroup, "id">): M
     createdAt: 1,
     ...overrides,
   };
+}
+
+function category(overrides: Partial<Category> & Pick<Category, "id">): Pick<Category, "id" | "sendToKitchen"> {
+  return { sendToKitchen: null, ...overrides };
 }
 
 function option(overrides: Partial<ModifierOption> & Pick<ModifierOption, "id" | "groupId">): ModifierOption {
@@ -145,6 +149,30 @@ test("resolveCustomerOrderItem: applies the dine-in channel's markup, same as th
     assert.equal(result.item.unitPrice, 75); // 60 + 20% = 72, rounds up to nearest 5
     assert.equal(result.item.lineTotal, 75);
   }
+});
+
+test("resolveCustomerOrderItem: a product in a sendToKitchen:false category snapshots that onto the line", () => {
+  const catalog: CustomerOrderCatalog = {
+    products: [product({ id: "p1", price: 40, categoryId: "drinks" })],
+    modifierGroups: [],
+    modifierOptions: [],
+    categories: [category({ id: "drinks", sendToKitchen: false })],
+  };
+  const result = resolveCustomerOrderItem({ productId: "p1", quantity: 1, optionIds: [], note: "" }, catalog);
+  assert.equal(result.ok, true);
+  if (result.ok) assert.equal(result.item.sendToKitchen, false);
+});
+
+test("resolveCustomerOrderItem: a normal category (or none passed) never sets sendToKitchen", () => {
+  const catalog: CustomerOrderCatalog = {
+    products: [product({ id: "p1", price: 40 })],
+    modifierGroups: [],
+    modifierOptions: [],
+    categories: [category({ id: "cat1" })],
+  };
+  const result = resolveCustomerOrderItem({ productId: "p1", quantity: 1, optionIds: [], note: "" }, catalog);
+  assert.equal(result.ok, true);
+  if (result.ok) assert.equal(result.item.sendToKitchen, undefined);
 });
 
 test("resolveCustomerOrderItem: no channel passed behaves exactly as before — plain product price", () => {
