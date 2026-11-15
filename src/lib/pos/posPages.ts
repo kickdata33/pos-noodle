@@ -1,11 +1,21 @@
 /**
  * The secondary `/pos/*` screens an Admin can restrict per staff member
  * (`AppUser.allowedPosPages`, item: "สิทธิ์การเข้าหน้า" requested so a kitchen-only staff member
- * doesn't also see stock counts, print-station setup, etc). The table-grid home (`/pos`) and the
- * order screen (`/pos/order/[orderId]`) are NOT in this list — ordinarily every signed-in staff
- * member can always reach them, restriction or not. The exception is a *locked* account (see
- * `resolveLockedPosPage` below): a staff account restricted to exactly one page here is sent
- * straight to it and barred from both of those too — see that function's comment.
+ * doesn't also see stock counts, etc). The table-grid home (`/pos`), the order screen
+ * (`/pos/order/[orderId]`), and — as of 2026-11-15 — `/pos/print-station` are NOT in this list —
+ * ordinarily every signed-in staff member can always reach them, restriction or not. The
+ * exception is a *locked* account (see `resolveLockedPosPage` below): a staff account restricted
+ * to exactly one page here is sent straight to it and barred from all three of those too — see
+ * that function's comment.
+ *
+ * `print-station` was removed from this list deliberately (item: "เอาสถานีพิมพ์ออก กันสับสน กับ
+ * ไปหลงกดเล่น") — it used to show up as a plain link on every staff member's POS home screen
+ * (`PosHome`'s link row) across every shop on this platform, which read as an invitation to tap
+ * into on a shop that only ever uses the background Print Agent and never opens that page on
+ * purpose. The route (`/pos/print-station`) still exists and works exactly as before for any
+ * shop that relies on it — it's just no longer advertised as a link, and no longer offered as a
+ * per-staff permission to tick — reaching it now takes knowing/typing the URL directly, the same
+ * as the table grid and the order screen always have.
  *
  * `path` doubles as the stable key stored in `AppUser.allowedPosPages` (no separate id needed,
  * and it reads directly as the thing it gates when you're looking at a staff doc in Firestore).
@@ -16,7 +26,6 @@ export const POS_SECONDARY_PAGES = [
   { path: "/pos/stock", label: "ของหมด" },
   { path: "/pos/inventory", label: "สต๊อก" },
   { path: "/pos/alert-voice", label: "เสียงแจ้งเตือน" },
-  { path: "/pos/print-station", label: "สถานีพิมพ์" },
 ] as const;
 
 export type PosPagePath = (typeof POS_SECONDARY_PAGES)[number]["path"];
