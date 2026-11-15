@@ -175,6 +175,15 @@ export function OrderScreen({ orderId, initialTableId, initialChannelId }: Props
   // 3 บิลซ้ำ").
   const reprintingCheckBillRef = useRef(false);
   const [reprintingCheckBill, setReprintingCheckBill] = useState(false);
+  // Latches true while "คิดเงิน" is opening the checkout — same reasoning as the reprint latch
+  // above, but on the FIRST check-bill print instead of a deliberate reprint: `handleOpenCheckout`
+  // awaits several writes (ส่งครัว/ส่งบาร์, the "billRequestedAt" update, then `printCheckBill`)
+  // before the dialog actually renders over the button, so a double tap in that gap used to race
+  // two `printCheckBill(..., onlyIfChanged: true)` calls against the same, not-yet-updated
+  // `order.checkBillPrintedTotal` — both read "not printed yet" and both queued a ticket (item:
+  // "ปริ้นออกทีละ 2 บิล ตลอด": the ใบแจ้งค่าอาหาร printed twice on every "คิดเงิน" tap).
+  const openingCheckoutRef = useRef(false);
+  const [openingCheckout, setOpeningCheckout] = useState(false);
   const [activeCategoryId, setActiveCategoryId] = useState<string | null>(null);
   const [pickerProduct, setPickerProduct] = useState<Product | null>(null);
   const [removeTarget, setRemoveTarget] = useState<OrderItem | null>(null);
@@ -792,37 +801,55 @@ export function OrderScreen({ orderId, initialTableId, initialChannelId }: Props
 
   /** "คิดเงิน": anything still unsent goes to the kitchen (and bar) first (takeaway orders are
    * often paid right after ordering), then the check bill prints at the cashier, then the dialog
-   * opens. The dialog opens even if printing failed. */
+   * opens. The dialog opens even if printing failed.
+   *
+   * A repeat tap while this is still running is dropped, not queued — see `openingCheckoutRef`'s
+   * comment above for why a second concurrent call could otherwise double-print the check bill. */
   async function handleOpenCheckout() {
-    await sendToKitchen();
-    await sendToBar();
-    // Tell the customer's QR page the bill is on its way (thank-you / check-your-items view, no
-    // more ordering from the phone). Best-effort; staff can reopen ordering from this screen.
-    if (orderRef.current && orderRef.current.items.length > 0 && !orderRef.current.billRequestedAt) {
-      try {
-        const id = await ensureSaved();
-        // eslint-disable-next-line react-hooks/purity -- event handler, not render; the compiler loses track once the bill lines render their kitchen status (see lineStatusOf)
-        const billRequestedAt = Date.now();
-        await orderRepository.update(id, { billRequestedAt });
-        if (orderRef.current) {
-          orderRef.current = { ...orderRef.current, billRequestedAt };
-          setOrder(orderRef.current);
+    if (openingCheckoutRef.current) return;
+    openingCheckoutRef.current = true;
+    setOpeningCheckout(true);
+    try {
+      await sendToKitchen();
+      await sendToBar();
+      // Tell the customer's QR page the bill is on its way (thank-you / check-your-items view, no
+      // more ordering from the phone). Best-effort; staff can reopen ordering from this screen.
+      if (orderRef.current && orderRef.current.items.length > 0 && !orderRef.current.billRequestedAt) {
+        try {
+          const id = await ensureSaved();
+          const billRequestedAt = Date.now();
+          await orderRepository.update(id, { billRequestedAt });
+          if (orderRef.current) {
+            orderRef.current = { ...orderRef.current, billRequestedAt };
+            setOrder(orderRef.current);
+          }
+        } catch {
+          // The bill can still be paid; the customer page just won't switch views.
         }
-      } catch {
-        // The bill can still be paid; the customer page just won't switch views.
       }
-    }
-    const current = orderRef.current;
-    if (current && appUser && catalogSettings?.printStation?.checkBillEnabled) {
-      try {
-        const id = await ensureSaved();
-        const latest = orderRef.current ?? current;
-        await printCheckBill({ ...latest, id }, catalogSettings, appUser.id, true);
-      } catch {
-        setPrintError("พิมพ์ใบแจ้งค่าอาหารไม่สำเร็จ");
+      const current = orderRef.current;
+      if (current && appUser && catalogSettings?.printStation?.checkBillEnabled) {
+        try {
+          const id = await ensureSaved();
+          const latest = orderRef.current ?? current;
+          const printed = await printCheckBill({ ...latest, id }, catalogSettings, appUser.id, true);
+          // Mirror the write `printCheckBill` just made in Firestore onto the local copy right
+          // away, same as `sendToKitchen`/`sendToBar` do with their own results below — otherwise
+          // this screen's own `onlyIfChanged` guard would still see the stale total until the
+          // order listener's next snapshot comes in, and a reopen in that window would print again.
+          if (printed && orderRef.current) {
+            orderRef.current = { ...orderRef.current, checkBillPrintedTotal: latest.total };
+            setOrder(orderRef.current);
+          }
+        } catch {
+          setPrintError("พิมพ์ใบแจ้งค่าอาหารไม่สำเร็จ");
+        }
       }
+      setCheckoutOpen(true);
+    } finally {
+      openingCheckoutRef.current = false;
+      setOpeningCheckout(false);
     }
-    setCheckoutOpen(true);
   }
 
   async function reopenCustomerOrdering() {
@@ -1263,8 +1290,12 @@ export function OrderScreen({ orderId, initialTableId, initialChannelId }: Props
             <Button variant="outline" className="h-14 text-base font-semibold" onClick={handleBackToHome}>
               กลับหน้าแรก
             </Button>
-            <Button className="h-14 text-base font-bold" onClick={handleOpenCheckout} disabled={saving || order.items.length === 0}>
-              คิดเงิน
+            <Button
+              className="h-14 text-base font-bold"
+              onClick={handleOpenCheckout}
+              disabled={saving || openingCheckout || order.items.length === 0}
+            >
+              {openingCheckout ? "กำลังเปิดบิล..." : "คิดเงิน"}
             </Button>
           </div>
           {/* Only a *saved* order can be stuck occupying a table — an unsaved draft has nothing
