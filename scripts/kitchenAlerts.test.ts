@@ -76,6 +76,13 @@ test("raising quantity on a done line carries sendToKitchen: false forward onto 
   assert.equal(result[1].sendToKitchen, false);
 });
 
+test("raising quantity on a done line carries sendToBar: true forward onto the split-off line", () => {
+  const done = item({ id: "a", quantity: 2, lineTotal: 100, prepared: true, barSentQty: 2, sendToBar: true });
+  const result = increaseItemQuantity([done], done, 1, "new", 5, lineTotal);
+  assert.equal(result[1].sendToBar, true);
+  assert.equal(result[1].barSentQty, undefined);
+});
+
 test("raising quantity on a line not yet done bumps it in place", () => {
   const pending = item({ id: "a", quantity: 1 });
   const result = increaseItemQuantity([pending], pending, 2, "new", 5, lineTotal);

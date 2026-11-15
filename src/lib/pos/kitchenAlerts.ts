@@ -67,6 +67,7 @@ export function increaseItemQuantity(
       ...(target.bundleDeals ? { bundleDeals: target.bundleDeals } : {}),
       ...(target.bundleUnits ? { bundleUnits: target.bundleUnits } : {}),
       ...(target.sendToKitchen === false ? { sendToKitchen: false as const } : {}),
+      ...(target.sendToBar === true ? { sendToBar: true as const } : {}),
     };
     return [...items, extra];
   }

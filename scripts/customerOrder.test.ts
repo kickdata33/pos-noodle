@@ -36,8 +36,8 @@ function group(overrides: Partial<ModifierGroup> & Pick<ModifierGroup, "id">): M
   };
 }
 
-function category(overrides: Partial<Category> & Pick<Category, "id">): Pick<Category, "id" | "sendToKitchen"> {
-  return { sendToKitchen: null, ...overrides };
+function category(overrides: Partial<Category> & Pick<Category, "id">): Pick<Category, "id" | "sendToKitchen" | "sendToBar"> {
+  return { sendToKitchen: null, sendToBar: null, ...overrides };
 }
 
 function option(overrides: Partial<ModifierOption> & Pick<ModifierOption, "id" | "groupId">): ModifierOption {
@@ -161,6 +161,21 @@ test("resolveCustomerOrderItem: a product in a sendToKitchen:false category snap
   const result = resolveCustomerOrderItem({ productId: "p1", quantity: 1, optionIds: [], note: "" }, catalog);
   assert.equal(result.ok, true);
   if (result.ok) assert.equal(result.item.sendToKitchen, false);
+});
+
+test("resolveCustomerOrderItem: a product in a sendToBar:true category snapshots that onto the line", () => {
+  const catalog: CustomerOrderCatalog = {
+    products: [product({ id: "p1", price: 40, categoryId: "drinks" })],
+    modifierGroups: [],
+    modifierOptions: [],
+    categories: [category({ id: "drinks", sendToKitchen: false, sendToBar: true })],
+  };
+  const result = resolveCustomerOrderItem({ productId: "p1", quantity: 1, optionIds: [], note: "" }, catalog);
+  assert.equal(result.ok, true);
+  if (result.ok) {
+    assert.equal(result.item.sendToBar, true);
+    assert.equal(result.item.sendToKitchen, false);
+  }
 });
 
 test("resolveCustomerOrderItem: a normal category (or none passed) never sets sendToKitchen", () => {

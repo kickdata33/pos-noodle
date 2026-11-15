@@ -72,6 +72,20 @@ export interface OrderItem extends WithId {
    * normal", matching `Category.sendToKitchen`'s own default.
    */
   sendToKitchen?: boolean;
+  /**
+   * How many of this line's `quantity` have already gone out on a bar ticket — the `kitchenSentQty`
+   * of the drink-bar station (`lib/pos/printTickets.ts`'s `computeBarSend`). Absent on every item
+   * from before this feature and on every item not sent yet — read as 0. Meaningless (never read)
+   * unless `sendToBar` is `true`.
+   */
+  barSentQty?: number;
+  /**
+   * Snapshot of the product's category's `Category.sendToBar` at add-time — `true` means this
+   * line prints on a bar ticket instead of a kitchen one (see that field's comment). Absent/falsy
+   * on every item from before this feature, and on any line whose category isn't routed to the
+   * bar — every read must treat `undefined` the same as "not the bar's".
+   */
+  sendToBar?: boolean;
   /** `Product.bundleDeals` as they were when this line was added (only on lines added at the
    * product's normal price — channel markups don't get shop promotions). */
   bundleDeals?: BundleDeal[];
@@ -159,6 +173,9 @@ export interface Order extends WithId {
   /** How many kitchen tickets this order has produced so far — printed as "รอบที่ N" so the
    * kitchen can tell a second round from a reprint. Absent = 0. */
   kitchenTicketCount?: number;
+  /** Same as `kitchenTicketCount`, counted separately for the drink-bar station's own tickets —
+   * a bill can be on kitchen round 3 and bar round 1 at the same time. Absent = 0. */
+  barTicketCount?: number;
   /** The part of `discount` that came from quantity deals (`computePromotionDiscount`) — shown
    * as "ส่วนลดโปรโมชั่น". Absent on orders from before promotions existed. */
   promoDiscount?: number;

@@ -18,6 +18,17 @@ export interface Category extends WithId {
    * means "send to kitchen as normal", same as today.
    */
   sendToKitchen?: boolean | null;
+  /**
+   * When `true`, products in this category go on a drink ticket at the dedicated "บาร์น้ำ" print
+   * station instead (item: "เพิ่มให้บาร์น้ำเฉพาะด้วย" — a bar printer of its own, separate from the
+   * kitchen's). Independent of `sendToKitchen` in the type, but the Admin category screen only
+   * ever offers one destination at a time (ไม่พิมพ์ / ครัว / บาร์น้ำ) and always writes both fields
+   * together, so a category is never both or neither on purpose. Snapshotted onto
+   * `OrderItem.sendToBar` at add-time, same reasoning as `sendToKitchen`. `null`/`undefined`
+   * (every category before this field existed, and the default for a new one) means "not the
+   * bar's" — unaffected unless an admin explicitly picks บาร์น้ำ.
+   */
+  sendToBar?: boolean | null;
   createdAt: EpochMillis;
 }
 

@@ -1,15 +1,19 @@
 import type { EpochMillis, WithId } from "./common";
 
 /**
- * Which printer a job goes to. One PC can run both stations at once (two Chrome windows, each
- * its own Chrome profile with its own remembered printer — see `PrintStationScreen`), or a shop
- * with one printer can run a single station that listens to both.
+ * Which printer a job goes to. One PC can run several stations at once (one Chrome window per
+ * station, each its own Chrome profile with its own remembered printer — see
+ * `PrintStationScreen`), or a shop with one printer can run a single station that listens to all
+ * of them. `bar` is the drink-bar ticket printer (item: "เพิ่มให้บาร์น้ำเฉพาะด้วย") — a station of
+ * its own, parallel to `kitchen`, for shops whose bar makes drinks separately from the kitchen.
  */
-export type PrintStation = "kitchen" | "cashier";
+export type PrintStation = "kitchen" | "cashier" | "bar";
 
-/** `tableQr` = a slip with a table's self-order QR for the customer to scan; `receipt` = the
- * paid receipt, queued automatically in the same transaction that marks the order paid. */
-export type PrintJobKind = "kitchen" | "checkBill" | "tableQr" | "receipt";
+/** `bar` = a drink order ticket at the bar station, same idea as `kitchen` but for
+ * `Category.sendToBar` lines instead of kitchen ones. `tableQr` = a slip with a table's
+ * self-order QR for the customer to scan; `receipt` = the paid receipt, queued automatically in
+ * the same transaction that marks the order paid. */
+export type PrintJobKind = "kitchen" | "bar" | "checkBill" | "tableQr" | "receipt";
 
 /**
  * - `pending` — waiting for a print station (browser page or the background Print Agent).

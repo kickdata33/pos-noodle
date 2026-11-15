@@ -29,11 +29,12 @@ export interface CustomerOrderCatalog {
   modifierGroups: ModifierGroup[];
   modifierOptions: ModifierOption[];
   /**
-   * Only read for `Category.sendToKitchen` — see `resolveCustomerOrderItem`'s use of it below.
-   * Optional, like `channel`, so existing tests that don't care about kitchen routing don't need
-   * to pass any; absent behaves exactly as before this field existed (every line sent to kitchen).
+   * Only read for `Category.sendToKitchen`/`Category.sendToBar` — see
+   * `resolveCustomerOrderItem`'s use of it below. Optional, like `channel`, so existing tests
+   * that don't care about kitchen/bar routing don't need to pass any; absent behaves exactly as
+   * before this field existed (every line sent to kitchen, none to the bar).
    */
-  categories?: Pick<Category, "id" | "sendToKitchen">[];
+  categories?: Pick<Category, "id" | "sendToKitchen" | "sendToBar">[];
   /**
    * The channel this order is on — QR ordering is dine-in only (see the API route's comment),
    * so this is always the shop's dine-in `SalesChannel`, passed through to `resolveChannelPrice`
@@ -132,6 +133,7 @@ export function resolveCustomerOrderItem(
       lineTotal,
       addedAt: Date.now(),
       ...(category?.sendToKitchen === false ? { sendToKitchen: false as const } : {}),
+      ...(category?.sendToBar === true ? { sendToBar: true as const } : {}),
     },
   };
 }

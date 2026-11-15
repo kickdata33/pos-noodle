@@ -8,7 +8,7 @@ import { notifyShop } from "@/lib/notifications/notifyShop";
 import { resolveCustomerOrder, type CustomerSelection } from "@/lib/pos/customerOrder";
 import { generateOrderNumberAdmin } from "@/lib/pos/orderNumberAdmin";
 import { computeOrderTotals } from "@/lib/pos/pricing";
-import { kitchenJobFields } from "@/lib/pos/printTickets";
+import { barJobFields, kitchenJobFields } from "@/lib/pos/printTickets";
 import { generatePromptPayPayload } from "@/lib/pos/promptpay";
 import { generateQueueNumberAdmin } from "@/lib/pos/queueNumberAdmin";
 import { resolveShopIdFromHost } from "@/lib/shop/shopLookupAdmin";
@@ -118,10 +118,12 @@ export async function POST(request: NextRequest) {
   // Kitchen printing on → the ticket is queued together with the order (same batch) and the
   // lines are marked as already sent — see the identical comment in the dine-in QR route.
   const kitchenPrintingOn = settings.printStation?.kitchenEnabled === true;
+  const barPrintingOn = settings.printStation?.barEnabled === true;
   const newItems: OrderItem[] = resolvedItems.map((item) => ({
     ...item,
     id: randomUUID(),
     ...(kitchenPrintingOn ? { kitchenSentQty: item.quantity } : {}),
+    ...(barPrintingOn ? { barSentQty: item.quantity } : {}),
   }));
   const totals = computeOrderTotals(newItems, settings);
   const now = Date.now();
@@ -154,6 +156,7 @@ export async function POST(request: NextRequest) {
     customerLabel,
     pickupPaymentIntent: paymentIntent,
     ...(kitchenPrintingOn ? { kitchenTicketCount: 1 } : {}),
+    ...(barPrintingOn ? { barTicketCount: 1 } : {}),
   };
 
   const orderRef = db.collection(COLLECTIONS.orders).doc();
@@ -166,6 +169,17 @@ export async function POST(request: NextRequest) {
     const send = { added: kitchenSendItems.map((item) => ({ item, quantity: item.quantity })), cancelled: [] };
     batch.set(db.collection(COLLECTIONS.printJobs).doc(), {
       ...kitchenJobFields({ ...orderData, id: orderRef.id }, send, 1),
+      shopId,
+      createdBy: "customer-pickup-qr",
+      createdAt: now,
+    });
+  }
+  // Same idea for the drink-bar station — see the identical comment in the dine-in QR route.
+  const barSendItems = newItems.filter((item) => item.sendToBar === true);
+  if (barPrintingOn && barSendItems.length > 0) {
+    const send = { added: barSendItems.map((item) => ({ item, quantity: item.quantity })), cancelled: [] };
+    batch.set(db.collection(COLLECTIONS.printJobs).doc(), {
+      ...barJobFields({ ...orderData, id: orderRef.id }, send, 1),
       shopId,
       createdBy: "customer-pickup-qr",
       createdAt: now,

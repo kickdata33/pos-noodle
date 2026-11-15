@@ -6,7 +6,7 @@ import { COLLECTIONS } from "@/lib/firebase/collections";
 import { agentUid, encodePairingCode, generateAgentSecret, hashAgentSecret } from "@/lib/printAgent/pairing";
 import type { PrintAgent, PrintStation } from "@/types";
 
-const STATIONS: PrintStation[] = ["kitchen", "cashier"];
+const STATIONS: PrintStation[] = ["kitchen", "cashier", "bar"];
 
 async function requireAdmin() {
   const session = await getServerSession();

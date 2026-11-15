@@ -114,6 +114,11 @@ export interface ShopSettings extends WithId {
     /** Queue the paid receipt for the cashier station when a payment is confirmed — once per
      * payment, in the same transaction that marks the order paid. Absent = off. */
     receiptEnabled?: boolean;
+    /** Print a drink-bar ticket of newly added `Category.sendToBar` items — same timing as
+     * `kitchenEnabled` (ส่งบาร์ button, กลับหน้าแรก, คิดเงิน, and customer QR orders) but to the
+     * `bar` station instead of `kitchen`. Absent = off, same as every field added after the
+     * original two. */
+    barEnabled?: boolean;
   };
   /**
    * Which optional Admin modules this shop has turned on, beyond the universal POS core that

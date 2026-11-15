@@ -51,7 +51,7 @@ export default function SettingsPage() {
               paymentQrImageUrl: s.paymentQrImageUrl ?? null,
               pickupIdentificationMode: s.pickupIdentificationMode ?? "queue",
               receiptPrinterIp: s.receiptPrinterIp ?? null,
-              printStation: s.printStation ?? { kitchenEnabled: false, checkBillEnabled: false, tableQrEnabled: false },
+              printStation: s.printStation ?? { kitchenEnabled: false, checkBillEnabled: false, tableQrEnabled: false, barEnabled: false },
             }
           : s
       );
@@ -255,7 +255,7 @@ export default function SettingsPage() {
               <a href="/pos/print-station" target="_blank" rel="noreferrer" className="underline">
                 สถานีพิมพ์
               </a>{" "}
-              ค้างไว้ในคอม เลือกครัวหรือแคชเชียร์ แล้วงานพิมพ์จะออกเอง
+              ค้างไว้ในคอม เลือกครัว บาร์น้ำ หรือแคชเชียร์ แล้วงานพิมพ์จะออกเอง
             </p>
           </div>
           <div className="flex items-center justify-between gap-4">
@@ -269,6 +269,25 @@ export default function SettingsPage() {
               checked={settings.printStation?.kitchenEnabled ?? false}
               onCheckedChange={(v) =>
                 update("printStation", { ...settings.printStation, kitchenEnabled: v, checkBillEnabled: settings.printStation?.checkBillEnabled ?? false })
+              }
+            />
+          </div>
+          <div className="flex items-center justify-between gap-4">
+            <div>
+              <p className="font-medium">พิมพ์ใบสั่งเข้าบาร์น้ำ</p>
+              <p className="text-sm text-muted-foreground">
+                เครื่องพิมพ์แยกเฉพาะเครื่องดื่ม/บาร์ — เลือกหมวดหมู่ที่เข้าบาร์น้ำได้ที่หน้า หมวดหมู่ (ครัว/บาร์น้ำ/ไม่พิมพ์)
+              </p>
+            </div>
+            <Switch
+              checked={settings.printStation?.barEnabled ?? false}
+              onCheckedChange={(v) =>
+                update("printStation", {
+                  ...settings.printStation,
+                  kitchenEnabled: settings.printStation?.kitchenEnabled ?? false,
+                  checkBillEnabled: settings.printStation?.checkBillEnabled ?? false,
+                  barEnabled: v,
+                })
               }
             />
           </div>

@@ -45,6 +45,7 @@ export function summarizePrintHealth(agents: PrintAgent[], jobs: PrintJob[], now
 
 const KIND_LABEL: Record<PrintJob["kind"], string> = {
   kitchen: "ใบครัว",
+  bar: "ใบบาร์น้ำ",
   checkBill: "ใบแจ้งค่าอาหาร",
   tableQr: "ใบ QR",
   receipt: "ใบเสร็จ",

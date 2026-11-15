@@ -9,7 +9,7 @@ import { resolveCustomerOrder, type CustomerSelection } from "@/lib/pos/customer
 import { CUSTOMER_ORDER_MIN_INTERVAL_MS, isThrottled } from "@/lib/pos/customerThrottle";
 import { generateOrderNumberAdmin } from "@/lib/pos/orderNumberAdmin";
 import { computeOrderTotals } from "@/lib/pos/pricing";
-import { kitchenJobFields } from "@/lib/pos/printTickets";
+import { barJobFields, kitchenJobFields } from "@/lib/pos/printTickets";
 import type {
   Category,
   ModifierGroup,
@@ -105,11 +105,13 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   // waiting for staff to open it — so these lines are marked as already sent in the same
   // transaction that queues their ticket (see `OrderItem.kitchenSentQty`).
   const kitchenPrintingOn = settings.printStation?.kitchenEnabled === true;
+  const barPrintingOn = settings.printStation?.barEnabled === true;
   const newItems: OrderItem[] = resolvedItems.map((item) => ({
     ...item,
     id: randomUUID(),
     newSinceReview: true,
     ...(kitchenPrintingOn ? { kitchenSentQty: item.quantity } : {}),
+    ...(barPrintingOn ? { barSentQty: item.quantity } : {}),
   }));
   // `Category.sendToKitchen === false` lines (see that field's comment) never go on this ticket —
   // unlike `computeKitchenSend`'s usual delta logic, there's no "before" state to diff against
@@ -119,6 +121,11 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   const kitchenSendItems = newItems.filter((item) => item.sendToKitchen !== false);
   const kitchenSend = { added: kitchenSendItems.map((item) => ({ item, quantity: item.quantity })), cancelled: [] };
   const kitchenJobsNeeded = kitchenPrintingOn && kitchenSendItems.length > 0;
+  // Same idea for the drink-bar station, the other way round: only `Category.sendToBar === true`
+  // lines go on this ticket.
+  const barSendItems = newItems.filter((item) => item.sendToBar === true);
+  const barSend = { added: barSendItems.map((item) => ({ item, quantity: item.quantity })), cancelled: [] };
+  const barJobsNeeded = barPrintingOn && barSendItems.length > 0;
   const printJobsRef = db.collection(COLLECTIONS.printJobs);
 
   const throttleRef = db.collection(COLLECTIONS.customerOrderThrottle).doc(tableId);
@@ -160,16 +167,26 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
         // Flags this table for the badge + alert sound on the POS home screen (`PosHome`) until
         // a staff member actually opens the order — see `Order.pendingReview`'s comment.
         const round = (order.kitchenTicketCount ?? 0) + 1;
+        const barRound = (order.barTicketCount ?? 0) + 1;
         tx.update(orderDoc.ref, {
           items: mergedItems,
           ...totals,
           updatedAt: now,
           pendingReview: true,
           ...(kitchenPrintingOn ? { kitchenTicketCount: round } : {}),
+          ...(barPrintingOn ? { barTicketCount: barRound } : {}),
         });
         if (kitchenJobsNeeded) {
           tx.set(printJobsRef.doc(), {
             ...kitchenJobFields({ ...order, id: orderDoc.id }, kitchenSend, round),
+            shopId: table.shopId,
+            createdBy: "customer-qr",
+            createdAt: now,
+          });
+        }
+        if (barJobsNeeded) {
+          tx.set(printJobsRef.doc(), {
+            ...barJobFields({ ...order, id: orderDoc.id }, barSend, barRound),
             shopId: table.shopId,
             createdBy: "customer-qr",
             createdAt: now,
@@ -208,6 +225,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
         paidAt: null,
         pendingReview: true,
         ...(kitchenPrintingOn ? { kitchenTicketCount: 1 } : {}),
+        ...(barPrintingOn ? { barTicketCount: 1 } : {}),
       };
       tx.set(newOrderRef, orderData);
       // Point the table at this order so a staff device opening the same table right now joins
@@ -221,6 +239,14 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       if (kitchenJobsNeeded) {
         tx.set(printJobsRef.doc(), {
           ...kitchenJobFields({ ...orderData, id: newOrderRef.id }, kitchenSend, 1),
+          shopId: table.shopId,
+          createdBy: "customer-qr",
+          createdAt: now,
+        });
+      }
+      if (barJobsNeeded) {
+        tx.set(printJobsRef.doc(), {
+          ...barJobFields({ ...orderData, id: newOrderRef.id }, barSend, 1),
           shopId: table.shopId,
           createdBy: "customer-qr",
           createdAt: now,

@@ -15,6 +15,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { useAuth } from "@/hooks/useAuth";
@@ -90,11 +91,24 @@ export default function CategoriesPage() {
     await categoryRepository.update(category.id, { active: !category.active });
   }
 
-  async function toggleSendToKitchen(category: Category) {
-    // Absent/`true` both read as "send as normal" (see `Category.sendToKitchen`'s comment), so
-    // the toggle flips to `false` from either and back to `true` (not just clearing the field) —
-    // a plain, unambiguous on/off switch rather than a three-state one.
-    await categoryRepository.update(category.id, { sendToKitchen: category.sendToKitchen === false });
+  type TicketDestination = "none" | "kitchen" | "bar";
+
+  function destinationOf(category: Category): TicketDestination {
+    if (category.sendToBar === true) return "bar";
+    if (category.sendToKitchen === false) return "none";
+    return "kitchen";
+  }
+
+  /**
+   * Replaces the old plain on/off "พิมพ์ใบครัว" switch (item: "เพิ่มให้บาร์น้ำเฉพาะด้วย" — now a
+   * 3-way choice of where this category's tickets go). Always writes both fields together so a
+   * category is never left in an ambiguous "both" or "neither" state by a half-applied update.
+   */
+  async function setDestination(category: Category, destination: TicketDestination) {
+    await categoryRepository.update(category.id, {
+      sendToKitchen: destination === "kitchen",
+      sendToBar: destination === "bar",
+    });
   }
 
   async function move(index: number, direction: "up" | "down") {
@@ -126,7 +140,7 @@ export default function CategoriesPage() {
             <TableHead className="w-10" />
             <TableHead>ชื่อหมวดหมู่</TableHead>
             <TableHead>สถานะ</TableHead>
-            <TableHead>พิมพ์ใบครัว</TableHead>
+            <TableHead>พิมพ์เข้า</TableHead>
             <TableHead className="text-right">จัดการ</TableHead>
           </TableRow>
         </TableHeader>
@@ -148,15 +162,16 @@ export default function CategoriesPage() {
                 </Badge>
               </TableCell>
               <TableCell>
-                <div className="flex items-center gap-2">
-                  <Switch
-                    checked={category.sendToKitchen !== false}
-                    onCheckedChange={() => toggleSendToKitchen(category)}
-                  />
-                  <span className="text-sm text-muted-foreground">
-                    {category.sendToKitchen === false ? "ไม่พิมพ์ (บาร์/อื่น ๆ)" : "พิมพ์เข้าครัว"}
-                  </span>
-                </div>
+                <Select value={destinationOf(category)} onValueChange={(v) => setDestination(category, v as TicketDestination)}>
+                  <SelectTrigger className="w-40">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="kitchen">ครัว</SelectItem>
+                    <SelectItem value="bar">บาร์น้ำ</SelectItem>
+                    <SelectItem value="none">ไม่พิมพ์</SelectItem>
+                  </SelectContent>
+                </Select>
               </TableCell>
               <TableCell className="text-right">
                 <div className="flex justify-end gap-2">

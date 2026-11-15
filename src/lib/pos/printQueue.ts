@@ -4,7 +4,9 @@ import { db } from "@/lib/firebase/client";
 import { COLLECTIONS } from "@/lib/firebase/collections";
 import {
   autoReceiptJobId,
+  barJobFields,
   checkBillJobFields,
+  computeBarSend,
   computeKitchenSend,
   kitchenJobFields,
   receiptJobFields,
@@ -76,6 +78,61 @@ export async function sendKitchenCancellation(
   if (cancelled.length === 0) return false;
   const job: Omit<PrintJob, "id"> = {
     ...kitchenJobFields(order, { added: [], cancelled }, order.kitchenTicketCount ?? 0),
+    shopId: order.shopId,
+    createdBy,
+    createdAt: Date.now(),
+  };
+  const batch = writeBatch(db);
+  batch.set(newJobRef(), job);
+  await batch.commit();
+  return true;
+}
+
+/**
+ * Sends whatever the drink bar hasn't seen yet on this (already saved) order — same idea as
+ * `sendOrderToKitchen`, to the `bar` station and counted on its own `barTicketCount`.
+ */
+export async function sendOrderToBar(
+  order: Order,
+  settings: ShopSettings | null,
+  createdBy: string
+): Promise<{ items: OrderItem[]; barTicketCount: number } | null> {
+  if (!settings?.printStation?.barEnabled) return null;
+  const send = computeBarSend(order.items);
+  if (!send) return null;
+  const round = (order.barTicketCount ?? 0) + 1;
+  const now = Date.now();
+  const job: Omit<PrintJob, "id"> = {
+    ...barJobFields(order, send, round),
+    shopId: order.shopId,
+    createdBy,
+    createdAt: now,
+  };
+  const batch = writeBatch(db);
+  batch.update(doc(db, COLLECTIONS.orders, order.id), {
+    items: send.updatedItems,
+    barTicketCount: round,
+    updatedAt: now,
+  });
+  batch.set(newJobRef(), job);
+  await batch.commit();
+  return { items: send.updatedItems, barTicketCount: round };
+}
+
+/** Same as `sendKitchenCancellation`, for the drink-bar station. */
+export async function sendBarCancellation(
+  order: Order,
+  removed: OrderItem[],
+  settings: ShopSettings | null,
+  createdBy: string
+): Promise<boolean> {
+  if (!settings?.printStation?.barEnabled) return false;
+  const cancelled = removed
+    .filter((i) => (i.barSentQty ?? 0) > 0)
+    .map((item) => ({ item, quantity: item.barSentQty ?? 0 }));
+  if (cancelled.length === 0) return false;
+  const job: Omit<PrintJob, "id"> = {
+    ...barJobFields(order, { added: [], cancelled }, order.barTicketCount ?? 0),
     shopId: order.shopId,
     createdBy,
     createdAt: Date.now(),

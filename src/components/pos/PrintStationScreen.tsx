@@ -29,7 +29,7 @@ import type { PrintJob, PrintJobLine, PrintStation } from "@/types";
  */
 
 const STATION_STORAGE_KEY = "printStation.station";
-const STATION_LABEL: Record<PrintStation, string> = { kitchen: "ครัว", cashier: "แคชเชียร์" };
+const STATION_LABEL: Record<PrintStation, string> = { kitchen: "ครัว", cashier: "แคชเชียร์", bar: "บาร์น้ำ" };
 /** Gap between consecutive prints — keeps a burst of tickets from tripping Chrome's throttling
  * of rapid script-initiated `print()` calls, and gives the cutter time to finish. */
 const GAP_BETWEEN_PRINTS_MS = 1500;
@@ -50,12 +50,16 @@ interface RecentEntry {
   error?: string;
 }
 
+function isPrintStation(value: string | null): value is PrintStation {
+  return value === "kitchen" || value === "cashier" || value === "bar";
+}
+
 function readStoredStation(): PrintStation | null {
   try {
     const fromUrl = new URLSearchParams(window.location.search).get("station");
-    if (fromUrl === "kitchen" || fromUrl === "cashier") return fromUrl;
+    if (isPrintStation(fromUrl)) return fromUrl;
     const stored = window.localStorage.getItem(STATION_STORAGE_KEY);
-    return stored === "kitchen" || stored === "cashier" ? stored : null;
+    return isPrintStation(stored) ? stored : null;
   } catch {
     return null;
   }
@@ -200,7 +204,7 @@ export function PrintStationScreen() {
         <p className="mb-5 text-sm text-muted-foreground">
           เลือกว่าหน้าต่างนี้พิมพ์ใบอะไร เครื่องจะจำไว้ ถ้ามีเครื่องพิมพ์ 2 เครื่อง ให้เปิดอีกหน้าต่างแล้วเลือกอีกสถานี
         </p>
-        <div className="grid gap-3 sm:grid-cols-2">
+        <div className="grid gap-3 sm:grid-cols-3">
           <button
             type="button"
             onClick={() => chooseStation("kitchen")}
@@ -208,6 +212,14 @@ export function PrintStationScreen() {
           >
             <span className="block text-xl font-semibold">ครัว</span>
             <span className="mt-1 block text-sm text-muted-foreground">ใบสั่งอาหาร ไม่มีราคา</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => chooseStation("bar")}
+            className="rounded-xl border-2 border-border bg-card p-5 text-left hover:border-primary focus-visible:outline-2 focus-visible:outline-primary"
+          >
+            <span className="block text-xl font-semibold">บาร์น้ำ</span>
+            <span className="mt-1 block text-sm text-muted-foreground">ใบสั่งเครื่องดื่ม ไม่มีราคา</span>
           </button>
           <button
             type="button"
@@ -339,6 +351,8 @@ const PRINT_CSS = `
  * station (built from the page's own address, so it works for every shop without editing), with
  * the raw launch command as a fallback to copy. See `lib/pos/printStationSetup.ts`.
  */
+const SETUP_LABEL: Record<PrintStation, string> = { kitchen: "Kitchen", bar: "Bar", cashier: "Cashier" };
+
 function SetupHelp({ station }: { station: PrintStation }) {
   const [copied, setCopied] = useState(false);
 
@@ -347,7 +361,7 @@ function SetupHelp({ station }: { station: PrintStation }) {
       origin: window.location.origin,
       host: window.location.hostname,
       station,
-      label: station === "kitchen" ? "Kitchen" : "Cashier",
+      label: SETUP_LABEL[station],
     };
   }
 

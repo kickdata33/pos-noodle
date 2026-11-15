@@ -15,6 +15,7 @@ import { runPowerShell, WindowsPrinter } from "./windowsPrinter.js";
  */
 
 const VERSION = "1.0.0";
+const STATION_LABEL_TH = { kitchen: "ครัว", bar: "บาร์น้ำ", cashier: "แคชเชียร์" };
 const HEARTBEAT_MS = 30_000;
 const POLL_MS = 20_000;
 const RECONNECT_MS = 30_000;
@@ -64,7 +65,7 @@ async function testPrint(config) {
         createdAt: Date.now(),
         lines: [
           { text: "ทดสอบโปรแกรมพิมพ์ RanPOS", align: "center", bold: true, size: 2 },
-          { text: `สถานี ${station === "kitchen" ? "ครัว" : "แคชเชียร์"}`, align: "center" },
+          { text: `สถานี ${STATION_LABEL_TH[station] ?? station}`, align: "center" },
           { text: "--------------------------------", align: "center" },
           { text: "ภาษาไทยอ่านออกครบ ก ข ฃ ค ฅ ฆ ง" },
           { text: "ตัวเลข 0123456789 ฿120.00", align: "right" },

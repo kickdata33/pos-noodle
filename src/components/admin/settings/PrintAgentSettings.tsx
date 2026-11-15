@@ -12,7 +12,7 @@ import { AGENT_OFFLINE_MS } from "@/lib/pos/printHealth";
 import { printAgentRepository } from "@/repositories/printJobRepository";
 import type { PrintAgent, PrintStation } from "@/types";
 
-const STATION_LABEL: Record<PrintStation, string> = { cashier: "แคชเชียร์", kitchen: "ครัว" };
+const STATION_LABEL: Record<PrintStation, string> = { cashier: "แคชเชียร์", kitchen: "ครัว", bar: "บาร์น้ำ" };
 
 /**
  * Admin: background Print Agents for this shop (`print-agent/` in the repo) — the program that
@@ -144,7 +144,7 @@ export function PrintAgentSettings() {
             <Input id="agent-name" value={name} onChange={(e) => setName(e.target.value)} />
           </div>
           <div className="flex gap-3 pb-2">
-            {(["cashier", "kitchen"] as PrintStation[]).map((s) => (
+            {(["cashier", "kitchen", "bar"] as PrintStation[]).map((s) => (
               <label key={s} className="flex items-center gap-1.5 text-sm">
                 <Checkbox
                   checked={stations.includes(s)}

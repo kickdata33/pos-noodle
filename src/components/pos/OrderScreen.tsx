@@ -31,8 +31,14 @@ import { LINE_STATUS_CLASS, LINE_STATUS_LABEL, lineKitchenStatus } from "@/lib/p
 import { confirmPaymentOnce } from "@/lib/pos/payOrder";
 import { createOrJoinTableOrder } from "@/lib/pos/tableOrder";
 import { printQrForTable } from "@/lib/pos/tableQrPrint";
-import { printCheckBill, sendKitchenCancellation, sendOrderToKitchen } from "@/lib/pos/printQueue";
-import { countUnsentToKitchen } from "@/lib/pos/printTickets";
+import {
+  printCheckBill,
+  sendBarCancellation,
+  sendKitchenCancellation,
+  sendOrderToBar,
+  sendOrderToKitchen,
+} from "@/lib/pos/printQueue";
+import { countUnsentToBar, countUnsentToKitchen } from "@/lib/pos/printTickets";
 import { deductStockForPaidOrder } from "@/lib/pos/stockService";
 import { buildOrderReceipt } from "@/lib/pos/receipt";
 import { auditLogRepository } from "@/repositories/auditLogRepository";
@@ -159,6 +165,8 @@ export function OrderScreen({ orderId, initialTableId, initialChannelId }: Props
   const [qrPrintMessage, setQrPrintMessage] = useState<{ ok: boolean; text: string } | null>(null);
   // Latches true while `sendToKitchen` is writing a ticket — same plain-boolean pattern.
   const sendingToKitchenRef = useRef(false);
+  // Same latch, for the drink-bar station's own "ส่งบาร์" send (see `sendToBar` below).
+  const sendingToBarRef = useRef(false);
   // Latches true while "พิมพ์บิลอีกครั้ง" is in flight — the button has no other busy indicator,
   // so a mobile tap that doesn't feel instant gets re-tapped before the first write lands, and
   // unlike `sendToKitchen` each call here is `printCheckBill(..., false)` — a brand-new job every
@@ -469,6 +477,7 @@ export function OrderScreen({ orderId, initialTableId, initialChannelId }: Props
       // eslint-disable-next-line react-hooks/purity -- event handler, not render; the compiler loses track once the bill lines render their kitchen status (see lineStatusOf)
       addedAt: Date.now(),
       ...(category?.sendToKitchen === false ? { sendToKitchen: false as const } : {}),
+      ...(category?.sendToBar === true ? { sendToBar: true as const } : {}),
     };
     applyItems([...current.items, item]);
   }
@@ -521,6 +530,9 @@ export function OrderScreen({ orderId, initialTableId, initialChannelId }: Props
       sendKitchenCancellation({ ...current, id: current.id }, [target], catalogSettings, appUser.id).catch(() =>
         setPrintError("ส่งใบยกเลิกเข้าครัวไม่สำเร็จ แจ้งครัวด้วยตัวเอง")
       );
+      sendBarCancellation({ ...current, id: current.id }, [target], catalogSettings, appUser.id).catch(() =>
+        setPrintError("ส่งใบยกเลิกเข้าบาร์ไม่สำเร็จ แจ้งบาร์ด้วยตัวเอง")
+      );
     }
     await auditLogRepository.create({
       shopId,
@@ -564,6 +576,9 @@ export function OrderScreen({ orderId, initialTableId, initialChannelId }: Props
     if (appUser) {
       // Awaited (unlike remove's) since we navigate away right after — but failures are swallowed.
       await sendKitchenCancellation({ ...current, id: current.id }, current.items, catalogSettings, appUser.id).catch(
+        () => false
+      );
+      await sendBarCancellation({ ...current, id: current.id }, current.items, catalogSettings, appUser.id).catch(
         () => false
       );
     }
@@ -689,6 +704,7 @@ export function OrderScreen({ orderId, initialTableId, initialChannelId }: Props
   }
 
   const kitchenPrintingOn = Boolean(catalogSettings?.printStation?.kitchenEnabled);
+  const barPrintingOn = Boolean(catalogSettings?.printStation?.barEnabled);
 
   // "พิมพ์ QR ให้ลูกค้าสั่ง" — only for dine-in, and only in shops that switched it on
   // (Admin → ตั้งค่าร้าน → พิมพ์ QR สั่งอาหารของโต๊ะ); everyone else never sees the button.
@@ -743,16 +759,43 @@ export function OrderScreen({ orderId, initialTableId, initialChannelId }: Props
     }
   }
 
+  /** Same as `sendToKitchen`, for the drink-bar station — see that function's comment. */
+  async function sendToBar(): Promise<void> {
+    if (!barPrintingOn || !appUser) return;
+    while (sendingToBarRef.current) {
+      await new Promise((resolve) => setTimeout(resolve, 30));
+    }
+    const current = orderRef.current;
+    if (!current || countUnsentToBar(current.items) === 0) return;
+    sendingToBarRef.current = true;
+    try {
+      const id = await ensureSaved();
+      const latest = orderRef.current ?? current;
+      const result = await sendOrderToBar({ ...latest, id }, catalogSettings, appUser.id);
+      if (result && orderRef.current) {
+        orderRef.current = { ...orderRef.current, items: result.items, barTicketCount: result.barTicketCount };
+        setOrder(orderRef.current);
+      }
+      setPrintError(null);
+    } catch {
+      setPrintError("ส่งใบสั่งเข้าบาร์ไม่สำเร็จ ลองกด ส่งบาร์ อีกครั้ง");
+    } finally {
+      sendingToBarRef.current = false;
+    }
+  }
+
   async function handleBackToHome() {
     await sendToKitchen();
+    await sendToBar();
     router.push("/pos");
   }
 
-  /** "คิดเงิน": anything still unsent goes to the kitchen first (takeaway orders are often paid
-   * right after ordering), then the check bill prints at the cashier, then the dialog opens.
-   * The dialog opens even if printing failed. */
+  /** "คิดเงิน": anything still unsent goes to the kitchen (and bar) first (takeaway orders are
+   * often paid right after ordering), then the check bill prints at the cashier, then the dialog
+   * opens. The dialog opens even if printing failed. */
   async function handleOpenCheckout() {
     await sendToKitchen();
+    await sendToBar();
     // Tell the customer's QR page the bill is on its way (thank-you / check-your-items view, no
     // more ordering from the phone). Best-effort; staff can reopen ordering from this screen.
     if (orderRef.current && orderRef.current.items.length > 0 && !orderRef.current.billRequestedAt) {
@@ -1207,6 +1250,11 @@ export function OrderScreen({ orderId, initialTableId, initialChannelId }: Props
           {kitchenPrintingOn && countUnsentToKitchen(order.items) > 0 ? (
             <Button variant="secondary" className="mb-2 h-12 w-full text-base font-semibold" onClick={sendToKitchen} disabled={saving}>
               ส่งครัว ({countUnsentToKitchen(order.items)} ที่)
+            </Button>
+          ) : null}
+          {barPrintingOn && countUnsentToBar(order.items) > 0 ? (
+            <Button variant="secondary" className="mb-2 h-12 w-full text-base font-semibold" onClick={sendToBar} disabled={saving}>
+              ส่งบาร์ ({countUnsentToBar(order.items)} ที่)
             </Button>
           ) : null}
           <div className="grid grid-cols-2 gap-2">

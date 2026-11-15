@@ -6,9 +6,12 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  buildBarTicketLines,
   buildKitchenTicketLines,
   checkBillJobFields,
+  computeBarSend,
   computeKitchenSend,
+  countUnsentToBar,
   countUnsentToKitchen,
   kitchenDestinationLabel,
 } from "../src/lib/pos/printTickets";
@@ -182,6 +185,44 @@ test("check bill without PromptPay ID prints with no QR", () => {
   const job = checkBillJobFields(order(), settings());
   assert.equal(job.qrPayload, null);
   assert.equal(job.qrCaption, null);
+});
+
+test("bar send only picks up sendToBar lines, independently of kitchen's own sentQty", () => {
+  // A line bound for the bar and a line bound for the kitchen on the same order: sending to the
+  // kitchen must never advance the bar line's `barSentQty` (and vice versa) — each station's
+  // "already sent" bookkeeping lives in its own field precisely so the two can't cross-contaminate.
+  const items = [
+    item({ id: "drink", productName: "ชาเย็น", quantity: 2, sendToKitchen: false, sendToBar: true }),
+    item({ id: "food", quantity: 1 }),
+  ];
+
+  const kitchenSend = computeKitchenSend(items)!;
+  assert.deepEqual(kitchenSend.added.map((l) => l.item.id), ["food"]);
+  // The drink line is untouched by the kitchen send — still no `barSentQty` set on it.
+  const drinkAfterKitchenSend = kitchenSend.updatedItems.find((i) => i.id === "drink")!;
+  assert.equal(drinkAfterKitchenSend.barSentQty, undefined);
+  assert.equal(drinkAfterKitchenSend.kitchenSentQty, undefined);
+
+  const barSend = computeBarSend(kitchenSend.updatedItems)!;
+  assert.deepEqual(barSend.added.map((l) => [l.item.id, l.quantity]), [["drink", 2]]);
+  assert.equal(countUnsentToBar(kitchenSend.updatedItems), 2);
+  // Sending to the bar, in turn, never touches the food line's `kitchenSentQty`.
+  const foodAfterBarSend = barSend.updatedItems.find((i) => i.id === "food")!;
+  assert.equal(foodAfterBarSend.kitchenSentQty, 1);
+  assert.equal(foodAfterBarSend.barSentQty, undefined);
+
+  assert.equal(countUnsentToKitchen(barSend.updatedItems), 0);
+  assert.equal(countUnsentToBar(barSend.updatedItems), 0);
+});
+
+test("bar ticket uses the same layout as the kitchen one, titled for the bar", () => {
+  const lines = buildBarTicketLines(
+    order(),
+    { added: [{ item: item({ id: "a", productName: "ชาเย็น" }), quantity: 2 }], cancelled: [] },
+    1
+  );
+  assert.ok(lines.map((l) => l.text).includes("ใบสั่งบาร์น้ำ รอบที่ 1"));
+  assert.ok(lines.some((l) => l.text === "2 x ชาเย็น"));
 });
 
 test("table QR slip: big table name, the ordering link as the QR, session warning", async () => {

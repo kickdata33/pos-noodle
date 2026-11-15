@@ -92,7 +92,7 @@ $virtual = 'XPS|PDF|OneNote|Fax|Document Writer'
 $guess = $printers | Where-Object { $_.Name -notmatch $virtual -and $_.Name -match 'Xprinter|XP-|POS|80|Receipt|Thermal' } | Select-Object -First 1
 $chosen = @{}
 foreach ($station in $info.stations) {
-  $label = if ($station -eq 'kitchen') { 'KITCHEN' } else { 'CASHIER' }
+  $label = switch ($station) { 'kitchen' { 'KITCHEN' } 'bar' { 'BAR' } default { 'CASHIER' } }
   $default = if ($guess) { [array]::IndexOf($printers, $guess) + 1 } else { 1 }
   $answer = Read-Host "Printer number for the $label station [$default]"
   if (-not $answer) { $answer = $default }
