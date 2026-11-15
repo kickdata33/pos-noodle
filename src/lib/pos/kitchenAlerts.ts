@@ -9,6 +9,21 @@ import type { Order, OrderItem } from "@/types";
 export const KITCHEN_NEW_ITEM_WINDOW_MS = 5 * 60 * 1000;
 
 /**
+ * Whether a line belongs on the live kitchen screen (`KitchenScreen`) at all — ticked
+ * "ไม่พิมพ์"/"บาร์น้ำ" at the category level (`sendToKitchen === false`) means the kitchen was
+ * never supposed to see or act on it (item: "เครื่องดื่มทำไมยังขึ้นครัว" — the screen used to show
+ * every line regardless, which is exactly the switch's category-level routing doing nothing on
+ * this screen). A line like this has no `prepared`/`serveCalledAt` tracking here at all: it's
+ * excluded from `staysOnKitchenScreen`/`linesToCall`/the new-item chime the same as it's excluded
+ * from rendering, so an order made up entirely of bar/no-print lines never appears on this screen,
+ * and a mixed order leaves the screen as soon as its *kitchen* lines are done — it doesn't wait on
+ * a drink that was never going to be ticked here.
+ */
+export function belongsOnKitchenScreen(item: Pick<OrderItem, "sendToKitchen">): boolean {
+  return item.sendToKitchen !== false;
+}
+
+/**
  * Compares the open orders now against the item ids the kitchen screen has already seen.
  * `hasNew` is true when any *unprepared* line appears that wasn't there before — whoever added
  * it (staff on the POS, a customer's QR order, a second round on an old table). `previouslySeen`

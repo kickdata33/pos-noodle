@@ -6,6 +6,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  belongsOnKitchenScreen,
   detectNewKitchenItems,
   increaseItemQuantity,
   isNewKitchenItem,
@@ -89,4 +90,10 @@ test("raising quantity on a line not yet done bumps it in place", () => {
   assert.equal(result.length, 1);
   assert.equal(result[0].quantity, 3);
   assert.equal(result[0].lineTotal, 150);
+});
+
+test("a line opted out of the kitchen (บาร์น้ำ/ไม่พิมพ์) does not belong on the kitchen screen", () => {
+  assert.equal(belongsOnKitchenScreen({ sendToKitchen: false }), false);
+  assert.equal(belongsOnKitchenScreen({ sendToKitchen: true }), true);
+  assert.equal(belongsOnKitchenScreen({}), true);
 });

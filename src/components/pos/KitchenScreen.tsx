@@ -7,7 +7,7 @@ import { usePosCatalog } from "@/components/pos/PosCatalogContext";
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/hooks/useAuth";
 import { formatTime } from "@/lib/format";
-import { detectNewKitchenItems, isNewKitchenItem } from "@/lib/pos/kitchenAlerts";
+import { belongsOnKitchenScreen, detectNewKitchenItems, isNewKitchenItem } from "@/lib/pos/kitchenAlerts";
 import { playOrderAlertSound } from "@/lib/pos/notificationSound";
 import { notifyServeCall } from "@/lib/pos/pushClient";
 import {
@@ -32,7 +32,18 @@ import type { Order, OrderItem, ServeCall } from "@/types";
  * POS screens; this is purely a display filter for the kitchen's own view. `prepared` is
  * per-item, not per-order, since some shops split prep across a few different menu lines within
  * one order — see the field's doc comment on `OrderItem`.
+ *
+ * Lines routed away from the kitchen ("ไม่พิมพ์"/"บาร์น้ำ" at the category level,
+ * `belongsOnKitchenScreen`) never show up here and never factor into whether an order stays on
+ * this screen — see that function's doc comment. Every place below that reads `order.items` for
+ * display or for the stays-on-screen/เรียกเสิร์ฟ bookkeeping uses `kitchenItemsOf(order)` instead;
+ * writes (`toggleItemPrepared`) still go through the real, full `order` so a drink line is never
+ * dropped from Firestore just because this screen doesn't show it.
  */
+function kitchenItemsOf(order: Pick<Order, "items">): OrderItem[] {
+  return order.items.filter(belongsOnKitchenScreen);
+}
+
 export function KitchenScreen() {
   const { shopId } = usePosCatalog();
   const { appUser } = useAuth();
@@ -67,7 +78,10 @@ export function KitchenScreen() {
   useEffect(
     () =>
       orderRepository.subscribeOpenForShop(shopId, (orders) => {
-        const { seen, hasNew } = detectNewKitchenItems(seenItemIdsRef.current, orders);
+        const { seen, hasNew } = detectNewKitchenItems(
+          seenItemIdsRef.current,
+          orders.map((o) => ({ items: kitchenItemsOf(o) }))
+        );
         seenItemIdsRef.current = seen;
         if (hasNew) playOrderAlertSound();
         setOpenOrders(orders);
@@ -80,9 +94,10 @@ export function KitchenScreen() {
     return () => clearInterval(timer);
   }, []);
 
-  // An order leaves this screen once everything is cooked AND called out ("เรียกเสิร์ฟ").
+  // An order leaves this screen once everything is cooked AND called out ("เรียกเสิร์ฟ") — judged
+  // only by its kitchen-bound lines, so a drink routed to the bar never keeps an order stuck here.
   const kitchenOrders = openOrders
-    .filter(staysOnKitchenScreen)
+    .filter((o) => staysOnKitchenScreen({ items: kitchenItemsOf(o) }))
     .slice()
     .sort((a, b) => a.createdAt - b.createdAt);
 
@@ -104,7 +119,7 @@ export function KitchenScreen() {
 
   async function callToServe(order: Order) {
     if (!appUser) return;
-    const lines = linesToCall(order.items);
+    const lines = linesToCall(kitchenItemsOf(order));
     if (lines.length === 0) return;
     setCallingId(order.id);
     try {
@@ -140,7 +155,14 @@ export function KitchenScreen() {
     if (won) notifyServeCall(call.callId, "done");
   }
 
-  const servedRecently = recentlyServedOrders(openOrders, now);
+  // `recentlyServedOrders` only needs the kitchen-bound lines to judge "fully called"; the real
+  // (full-items) order is recovered right after so any later write still carries every line.
+  const servedRecently = recentlyServedOrders(
+    openOrders.map((o) => ({ id: o.id, items: kitchenItemsOf(o) })),
+    now
+  )
+    .map((scoped) => openOrders.find((o) => o.id === scoped.id))
+    .filter((o): o is Order => Boolean(o));
 
   return (
     <main className="mx-auto max-w-3xl p-4 pb-28 sm:p-6 sm:pb-28">
@@ -158,83 +180,86 @@ export function KitchenScreen() {
       ) : null}
 
       <div className="grid gap-4">
-        {kitchenOrders.map((order) => (
-          <div
-            key={order.id}
-            className={
-              "rounded-lg border bg-card p-4 " +
-              (order.items.some((item) => isNewKitchenItem(item, now))
-                ? "border-primary ring-2 ring-primary"
-                : "border-border")
-            }
-          >
-            <div className="mb-3 flex items-center justify-between">
-              <span className="text-lg font-semibold">
-                {order.tableName ?? order.customerLabel ?? order.channelName} · {order.orderNumber}
-              </span>
-              <span className="text-sm text-muted-foreground">เปิดเมื่อ {formatTime(order.createdAt)}</span>
-            </div>
-            <Button
-              className="mb-3 h-12 w-full bg-amber-500 text-base font-bold text-white hover:bg-amber-600"
-              disabled={callingId === order.id || linesToCall(order.items).length === 0}
-              onClick={() => callToServe(order)}
+        {kitchenOrders.map((order) => {
+          const items = kitchenItemsOf(order);
+          return (
+            <div
+              key={order.id}
+              className={
+                "rounded-lg border bg-card p-4 " +
+                (items.some((item) => isNewKitchenItem(item, now))
+                  ? "border-primary ring-2 ring-primary"
+                  : "border-border")
+              }
             >
-              {callingId === order.id
-                ? "กำลังเรียก..."
-                : order.items.some(awaitingServeCall)
-                  ? `🔔 เรียกเสิร์ฟ (${order.items.filter(awaitingServeCall).length} รายการที่ทำแล้ว)`
-                  : "🔔 เรียกเสิร์ฟทั้งหมด"}
-            </Button>
+              <div className="mb-3 flex items-center justify-between">
+                <span className="text-lg font-semibold">
+                  {order.tableName ?? order.customerLabel ?? order.channelName} · {order.orderNumber}
+                </span>
+                <span className="text-sm text-muted-foreground">เปิดเมื่อ {formatTime(order.createdAt)}</span>
+              </div>
+              <Button
+                className="mb-3 h-12 w-full bg-amber-500 text-base font-bold text-white hover:bg-amber-600"
+                disabled={callingId === order.id || linesToCall(items).length === 0}
+                onClick={() => callToServe(order)}
+              >
+                {callingId === order.id
+                  ? "กำลังเรียก..."
+                  : items.some(awaitingServeCall)
+                    ? `🔔 เรียกเสิร์ฟ (${items.filter(awaitingServeCall).length} รายการที่ทำแล้ว)`
+                    : "🔔 เรียกเสิร์ฟทั้งหมด"}
+              </Button>
 
-            <div className="grid gap-2">
-              {order.items.map((item) => (
-                <button
-                  key={item.id}
-                  type="button"
-                  onClick={() => toggleItemPrepared(order, item)}
-                  className={
-                    "flex w-full items-center justify-between gap-3 rounded-lg border-2 px-4 py-3 text-left " +
-                    (item.prepared
-                      ? "border-success bg-success/10"
-                      : "border-destructive bg-destructive/10")
-                  }
-                >
-                  <span className="flex-1">
-                    <span className="flex flex-wrap items-center gap-2">
-                      <span className={"text-lg font-semibold " + (item.prepared ? "line-through opacity-70" : "")}>
-                        {item.quantity}× {item.productName}
-                      </span>
-                      {isNewKitchenItem(item, now) ? (
-                        <span className="rounded-md bg-primary px-2 py-0.5 text-sm font-bold text-primary-foreground">
-                          ใหม่
-                        </span>
-                      ) : null}
-                      {item.addedAt ? (
-                        <span className="text-sm text-muted-foreground">สั่ง {formatTime(item.addedAt)}</span>
-                      ) : null}
-                    </span>
-                    {item.modifiers.length > 0 ? (
-                      <span className="block text-sm text-muted-foreground">
-                        {item.modifiers.map((m) => m.optionName).join(", ")}
-                      </span>
-                    ) : null}
-                    {item.note ? (
-                      <span className="block text-sm text-muted-foreground">หมายเหตุ: {item.note}</span>
-                    ) : null}
-                  </span>
-                  <span
+              <div className="grid gap-2">
+                {items.map((item) => (
+                  <button
+                    key={item.id}
+                    type="button"
+                    onClick={() => toggleItemPrepared(order, item)}
                     className={
-                      "shrink-0 rounded-md px-3 py-2 text-base font-bold " +
-                      (item.prepared ? "bg-success text-success-foreground" : "bg-destructive text-destructive-foreground")
+                      "flex w-full items-center justify-between gap-3 rounded-lg border-2 px-4 py-3 text-left " +
+                      (item.prepared
+                        ? "border-success bg-success/10"
+                        : "border-destructive bg-destructive/10")
                     }
                   >
-                    {item.prepared ? "ทำแล้ว" : "ยังไม่ทำ"}
-                  </span>
-                </button>
-              ))}
+                    <span className="flex-1">
+                      <span className="flex flex-wrap items-center gap-2">
+                        <span className={"text-lg font-semibold " + (item.prepared ? "line-through opacity-70" : "")}>
+                          {item.quantity}× {item.productName}
+                        </span>
+                        {isNewKitchenItem(item, now) ? (
+                          <span className="rounded-md bg-primary px-2 py-0.5 text-sm font-bold text-primary-foreground">
+                            ใหม่
+                          </span>
+                        ) : null}
+                        {item.addedAt ? (
+                          <span className="text-sm text-muted-foreground">สั่ง {formatTime(item.addedAt)}</span>
+                        ) : null}
+                      </span>
+                      {item.modifiers.length > 0 ? (
+                        <span className="block text-sm text-muted-foreground">
+                          {item.modifiers.map((m) => m.optionName).join(", ")}
+                        </span>
+                      ) : null}
+                      {item.note ? (
+                        <span className="block text-sm text-muted-foreground">หมายเหตุ: {item.note}</span>
+                      ) : null}
+                    </span>
+                    <span
+                      className={
+                        "shrink-0 rounded-md px-3 py-2 text-base font-bold " +
+                        (item.prepared ? "bg-success text-success-foreground" : "bg-destructive text-destructive-foreground")
+                      }
+                    >
+                      {item.prepared ? "ทำแล้ว" : "ยังไม่ทำ"}
+                    </span>
+                  </button>
+                ))}
+              </div>
             </div>
-          </div>
-        ))}
+          );
+        })}
 
         {kitchenOrders.length === 0 ? (
           <p className="text-center text-muted-foreground">ไม่มีออเดอร์ที่ต้องทำตอนนี้</p>
@@ -261,7 +286,7 @@ export function KitchenScreen() {
                   </p>
                   <p className="mb-2 text-sm text-muted-foreground">แตะรายการที่ยังไม่ได้ทำจริง เพื่อดึงกลับขึ้นด้านบน</p>
                   <div className="grid gap-2">
-                    {order.items.map((item) => (
+                    {kitchenItemsOf(order).map((item) => (
                       <button
                         key={item.id}
                         type="button"
