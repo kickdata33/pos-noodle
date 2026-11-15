@@ -13,6 +13,7 @@ import {
   distributeTieredPriceDeltas,
   groupItemsByProduct,
   resolveChannelPrice,
+  resolveManualDiscount,
   resolveTieredGroupPrice,
   resolveTimeBasedPrice,
 } from "../src/lib/pos/pricing";
@@ -88,6 +89,29 @@ test("discount reduces the VAT base and the total, but not the displayed subtota
   assert.equal(totals.discount, 20);
   assert.equal(totals.tax, 5.6); // 7% of (100 - 20 + 0)
   assert.equal(totals.total, 85.6);
+});
+
+test("resolveManualDiscount: a baht amount passes straight through", () => {
+  assert.equal(resolveManualDiscount("amount", 20, 150, 0), 20);
+});
+
+test("resolveManualDiscount: a percent amount is a share of the subtotal, not what's left after promos", () => {
+  assert.equal(resolveManualDiscount("percent", 10, 200, 50), 20); // 10% of 200, not of 150
+});
+
+test("resolveManualDiscount: blank/zero/negative/garbled all resolve to no discount", () => {
+  assert.equal(resolveManualDiscount("amount", 0, 150, 0), 0);
+  assert.equal(resolveManualDiscount("amount", -5, 150, 0), 0);
+  assert.equal(resolveManualDiscount("amount", NaN, 150, 0), 0);
+});
+
+test("resolveManualDiscount: caps at what's left of the subtotal after the promotion discount, never billing negative", () => {
+  assert.equal(resolveManualDiscount("amount", 200, 150, 0), 150);
+  assert.equal(resolveManualDiscount("percent", 100, 150, 50), 100); // 150 - 50 already taken by promo
+});
+
+test("resolveManualDiscount: a promo discount already covering the whole subtotal leaves no room for a manual one", () => {
+  assert.equal(resolveManualDiscount("amount", 20, 100, 100), 0);
 });
 
 test("rounds to 2 decimal places to avoid floating-point noise", () => {

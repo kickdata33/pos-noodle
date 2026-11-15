@@ -152,8 +152,8 @@ function roundUpToNearest5(value: number): number {
 
 export interface OrderTotals {
   subtotal: number;
-  /** Everything taken off the subtotal — today only `promoDiscount`, plus any manual discount
-   * passed in (no staff discount UI exists yet). */
+  /** Everything taken off the subtotal — `promoDiscount` plus any manual discount a staff
+   * member keyed in at checkout (see `resolveManualDiscount`). */
   discount: number;
   promoDiscount: number;
   serviceCharge: number;
@@ -266,9 +266,10 @@ export function computePromotionDiscount(items: PromoItem[]): number {
 /**
  * VAT is computed on (subtotal - discount + serviceCharge), the standard Thai restaurant
  * convention — service charge is itself taxable. The promotion discount is always recomputed
- * from the items here, so callers must pass only a *manual* discount (none exist yet → leave it
- * 0) — never an order's stored `discount`, which already includes the promotion and would count
- * it twice.
+ * from the items here, so callers must pass only a *manual* discount (the checkout dialog's
+ * "ส่วนลดเพิ่มเติม" field, resolved via `resolveManualDiscount` — leave it 0 when none was
+ * entered) — never an order's stored `discount`, which already includes the promotion and would
+ * count it twice.
  */
 export function computeOrderTotals(
   items: (Pick<OrderItem, "lineTotal"> & PromoItem)[],
@@ -286,6 +287,29 @@ export function computeOrderTotals(
   const total = round2(subtotal - discount + serviceCharge + tax);
 
   return { subtotal: round2(subtotal), discount, promoDiscount, serviceCharge, tax, total };
+}
+
+/**
+ * Turns what staff typed into the checkout dialog's "ส่วนลดเพิ่มเติม" field into a baht amount
+ * ready for `computeOrderTotals`'s `manualDiscount` — a blank field, 0, or a negative/garbled
+ * number all resolve to "no discount" rather than erroring, since the field is optional and the
+ * dialog re-evaluates on every keystroke. A `"percent"` entry is a percentage of `subtotal`
+ * itself (before any promotion discount), matching how a cashier normally quotes "ลด 10%".
+ *
+ * Capped so it can never exceed what's left of the subtotal after the promotion discount already
+ * took its share (`subtotal - promoDiscount`) — otherwise a typo like "200" (meant to be baht on
+ * a ฿150 bill, or meant to be % but typed without the mode switched) would bill a negative total.
+ */
+export function resolveManualDiscount(
+  mode: "amount" | "percent",
+  value: number,
+  subtotal: number,
+  promoDiscount: number
+): number {
+  if (!Number.isFinite(value) || value <= 0) return 0;
+  const raw = mode === "percent" ? (subtotal * value) / 100 : value;
+  const max = Math.max(subtotal - promoDiscount, 0);
+  return Math.min(raw, max);
 }
 
 /** Avoids floating-point noise like 12.000000000000002 baht showing up on a receipt. */

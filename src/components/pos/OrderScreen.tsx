@@ -885,22 +885,44 @@ export function OrderScreen({ orderId, initialTableId, initialChannelId }: Props
     paymentMethodName: string;
     cashReceived: number | null;
     changeDue: number | null;
+    /** From the checkout dialog's "ส่วนลดเพิ่มเติม" field — already resolved to baht and capped
+     * there, 0 when staff left it blank. */
+    manualDiscount: number;
   }) {
     if (!order || !totals) return;
     setSaving(true);
     setError(null);
     try {
       const id = await ensureSaved();
+      const latest = orderRef.current ?? order;
+      // A manual discount typed in at checkout isn't on the order doc yet (`totals` above is
+      // always computed with no manual discount — see its own comment), and `confirmPaymentOnce`
+      // builds its receipt job from the order doc's *stored* fields, not from what's passed into
+      // it — so persist the real totals first, same fields `persistItems` saves on every item
+      // change, before starting the payment transaction.
+      const finalTotals =
+        payment.manualDiscount > 0 ? computeOrderTotals(latest.items, settings, payment.manualDiscount) : totals;
+      if (payment.manualDiscount > 0) {
+        await orderRepository.update(id, {
+          subtotal: finalTotals.subtotal,
+          discount: finalTotals.discount,
+          promoDiscount: finalTotals.promoDiscount,
+          serviceCharge: finalTotals.serviceCharge,
+          tax: finalTotals.tax,
+          total: finalTotals.total,
+          // eslint-disable-next-line react-hooks/purity -- event handler, not render; same as applyItems's updatedAt above
+          updatedAt: Date.now(),
+        });
+      }
       // One transaction: order → PAID, payment recorded, receipt queued (if the shop prints
       // through the queue) — and a no-op if this bill was already paid (double tap, retry,
       // another device), so nothing below runs twice either. See `confirmPaymentOnce`.
-      const latest = orderRef.current ?? order;
       const { alreadyPaid, paidAt } = await confirmPaymentOnce({
-        order: { ...latest, id } as Order,
+        order: { ...latest, ...finalTotals, id } as Order,
         payment: {
           paymentMethodId: payment.paymentMethodId,
           paymentMethodName: payment.paymentMethodName,
-          amount: totals.total,
+          amount: finalTotals.total,
           cashReceived: payment.cashReceived,
           changeDue: payment.changeDue,
         },
@@ -913,10 +935,10 @@ export function OrderScreen({ orderId, initialTableId, initialChannelId }: Props
       }
       // Piece-sold items (water, snacks, bottled drinks) come off the shelf count now — not
       // awaited: a stock write problem must never hold up or undo a completed sale.
-      deductStockForPaidOrder({ id, shopId, items: orderRef.current?.items ?? order.items }, appUser!).catch((err) =>
+      deductStockForPaidOrder({ id, shopId, items: latest.items ?? order.items }, appUser!).catch((err) =>
         console.error("deductStockForPaidOrder failed", err)
       );
-      notifyOrderEvent("paid", { ...order, total: totals.total, paymentMethodName: payment.paymentMethodName });
+      notifyOrderEvent("paid", { ...order, total: finalTotals.total, paymentMethodName: payment.paymentMethodName });
       if (order.tableId) closeTableSession(order.tableId);
       // Auto-print the receipt once checkout succeeds — fire-and-forget, deliberately not
       // awaited before navigating away: an unreachable/offline printer has no fetch timeout
@@ -927,6 +949,7 @@ export function OrderScreen({ orderId, initialTableId, initialChannelId }: Props
       if (catalogSettings?.receiptPrinterIp) {
         const receiptOrder: Order = {
           ...order,
+          ...finalTotals,
           id,
           status: "PAID",
           paymentStatus: "PAID",
@@ -1386,8 +1409,7 @@ export function OrderScreen({ orderId, initialTableId, initialChannelId }: Props
         open={checkoutOpen}
         onOpenChange={setCheckoutOpen}
         items={order.items}
-        totals={totals}
-        currency={settings.currency}
+        settings={settings}
         paymentMethods={paymentMethods.filter((m) => m.active)}
         saving={saving}
         onConfirm={handleConfirmPayment}
