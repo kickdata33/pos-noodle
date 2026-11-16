@@ -53,6 +53,13 @@ class FakeQueue {
   }
 }
 
+/**
+ * Mirrors the real `WindowsPrinter.print`'s two-phase contract: resolves fast with
+ * `{ submitted: false, detail }` for a job that never reached the printer at all, or
+ * `{ submitted: true, outcome }` — where `outcome` is a *promise*, not awaited here — once it
+ * has. A queued outcome's `wait` (a promise the caller controls) lets a test hold that job's
+ * `outcome` open to prove later jobs don't wait on it.
+ */
 class FakePrinter {
   constructor() {
     this.ready = true;
@@ -66,11 +73,11 @@ class FakePrinter {
   }
   async print(job) {
     const next = this.outcomes.shift() ?? { outcome: OUTCOME.DELIVERED, detail: "ok" };
-    if (next === "throw") throw new Error("powershell crashed");
-    if (next.outcome === OUTCOME.DELIVERED || next.outcome === OUTCOME.ERROR || next.outcome === OUTCOME.TIMEOUT) {
-      this.printed.push(job.id);
-    }
-    return next;
+    if (next.outcome === OUTCOME.NOT_SUBMITTED) return { submitted: false, detail: next.detail };
+    this.printed.push(job.id);
+    if (next === "throw") return { submitted: true, outcome: Promise.reject(new Error("powershell crashed")) };
+    const outcome = next.wait ? next.wait.then(() => next) : Promise.resolve(next);
+    return { submitted: true, outcome };
   }
 }
 
@@ -104,6 +111,43 @@ test("jobs print oldest first", async () => {
   const p = new FakePrinter();
   await agent(q, p).drain("cashier", q.pending());
   assert.deepEqual(p.printed, ["a", "b"]);
+});
+
+test("doesn't wait for one ticket to finish printing before handing the next one to the printer", async () => {
+  const q = new FakeQueue();
+  q.add("a", { createdAt: 1 });
+  q.add("b", { createdAt: 2 });
+  const p = new FakePrinter();
+  let resolveA;
+  p.outcomes.push({ outcome: OUTCOME.DELIVERED, detail: "ok", wait: new Promise((res) => (resolveA = res)) });
+  const draining = agent(q, p).drain("cashier", q.pending());
+  // Flush every microtask the claim+submit loop needs (claim and print are both one-tick
+  // `async` calls, nothing here depends on a timer) without flushing resolveA() itself.
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(p.printed, ["a", "b"], "b was already handed to the printer even though a hasn't finished yet");
+  assert.equal(q.jobs.get("a").status, "printing", "a is still waiting on its own confirmation");
+  assert.equal(q.jobs.get("b").status, "sent", "b, with nothing holding it up, already finished");
+  resolveA();
+  await draining;
+  assert.equal(q.jobs.get("a").status, "sent");
+});
+
+test("a printer dying mid-ticket still lands as 'uncertain', even after more tickets were already handed to it", async () => {
+  const q = new FakeQueue();
+  q.add("a", { createdAt: 1 });
+  q.add("b", { createdAt: 2 });
+  const p = new FakePrinter();
+  let resolveA;
+  p.outcomes.push(
+    { outcome: OUTCOME.ERROR, detail: "เครื่องพิมพ์หลุดระหว่างพิมพ์", wait: new Promise((res) => (resolveA = res)) }
+  );
+  const draining = agent(q, p).drain("cashier", q.pending());
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(p.printed, ["a", "b"], "b still went out before a's failure was known");
+  resolveA();
+  await draining;
+  assert.equal(q.jobs.get("a").status, "uncertain");
+  assert.equal(q.jobs.get("b").status, "sent", "b itself printed fine — a's failure doesn't retroactively touch it");
 });
 
 test("two agents (or a browser station) racing for the same job print it exactly once", async () => {

@@ -12,6 +12,24 @@
  *                                                             offline / not found) — retried later
  * The agent never marks "printed": a USB receipt printer's driver can only confirm it accepted
  * the data, not that paper came out.
+ *
+ * `#drainOnce` only waits for *reaching the printer* (`printer.print`'s fast `submitted` check)
+ * before claiming and starting the next pending job — not for that ticket to actually finish
+ * printing (feed + cut, watched by `printer.print`'s slower `outcome` promise). One ticket at a
+ * time per *physical* printer was always the right model, but making every *claim* wait on the
+ * previous ticket's full confirmation too was an artificial extra queue on top of it (item: "ร้าน
+ * ใหญ่ 50 โต๊ะ... ปริ้นไม่ทัน เพราะออเดอร์ค่อนข้างไหล" — a busy kitchen's single printer falling behind
+ * real time during a rush). `#settle` resolves each job's own `outcome` whenever it's ready,
+ * independently of however many other jobs have since been claimed and handed to the printer.
+ *
+ * Trade-off worth knowing: a printer that dies *mid-ticket* (paper runs out, unplugged while
+ * printing) is only discovered once that ticket's own `outcome` settles — by then, this pass may
+ * already have handed the printer several more tickets behind it, instead of stopping at the
+ * first failure the way a fully serial loop could. Every one of those still lands safely as
+ * "uncertain" (never silently lost, never auto-reprinted) — there's just more of them to check
+ * before the printer's fixed. A printer that's already down *before* a ticket is even submitted
+ * (offline, unplugged, not found) is still caught immediately and still stops the pass, same as
+ * before — that check doesn't depend on the slow tail at all.
  */
 
 export const OUTCOME = Object.freeze({
@@ -141,56 +159,88 @@ export class AgentCore {
       this.log(`station ${station}: printer not ready (${state.detail}) — ${pending.length} job(s) wait`);
       return;
     }
+    // Each job's own confirmation (`#settle`) runs in the background, not awaited here — see
+    // this file's header comment. Collected so this pass doesn't report "done" (and `drain()`'s
+    // "again" re-run logic doesn't move on) until every job it started has actually landed on a
+    // final status, even though none of them blocked each other getting there.
+    const settling = [];
     for (const job of pending) {
       let claimed;
       try {
         claimed = await this.store.claim(job.id);
       } catch (err) {
         this.log(`claim ${job.id} failed (${err.message}) — offline? will retry`);
-        return;
+        break;
       }
       if (!claimed) continue; // another station got it, or it's no longer pending
-      const stop = await this.#printClaimed(station, printerName, job);
-      if (stop) return;
+      const submission = await this.#submitClaimed(printerName, job);
+      if (!submission.submitted) {
+        // Never reached Windows' queue → nothing printed → safe to put back for later, and don't
+        // hand this printer anything more this pass (same as before: this check is fast, it
+        // doesn't depend on the slow watch-tail, so stopping here loses nothing).
+        this.log(`job ${job.id} not submitted (${submission.detail}) → back to pending`);
+        this.printerState[station] = {
+          name: printerName,
+          ready: false,
+          detail: submission.detail || "เครื่องพิมพ์ไม่พร้อม",
+        };
+        await this.#safeRelease(job.id, submission.detail || "เครื่องพิมพ์ไม่พร้อม รอพิมพ์ใหม่อัตโนมัติ");
+        break;
+      }
+      this.log(`job ${job.id} → submitted (${printerName}), not waiting for it to finish before the next one`);
+      settling.push(this.#settle(printerName, job.id, submission.outcome));
+    }
+    await Promise.all(settling);
+  }
+
+  /** @returns {Promise<{submitted: boolean, detail?: string, outcome?: Promise}>} */
+  async #submitClaimed(printerName, job) {
+    try {
+      return await this.printer.print(job, printerName);
+    } catch (err) {
+      // Didn't even get far enough to tell us whether Windows took it — treat it the same as a
+      // clean "never submitted" so it's safe to retry rather than risk double-printing later.
+      this.log(`print ${job.id} threw before submitting: ${err.message}`);
+      return { submitted: false, detail: "เกิดข้อผิดพลาดก่อนส่งพิมพ์" };
     }
   }
 
-  /** @returns {Promise<boolean>} true = stop this pass (the printer just went away) */
-  async #printClaimed(station, printerName, job) {
+  /** Waits for one already-submitted job's real outcome and writes its final status — runs
+   * independently of whatever else this pass has since claimed and submitted. */
+  async #settle(printerName, jobId, outcomePromise) {
     let result;
     try {
-      result = await this.printer.print(job, printerName);
+      result = await outcomePromise;
     } catch (err) {
       // Unknown how far it got — it may have reached the spooler.
-      this.log(`print ${job.id} threw: ${err.message}`);
-      await this.#safeFinish(job.id, {
+      this.log(`print ${jobId} threw while printing: ${err.message}`);
+      await this.#safeFinish(jobId, {
         status: "uncertain",
-        error: "เกิดข้อผิดพลาดระหว่างส่งพิมพ์ ตรวจที่เครื่องพิมพ์ก่อนสั่งใหม่",
+        error: "เกิดข้อผิดพลาดระหว่างพิมพ์ ตรวจที่เครื่องพิมพ์ก่อนสั่งใหม่",
         printerName,
       });
-      return false;
+      return;
     }
     switch (result.outcome) {
       case OUTCOME.DELIVERED:
-        this.log(`job ${job.id} → sent (${printerName})`);
-        await this.#safeFinish(job.id, { status: "sent", printedAt: this.now(), error: null, printerName });
-        return false;
+        this.log(`job ${jobId} → sent (${printerName})`);
+        await this.#safeFinish(jobId, { status: "sent", printedAt: this.now(), error: null, printerName });
+        return;
       case OUTCOME.NOT_SUBMITTED:
-        // Never reached Windows' queue → nothing printed → safe to put back for later.
-        this.log(`job ${job.id} not submitted (${result.detail}) → back to pending`);
-        this.printerState[station] = { name: printerName, ready: false, detail: result.detail || "เครื่องพิมพ์ไม่พร้อม" };
-        await this.#safeRelease(job.id, result.detail || "เครื่องพิมพ์ไม่พร้อม รอพิมพ์ใหม่อัตโนมัติ");
-        return true;
+        // Shouldn't happen for an already-submitted job, but handled the same defensively.
+        this.log(`job ${jobId} not submitted after all (${result.detail}) → back to pending`);
+        await this.#safeRelease(jobId, result.detail || "เครื่องพิมพ์ไม่พร้อม รอพิมพ์ใหม่อัตโนมัติ");
+        return;
       case OUTCOME.ERROR:
       case OUTCOME.TIMEOUT:
       default:
-        this.log(`job ${job.id} → uncertain (${result.outcome}: ${result.detail})`);
-        await this.#safeFinish(job.id, {
+        this.log(`job ${jobId} → uncertain (${result.outcome}: ${result.detail})`);
+        await this.#safeFinish(jobId, {
           status: "uncertain",
           error: `${result.detail || "เครื่องพิมพ์มีปัญหาระหว่างพิมพ์"} — ตรวจที่เครื่องพิมพ์ก่อนสั่งใหม่`,
           printerName,
         });
-        return result.outcome === OUTCOME.ERROR;
+        return;
     }
   }
 
