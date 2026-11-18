@@ -13,14 +13,19 @@ import {
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import { formatCurrency } from "@/lib/format";
-import { computeOrderTotals, groupItemsByProduct, resolveManualDiscount } from "@/lib/pos/pricing";
-import type { OrderItem, PaymentMethod, ShopSettings } from "@/types";
+import { groupItemsByProduct } from "@/lib/pos/pricing";
+import type { OrderTotals } from "@/lib/pos/pricing";
+import type { OrderItem, PaymentMethod } from "@/types";
 
 interface Props {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   items: OrderItem[];
-  settings: Pick<ShopSettings, "vatEnabled" | "vatRate" | "serviceChargeEnabled" | "serviceChargeRate" | "currency">;
+  /** Already final — any discount (promotion and/or the "ส่วนลดเพิ่มเติม" staff key in on the order
+   * screen, before "คิดเงิน") is already baked in. This dialog only displays it, never computes
+   * its own — see `OrderScreen`'s own discount state/comment for where that happens now. */
+  totals: OrderTotals;
+  currency: string;
   paymentMethods: PaymentMethod[];
   saving: boolean;
   onConfirm: (payment: {
@@ -28,10 +33,6 @@ interface Props {
     paymentMethodName: string;
     cashReceived: number | null;
     changeDue: number | null;
-    /** Baht taken off on top of any promotion discount — 0 when staff left the discount field
-     * blank. See the "ส่วนลดเพิ่มเติม" input's comment below for why this is computed here rather
-     * than passed in already-applied. */
-    manualDiscount: number;
   }) => void;
   /** Present only when check-bill printing is on — shows a "พิมพ์บิลอีกครั้ง" button. */
   onReprintCheckBill?: () => void;
@@ -51,14 +52,14 @@ export function CheckoutDialog({
   open,
   onOpenChange,
   items,
-  settings,
+  totals,
+  currency,
   paymentMethods,
   saving,
   onConfirm,
   onReprintCheckBill,
   reprintingCheckBill = false,
 }: Props) {
-  const currency = settings.currency;
   const groupedItems = groupItemsByProduct(items);
   // เงินสด/QR are the overwhelming majority of orders (item request: "เลือก เงินสด หรือ QR
   // ตัวใหญ่ๆ" — one big tap, no dropdown for the common case), so they get their own large
@@ -69,12 +70,6 @@ export function CheckoutDialog({
   const otherMethods = paymentMethods.filter((m) => m.code !== "cash" && m.code !== "qr");
   const [methodId, setMethodId] = useState<string>("");
   const [cashReceivedText, setCashReceivedText] = useState("");
-  // ส่วนลดเพิ่มเติม (item: "เพิ่มช่องโปรโมชั่นส่วนลดหน่อย") — a free-form discount staff can key in
-  // right here before confirming, on top of whatever promotion discount the items already carry.
-  // Kept as mode + raw text (not baht-already-applied) so switching บาท/% recomputes live against
-  // the current subtotal instead of needing the previous amount re-entered.
-  const [discountMode, setDiscountMode] = useState<"amount" | "percent">("amount");
-  const [discountText, setDiscountText] = useState("");
 
   // This dialog stays mounted across orders (OrderScreen just toggles `open`), so without this
   // a staff member checking out order #2 would still see order #1's payment method highlighted
@@ -85,21 +80,8 @@ export function CheckoutDialog({
       // eslint-disable-next-line react-hooks/set-state-in-effect
       setMethodId("");
       setCashReceivedText("");
-      setDiscountMode("amount");
-      setDiscountText("");
     }
   }, [open]);
-
-  // Totals with no manual discount yet — what the subtotal/promotion discount actually are,
-  // used to turn a "%" entry into baht and to cap the discount so it can never push the total
-  // below what service charge + tax alone would be (a typo like "200" must not bill negative).
-  const baseTotals = computeOrderTotals(items, settings);
-  const discountValue = Number(discountText);
-  const discountEntered = discountText.trim() !== "" && Number.isFinite(discountValue) && discountValue > 0;
-  const manualDiscount = resolveManualDiscount(discountMode, discountValue, baseTotals.subtotal, baseTotals.promoDiscount);
-  const rawManualDiscount = discountMode === "percent" ? (baseTotals.subtotal * discountValue) / 100 : discountValue;
-  const discountClamped = discountEntered && rawManualDiscount > manualDiscount;
-  const totals = computeOrderTotals(items, settings, manualDiscount);
 
   const method = paymentMethods.find((m) => m.id === methodId);
   const isCash = method?.code === "cash";
@@ -119,7 +101,6 @@ export function CheckoutDialog({
       paymentMethodName: method.name,
       cashReceived: isCash && changeDue !== null ? cashReceived : null,
       changeDue: isCash && changeDue !== null ? changeDue : null,
-      manualDiscount,
     });
   }
 
@@ -162,43 +143,6 @@ export function CheckoutDialog({
               })}
             </div>
           ))}
-        </div>
-
-        <div className="grid gap-2">
-          <p className="text-sm font-medium">
-            ส่วนลดเพิ่มเติม <span className="font-normal text-muted-foreground">(ไม่บังคับ)</span>
-          </p>
-          <div className="flex gap-2">
-            <Button
-              type="button"
-              variant={discountMode === "amount" ? "default" : "outline"}
-              onClick={() => setDiscountMode("amount")}
-            >
-              บาท
-            </Button>
-            <Button
-              type="button"
-              variant={discountMode === "percent" ? "default" : "outline"}
-              onClick={() => setDiscountMode("percent")}
-            >
-              %
-            </Button>
-            <Input
-              type="number"
-              inputMode="decimal"
-              min={0}
-              placeholder={discountMode === "percent" ? "เช่น 10" : "เช่น 20"}
-              value={discountText}
-              onChange={(e) => setDiscountText(e.target.value)}
-              className="flex-1"
-            />
-          </div>
-          {discountEntered && (discountMode === "percent" || discountClamped) ? (
-            <p className="text-xs text-muted-foreground">
-              {discountMode === "percent" ? `= -${formatCurrency(manualDiscount, currency)}` : ""}
-              {discountClamped ? " (ลดได้สูงสุดแค่นี้ ไม่ให้ยอดติดลบ)" : ""}
-            </p>
-          ) : null}
         </div>
 
         <div className="grid gap-3 text-sm">

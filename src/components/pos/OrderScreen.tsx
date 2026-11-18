@@ -11,6 +11,7 @@ import { MoveTableDialog } from "@/components/pos/MoveTableDialog";
 import { usePosCatalog } from "@/components/pos/PosCatalogContext";
 import { RemoveItemDialog } from "@/components/pos/RemoveItemDialog";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { formatCurrency, formatTime } from "@/lib/format";
 import { useAuth } from "@/hooks/useAuth";
 import { usePosLockRedirect } from "@/hooks/usePosLockRedirect";
@@ -22,6 +23,7 @@ import {
   computeOrderTotals,
   groupItemsByProduct,
   resolveChannelPrice,
+  resolveManualDiscount,
   resolveModifiersFromSelections,
 } from "@/lib/pos/pricing";
 import { resolveItemName } from "@/lib/pos/itemName";
@@ -313,9 +315,40 @@ export function OrderScreen({ orderId, initialTableId, initialChannelId }: Props
     });
   }, [orderId, appUser, shopId, channels, tables, initialTableId, initialChannelId, order]);
 
-  const totals = useMemo(
+  // ส่วนลดเพิ่มเติม (item: "เอาปุ่มส่วนลดออกมาข้างหน้า ก่อนกดคิดเงิน") — staff key this in on the order
+  // screen itself, before tapping "คิดเงิน", so by the time `handleOpenCheckout` auto-prints the
+  // check bill the discount is already baked into the total (it used to live inside the checkout
+  // dialog, entered only *after* that first print had already gone out). Kept as mode + raw text
+  // (not baht-already-applied) so switching บาท/% recomputes live against the current subtotal.
+  const [discountMode, setDiscountMode] = useState<"amount" | "percent">("amount");
+  const [discountText, setDiscountText] = useState("");
+  // This screen doesn't remount just because `orderId` changes (tapping a different table on
+  // `/pos` navigates within the same route pattern) — without this, a discount typed in for one
+  // order would still be sitting in the field, and silently apply, the next order staff open.
+  // Same "reset on identity change" shape as CheckoutDialog's reset-on-`open` effect below.
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setDiscountMode("amount");
+    setDiscountText("");
+  }, [orderId]);
+
+  // Totals with no manual discount — what the subtotal/promotion discount actually are, used to
+  // turn a "%" entry into baht and to cap the discount so it can never push the total below what
+  // service charge + tax alone would be (a typo like "200" must not bill negative).
+  const baseTotals = useMemo(
     () => (order ? computeOrderTotals(order.items, settings) : null),
     [order, settings]
+  );
+  const discountValue = Number(discountText);
+  const discountEntered = discountText.trim() !== "" && Number.isFinite(discountValue) && discountValue > 0;
+  const manualDiscount = baseTotals
+    ? resolveManualDiscount(discountMode, discountValue, baseTotals.subtotal, baseTotals.promoDiscount)
+    : 0;
+  const rawManualDiscount = discountMode === "percent" ? ((baseTotals?.subtotal ?? 0) * discountValue) / 100 : discountValue;
+  const discountClamped = discountEntered && rawManualDiscount > manualDiscount;
+  const totals = useMemo(
+    () => (order ? computeOrderTotals(order.items, settings, manualDiscount) : null),
+    [order, settings, manualDiscount]
   );
 
   // Groups cart lines by product for display only (see `groupItemsByProduct`'s comment) — the
@@ -810,6 +843,31 @@ export function OrderScreen({ orderId, initialTableId, initialChannelId }: Props
     openingCheckoutRef.current = true;
     setOpeningCheckout(true);
     try {
+      // A discount staff typed in on the order screen (above the "คิดเงิน" button) isn't on the
+      // order doc yet — persist it first, same fields `persistItems` saves on every item change,
+      // so the check-bill print just below (and anything else reading the order doc from here on)
+      // already reflects it. Abort rather than print the wrong amount if this write fails.
+      if (manualDiscount > 0 && orderRef.current && totals) {
+        try {
+          const id = await ensureSaved();
+          await orderRepository.update(id, {
+            subtotal: totals.subtotal,
+            discount: totals.discount,
+            promoDiscount: totals.promoDiscount,
+            serviceCharge: totals.serviceCharge,
+            tax: totals.tax,
+            total: totals.total,
+            updatedAt: Date.now(),
+          });
+          if (orderRef.current) {
+            orderRef.current = { ...orderRef.current, ...totals };
+            setOrder(orderRef.current);
+          }
+        } catch {
+          setPrintError("บันทึกส่วนลดไม่สำเร็จ ลองกด \"คิดเงิน\" อีกครั้ง");
+          return;
+        }
+      }
       await sendToKitchen();
       await sendToBar();
       // Tell the customer's QR page the bill is on its way (thank-you / check-your-items view, no
@@ -885,9 +943,6 @@ export function OrderScreen({ orderId, initialTableId, initialChannelId }: Props
     paymentMethodName: string;
     cashReceived: number | null;
     changeDue: number | null;
-    /** From the checkout dialog's "ส่วนลดเพิ่มเติม" field — already resolved to baht and capped
-     * there, 0 when staff left it blank. */
-    manualDiscount: number;
   }) {
     if (!order || !totals) return;
     setSaving(true);
@@ -895,21 +950,19 @@ export function OrderScreen({ orderId, initialTableId, initialChannelId }: Props
     try {
       const id = await ensureSaved();
       const latest = orderRef.current ?? order;
-      // A manual discount typed in at checkout isn't on the order doc yet (`totals` above is
-      // always computed with no manual discount — see its own comment), and `confirmPaymentOnce`
-      // builds its receipt job from the order doc's *stored* fields, not from what's passed into
-      // it — so persist the real totals first, same fields `persistItems` saves on every item
-      // change, before starting the payment transaction.
-      const finalTotals =
-        payment.manualDiscount > 0 ? computeOrderTotals(latest.items, settings, payment.manualDiscount) : totals;
-      if (payment.manualDiscount > 0) {
+      // The discount entered on the order screen is normally already persisted by the time this
+      // runs — `handleOpenCheckout` ("คิดเงิน") saves it before the check bill ever prints. This is
+      // just a safety net (e.g. staff edited the discount field after the dialog was already open,
+      // or that earlier write failed silently): `confirmPaymentOnce` builds its receipt job from
+      // the order doc's *stored* fields, not from what's passed into it, so make sure they match.
+      if (manualDiscount > 0 && latest.total !== totals.total) {
         await orderRepository.update(id, {
-          subtotal: finalTotals.subtotal,
-          discount: finalTotals.discount,
-          promoDiscount: finalTotals.promoDiscount,
-          serviceCharge: finalTotals.serviceCharge,
-          tax: finalTotals.tax,
-          total: finalTotals.total,
+          subtotal: totals.subtotal,
+          discount: totals.discount,
+          promoDiscount: totals.promoDiscount,
+          serviceCharge: totals.serviceCharge,
+          tax: totals.tax,
+          total: totals.total,
           // eslint-disable-next-line react-hooks/purity -- event handler, not render; same as applyItems's updatedAt above
           updatedAt: Date.now(),
         });
@@ -918,11 +971,11 @@ export function OrderScreen({ orderId, initialTableId, initialChannelId }: Props
       // through the queue) — and a no-op if this bill was already paid (double tap, retry,
       // another device), so nothing below runs twice either. See `confirmPaymentOnce`.
       const { alreadyPaid, paidAt } = await confirmPaymentOnce({
-        order: { ...latest, ...finalTotals, id } as Order,
+        order: { ...latest, ...totals, id } as Order,
         payment: {
           paymentMethodId: payment.paymentMethodId,
           paymentMethodName: payment.paymentMethodName,
-          amount: finalTotals.total,
+          amount: totals.total,
           cashReceived: payment.cashReceived,
           changeDue: payment.changeDue,
         },
@@ -938,7 +991,7 @@ export function OrderScreen({ orderId, initialTableId, initialChannelId }: Props
       deductStockForPaidOrder({ id, shopId, items: latest.items ?? order.items }, appUser!).catch((err) =>
         console.error("deductStockForPaidOrder failed", err)
       );
-      notifyOrderEvent("paid", { ...order, total: finalTotals.total, paymentMethodName: payment.paymentMethodName });
+      notifyOrderEvent("paid", { ...order, total: totals.total, paymentMethodName: payment.paymentMethodName });
       if (order.tableId) closeTableSession(order.tableId);
       // Auto-print the receipt once checkout succeeds — fire-and-forget, deliberately not
       // awaited before navigating away: an unreachable/offline printer has no fetch timeout
@@ -949,7 +1002,7 @@ export function OrderScreen({ orderId, initialTableId, initialChannelId }: Props
       if (catalogSettings?.receiptPrinterIp) {
         const receiptOrder: Order = {
           ...order,
-          ...finalTotals,
+          ...totals,
           id,
           status: "PAID",
           paymentStatus: "PAID",
@@ -1267,15 +1320,55 @@ export function OrderScreen({ orderId, initialTableId, initialChannelId }: Props
         </div>
 
         <div className="border-t border-border p-3">
+          {/* ส่วนลดเพิ่มเติม — kept here, before "คิดเงิน", so it's already on the order (and so the
+              check bill that auto-prints the moment "คิดเงิน" is tapped already reflects it) rather
+              than typed in after that first print has already gone out. */}
+          <div className="mb-3 grid gap-2">
+            <p className="text-sm font-medium">
+              ส่วนลดเพิ่มเติม <span className="font-normal text-muted-foreground">(ไม่บังคับ)</span>
+            </p>
+            <div className="flex gap-2">
+              <Button
+                type="button"
+                variant={discountMode === "amount" ? "default" : "outline"}
+                onClick={() => setDiscountMode("amount")}
+              >
+                บาท
+              </Button>
+              <Button
+                type="button"
+                variant={discountMode === "percent" ? "default" : "outline"}
+                onClick={() => setDiscountMode("percent")}
+              >
+                %
+              </Button>
+              <Input
+                type="number"
+                inputMode="decimal"
+                min={0}
+                placeholder={discountMode === "percent" ? "เช่น 10" : "เช่น 20"}
+                value={discountText}
+                onChange={(e) => setDiscountText(e.target.value)}
+                className="flex-1"
+              />
+            </div>
+            {discountEntered && (discountMode === "percent" || discountClamped) ? (
+              <p className="text-xs text-muted-foreground">
+                {discountMode === "percent" ? `= -${formatCurrency(manualDiscount, settings.currency)}` : ""}
+                {discountClamped ? " (ลดได้สูงสุดแค่นี้ ไม่ให้ยอดติดลบ)" : ""}
+              </p>
+            ) : null}
+          </div>
+
           <div className="mb-3 grid gap-1 text-sm">
             <div className="flex justify-between">
               <span>ยอดรวม</span>
               <span>{formatCurrency(totals.subtotal, settings.currency)}</span>
             </div>
-            {totals.promoDiscount > 0 ? (
+            {totals.discount > 0 ? (
               <div className="flex justify-between font-medium text-success">
-                <span>ส่วนลดโปรโมชั่น</span>
-                <span>-{formatCurrency(totals.promoDiscount, settings.currency)}</span>
+                <span>{totals.discount === totals.promoDiscount ? "ส่วนลดโปรโมชั่น" : "ส่วนลด"}</span>
+                <span>-{formatCurrency(totals.discount, settings.currency)}</span>
               </div>
             ) : null}
             {totals.serviceCharge > 0 ? (
@@ -1409,7 +1502,8 @@ export function OrderScreen({ orderId, initialTableId, initialChannelId }: Props
         open={checkoutOpen}
         onOpenChange={setCheckoutOpen}
         items={order.items}
-        settings={settings}
+        totals={totals}
+        currency={settings.currency}
         paymentMethods={paymentMethods.filter((m) => m.active)}
         saving={saving}
         onConfirm={handleConfirmPayment}
