@@ -31,6 +31,10 @@ export const COLLECTIONS = {
   tableOccupancy: "tableOccupancy",
   /** Kitchen "เรียกเสิร์ฟ" calls — types/serveCall.ts. */
   serveCalls: "serveCalls",
+  /** Dine-in customer "เรียกพนักงาน" calls from their own QR ordering screen — types/staffCall.ts.
+   * Created only via `/api/customer/table/[tableId]/call-staff` (Admin SDK — customers aren't
+   * signed in); read/resolved by staff through the normal client SDK like `serveCalls`. */
+  staffCalls: "staffCalls",
   /** Web Push subscriptions of staff phones that turned on "รับเรียกเสิร์ฟ" (doc id = hash of the
    * push endpoint). Server-only: no client rule allows it — lib/push/webPush.ts. */
   pushSubscriptions: "pushSubscriptions",

@@ -37,6 +37,20 @@ export interface AppUser extends WithId {
    */
   allowedPosPages?: string[] | null;
   /**
+   * Whether this account sees "เรียกพนักงาน" alerts on the POS table grid (customer tapped it on
+   * their own QR ordering screen — `types/staffCall.ts`) — the blinking table card, the floating
+   * banner, and the alert sound. Every `role: "admin"` account always receives these no matter
+   * this field (see `lib/pos/customerRequests.ts`'s `canReceiveStaffCalls` helper), since the
+   * shop's own choice when this shipped was "admin หรือ ไอดีที่ตั้งสิทธิ์ไว้" — so this field only
+   * ever matters for a `staff` account. Absent/`false` (every account before this field existed)
+   * means that staff member sees nothing, an explicit opt-in an Admin grants per person.
+   */
+  canReceiveStaffCalls?: boolean;
+  /** Same as `canReceiveStaffCalls`, for "เช็คบิล" requests (`Order.customerCheckBillRequestedAt`)
+   * — kept as a separate flag since a shop may want a different set of people handling each (e.g.
+   * only the cashier handles bills, but any floor staff can answer a general call for attention). */
+  canReceiveBillRequests?: boolean;
+  /**
    * True right after an Admin creates this account or resets its PIN — the PIN that action just
    * set is a temporary one the Admin picked and can see on screen, not the account's real
    * working PIN (PINs are stored as a one-way hash — see `UserSecret` below — so once set, not

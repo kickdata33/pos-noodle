@@ -55,6 +55,11 @@ export default function StaffPage() {
   const [permEnabled, setPermEnabled] = useState(false);
   const [permDraft, setPermDraft] = useState<string[]>([]);
   const [permSaving, setPermSaving] = useState(false);
+  // "เรียกพนักงาน" / "เช็คบิล" (ลูกค้ากดเอง) — ใครเห็นการแจ้งเตือนในหน้า POS บ้าง (ตั้งค่า, เรื่อง
+  // "คุยกันก่อนนะ"). Admin ทุกคนเห็นเสมอไม่ว่าจะติ๊กไว้หรือไม่ (ตามที่ร้านยืนยัน "admin หรือ ไอดีที่ตั้งสิทธิ์ไว้") —
+  // แถวของ admin เลยล็อกให้ติ๊กอยู่เสมอ แก้ไม่ได้ ไม่ได้แปลว่าต้องไปเซ็ตฟิลด์จริงบน user doc นั้น.
+  const [permCallStaffDraft, setPermCallStaffDraft] = useState(false);
+  const [permBillRequestDraft, setPermBillRequestDraft] = useState(false);
 
   useEffect(() => {
     if (!shopId) return;
@@ -130,6 +135,8 @@ export default function StaffPage() {
     setPermTarget(user);
     setPermEnabled(user.allowedPosPages != null);
     setPermDraft(user.allowedPosPages ?? []);
+    setPermCallStaffDraft(user.canReceiveStaffCalls === true);
+    setPermBillRequestDraft(user.canReceiveBillRequests === true);
   }
 
   function togglePermPage(path: string) {
@@ -140,7 +147,11 @@ export default function StaffPage() {
     if (!permTarget) return;
     setPermSaving(true);
     try {
-      await userRepository.update(permTarget.id, { allowedPosPages: permEnabled ? permDraft : null });
+      await userRepository.update(permTarget.id, {
+        allowedPosPages: permEnabled ? permDraft : null,
+        canReceiveStaffCalls: permCallStaffDraft,
+        canReceiveBillRequests: permBillRequestDraft,
+      });
       setPermTarget(null);
       refresh();
     } finally {
@@ -353,6 +364,29 @@ export default function StaffPage() {
                 (ออกจากระบบได้อย่างเดียว) เหมาะกับแท็บเล็ตที่ตั้งไว้ใช้งานแค่หน้าเดียว เช่น จอครัว
               </p>
             ) : null}
+
+            <div className="grid gap-2 rounded-md border border-border p-3">
+              <p className="text-sm font-medium">รับแจ้งเตือนลูกค้าเรียก/ขอเช็คบิล</p>
+              <label className="flex items-center gap-2 text-sm">
+                <Checkbox
+                  checked={permTarget?.role === "admin" ? true : permCallStaffDraft}
+                  disabled={permTarget?.role === "admin"}
+                  onCheckedChange={(v) => setPermCallStaffDraft(v === true)}
+                />
+                เรียกพนักงาน
+              </label>
+              <label className="flex items-center gap-2 text-sm">
+                <Checkbox
+                  checked={permTarget?.role === "admin" ? true : permBillRequestDraft}
+                  disabled={permTarget?.role === "admin"}
+                  onCheckedChange={(v) => setPermBillRequestDraft(v === true)}
+                />
+                ขอเช็คบิล
+              </label>
+              {permTarget?.role === "admin" ? (
+                <p className="text-xs text-muted-foreground">Admin รับแจ้งเตือนทั้งสองอย่างเสมอ ปรับไม่ได้</p>
+              ) : null}
+            </div>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setPermTarget(null)}>

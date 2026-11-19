@@ -30,3 +30,4 @@ export * from "./investment";
 export * from "./printJob";
 export * from "./stock";
 export * from "./serveCall";
+export * from "./staffCall";

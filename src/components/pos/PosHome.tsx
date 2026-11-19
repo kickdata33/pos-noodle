@@ -9,12 +9,14 @@ import { Badge } from "@/components/ui/badge";
 import { useAuth } from "@/hooks/useAuth";
 import { usePosLockRedirect } from "@/hooks/usePosLockRedirect";
 import { formatCurrency, formatTime } from "@/lib/format";
+import { canReceiveBillRequests, canReceiveStaffCalls } from "@/lib/pos/customerRequests";
 import { canSeePosPage, POS_SECONDARY_PAGES } from "@/lib/pos/posPages";
 import { isLowStock } from "@/lib/pos/stock";
 import { printQrForTable } from "@/lib/pos/tableQrPrint";
 import { orderRepository } from "@/repositories/orderRepository";
+import { staffCallRepository } from "@/repositories/staffCallRepository";
 import { stockLevelRepository } from "@/repositories/stockRepository";
-import type { Order, StockLevel, Table as PosTable } from "@/types";
+import type { Order, StaffCall, StockLevel, Table as PosTable } from "@/types";
 
 import { usePosCatalog } from "./PosCatalogContext";
 import { tableLabel } from "@/lib/tableLabel";
@@ -97,6 +99,28 @@ export function PosHome() {
   useEffect(() => stockLevelRepository.subscribeForShop(shopId, setStockLevels), [shopId]);
   const lowStock = stockLevels.filter(isLowStock);
 
+  // Dine-in "เรียกพนักงาน"/"เช็คบิล" (item: ปุ่มเรียกพนักงาน/เช็คบิล) — blinks the table's own card,
+  // gated by the same per-account permission `PosCustomerRequestBanner` uses, so a staff member
+  // with neither permission sees nothing different here at all (not even a subscription opened
+  // for a collection they can't act on).
+  const seesStaffCalls = canReceiveStaffCalls(appUser);
+  const seesBillRequests = canReceiveBillRequests(appUser);
+  const [staffCalls, setStaffCalls] = useState<StaffCall[]>([]);
+  useEffect(() => {
+    if (!seesStaffCalls) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- synchronizing local state with this account's permission, not deriving from props; same reasoning as PosCustomerRequestBanner's identical guard
+      setStaffCalls([]);
+      return;
+    }
+    return staffCallRepository.subscribeOpen(shopId, setStaffCalls);
+  }, [seesStaffCalls, shopId]);
+  const tableIdsCallingStaff = new Set(staffCalls.map((c) => c.tableId));
+  const tableIdsRequestingBill = new Set(
+    seesBillRequests
+      ? openOrders.filter((o) => o.tableId && o.customerCheckBillRequestedAt).map((o) => o.tableId!)
+      : []
+  );
+
   if (lockedPage) return null;
 
   const activeTables = tables.filter((t) => t.active);
@@ -121,6 +145,9 @@ export function PosHome() {
           {activeTables.map((table) => {
             const order = orderForTable(table.id);
             const waitingMinutes = order ? null : seatedMinutes(table);
+            const callingStaff = tableIdsCallingStaff.has(table.id);
+            const requestingBill = tableIdsRequestingBill.has(table.id);
+            const hasCustomerRequest = callingStaff || requestingBill;
             // Card look by state (approved design "1 · หน้าโต๊ะ"): white = ว่าง, amber = รอสั่ง,
             // filled accent = มีบิล, deep blue = กำลังคิดเงิน; a customer's new QR order blinks green.
             const look = order?.pendingReview
@@ -148,7 +175,13 @@ export function PosHome() {
                 href={order ? `/pos/order/${order.id}` : `/pos/order/new?tableId=${table.id}`}
                 className={
                   "relative isolate flex h-32 flex-col justify-between overflow-hidden rounded-xl border p-3.5 text-left " +
-                  look
+                  look +
+                  // Rose ring/pulse layered on top of whatever base state the card is already
+                  // in — a customer can ask for staff attention regardless of occupancy status
+                  // (even an empty table, before anything's ordered). Kept visually separate
+                  // from the full-card green blink below (new QR order) rather than competing
+                  // for the same background layer.
+                  (hasCustomerRequest ? " animate-pulse ring-4 ring-rose-500" : "")
                 }
               >
                 {order?.pendingReview ? (
@@ -160,7 +193,9 @@ export function PosHome() {
                 <div className="flex items-start justify-between gap-2">
                   <div className="min-w-0">
                     <span className="block truncate text-2xl font-bold leading-tight">{tableLabel(table.name)}</span>
-                    <span className="block text-sm font-medium opacity-90">{statusText}</span>
+                    <span className="block text-sm font-medium opacity-90">
+                      {callingStaff ? "🔔 เรียกพนักงาน" : requestingBill ? "🧾 ขอเช็คบิล" : statusText}
+                    </span>
                   </div>
                   {table.qrMode === "session" ? (
                     <button
@@ -253,6 +288,12 @@ export function PosHome() {
           <span className="flex items-center gap-1.5"><span className="h-3 w-3 rounded bg-primary" />มีบิล</span>
           <span className="flex items-center gap-1.5"><span className="h-3 w-3 rounded bg-[#23407A]" />กำลังคิดเงิน</span>
           <span className="flex items-center gap-1.5"><span className="h-3 w-3 rounded bg-success" />ออเดอร์ใหม่จาก QR</span>
+          {seesStaffCalls || seesBillRequests ? (
+            <span className="flex items-center gap-1.5">
+              <span className="h-3 w-3 rounded border-2 border-rose-500" />
+              ลูกค้าเรียกพนักงาน/ขอเช็คบิล
+            </span>
+          ) : null}
         </div>
       </section>
 

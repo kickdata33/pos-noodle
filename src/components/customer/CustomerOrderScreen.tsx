@@ -26,6 +26,13 @@ interface TableResponse {
   billRequested?: boolean;
   /** Amount due as the shop computed it (promotions, service charge, VAT included). */
   total?: number | null;
+  /** Whether the shop turned on each self-order request button at all — both default off. */
+  callStaffEnabled?: boolean;
+  checkBillEnabled?: boolean;
+  /** Whether *this* table already has a pending request — read fresh on every poll so the
+   * button's "...รอพนักงาน" state survives a reload, not just this tab's own memory. */
+  staffCallActive?: boolean;
+  checkBillRequested?: boolean;
 }
 
 /** A locally-built cart line before it's ever sent to the server — no `id` yet (the API assigns
@@ -115,6 +122,12 @@ export function CustomerOrderScreen({
   // fetch*, and a brand-new table (nobody has ordered yet) legitimately has `orderNumber: null`
   // too — the polling below must never mistake "never ordered" for "just got closed out".
   const [hasActiveOrder, setHasActiveOrder] = useState(false);
+  // "เรียกพนักงาน"/"เช็คบิล" — each tracks its own in-flight + error state since they're
+  // independent actions (item: ปุ่มเรียกพนักงาน/เช็คบิล, สวิตช์เปิดแยกกันคนละปุ่ม).
+  const [callingStaff, setCallingStaff] = useState(false);
+  const [callStaffError, setCallStaffError] = useState<string | null>(null);
+  const [requestingBill, setRequestingBill] = useState(false);
+  const [requestBillError, setRequestBillError] = useState<string | null>(null);
 
   // Shop clock for `resolveTimeBasedPrice` (`Product.timePrices`) — same ticking-every-30s
   // pattern as the staff order screen's own `clock`, so a happy-hour price appears/disappears on
@@ -191,14 +204,19 @@ export function CustomerOrderScreen({
   // sitting right there watching their own phone, felt the old 10s worst-case (5s on average) as
   // a real delay before "ขอบคุณ" appeared. This is one small GET per tick against a single
   // Firestore doc read — cheap enough at this shop's scale to poll noticeably faster.
+  //
+  // Runs even before any order exists (not gated on `hasActiveOrder` like the "bill closed" check
+  // below is) — "เรียกพนักงาน" is tied to the table, not an order, so `staffCallActive` needs to
+  // keep refreshing even for a table nobody has ordered at yet, so the button reverts to tappable
+  // again once staff resolves the call, without waiting for a page reload.
   useEffect(() => {
-    if (status !== "ready" || !hasActiveOrder) return;
+    if (status !== "ready") return;
     const interval = setInterval(async () => {
       try {
         const res = await fetch(`/api/customer/table/${tableId}${tokenQuery}`);
         if (!res.ok) return;
         const table = (await res.json()) as TableResponse;
-        if (table.orderNumber === null) {
+        if (hasActiveOrder && table.orderNumber === null) {
           markClosedThisTab(tableId);
           setStatus("closed");
           return;
@@ -351,6 +369,46 @@ export function CustomerOrderScreen({
     }
   }
 
+  /** Optimistically flips the button to "เรียกแล้ว..." right away rather than waiting on the next
+   * 3s poll — the poll (above) is what reverts it once staff resolves the call. */
+  async function handleCallStaff() {
+    if (callingStaff || tableInfo?.staffCallActive) return;
+    setCallingStaff(true);
+    setCallStaffError(null);
+    try {
+      const res = await fetch(`/api/customer/table/${tableId}/call-staff`, { method: "POST" });
+      if (!res.ok) {
+        const data = (await res.json().catch(() => null)) as { error?: string } | null;
+        setCallStaffError(data?.error ?? "เรียกพนักงานไม่สำเร็จ ลองใหม่อีกครั้ง");
+        return;
+      }
+      setTableInfo((prev) => (prev ? { ...prev, staffCallActive: true } : prev));
+    } catch {
+      setCallStaffError("เชื่อมต่อไม่ได้ กรุณาลองใหม่");
+    } finally {
+      setCallingStaff(false);
+    }
+  }
+
+  async function handleRequestBill() {
+    if (requestingBill || tableInfo?.checkBillRequested) return;
+    setRequestingBill(true);
+    setRequestBillError(null);
+    try {
+      const res = await fetch(`/api/customer/table/${tableId}/request-bill`, { method: "POST" });
+      if (!res.ok) {
+        const data = (await res.json().catch(() => null)) as { error?: string } | null;
+        setRequestBillError(data?.error ?? "ขอเช็คบิลไม่สำเร็จ ลองใหม่อีกครั้ง");
+        return;
+      }
+      setTableInfo((prev) => (prev ? { ...prev, checkBillRequested: true } : prev));
+    } catch {
+      setRequestBillError("เชื่อมต่อไม่ได้ กรุณาลองใหม่");
+    } finally {
+      setRequestingBill(false);
+    }
+  }
+
   if (status === "loading") {
     return <main className="flex min-h-dvh items-center justify-center text-muted-foreground">กำลังโหลดเมนู...</main>;
   }
@@ -444,6 +502,34 @@ export function CustomerOrderScreen({
       <header className="border-b border-border bg-card p-4">
         <p className="text-sm text-muted-foreground">โต๊ะ</p>
         <p className="text-xl font-semibold">{tableInfo.table.name}</p>
+        {tableInfo.callStaffEnabled || (tableInfo.checkBillEnabled && hasActiveOrder) ? (
+          <div className="mt-3 flex flex-wrap gap-2">
+            {tableInfo.callStaffEnabled ? (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                disabled={callingStaff || tableInfo.staffCallActive}
+                onClick={handleCallStaff}
+              >
+                {tableInfo.staffCallActive ? "🔔 เรียกแล้ว รอพนักงาน..." : "🔔 เรียกพนักงาน"}
+              </Button>
+            ) : null}
+            {tableInfo.checkBillEnabled && hasActiveOrder ? (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                disabled={requestingBill || tableInfo.checkBillRequested}
+                onClick={handleRequestBill}
+              >
+                {tableInfo.checkBillRequested ? "🧾 ขอเช็คบิลแล้ว รอพนักงาน..." : "🧾 ขอเช็คบิล"}
+              </Button>
+            ) : null}
+          </div>
+        ) : null}
+        {callStaffError ? <p className="mt-2 text-xs text-destructive">{callStaffError}</p> : null}
+        {requestBillError ? <p className="mt-2 text-xs text-destructive">{requestBillError}</p> : null}
       </header>
 
       {tableInfo.existingItems.length > 0 && (

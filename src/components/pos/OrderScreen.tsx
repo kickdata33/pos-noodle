@@ -1,6 +1,6 @@
 "use client";
 
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { CancelOrderDialog } from "@/components/pos/CancelOrderDialog";
@@ -103,6 +103,7 @@ const DEFAULT_SETTINGS: Pick<
 
 export function OrderScreen({ orderId, initialTableId, initialChannelId }: Props) {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const { appUser } = useAuth();
   // Same locked-account bail-out as `PosHome` — a kitchen-only tablet, say, has no business
   // taking orders either. Hook call unconditional up here; the actual early return is below,
@@ -245,6 +246,22 @@ export function OrderScreen({ orderId, initialTableId, initialChannelId }: Props
       if (existing) setOrder(existing);
     });
   }, [orderId]);
+
+  // Landed here via "รับเรื่อง" on a customer's "เช็คบิล" request (`PosCustomerRequestBanner`,
+  // `?checkout=1`) — opens the checkout dialog the same way tapping "คิดเงิน" would, without
+  // staff having to find this table and tap it themselves (confirmed: "พาตรงไปหน้าคิดเงินของโต๊ะ
+  // นั้นเลย"). Fires at most once per mount, and only once the real order has actually loaded —
+  // calling `handleOpenCheckout` against the placeholder draft from the "seed a fresh local
+  // draft" effect below would print a check bill for an order that doesn't really exist yet.
+  const autoOpenedCheckoutRef = useRef(false);
+  useEffect(() => {
+    if (autoOpenedCheckoutRef.current) return;
+    if (searchParams.get("checkout") !== "1") return;
+    if (!order?.id || !appUser) return;
+    autoOpenedCheckoutRef.current = true;
+    void handleOpenCheckout();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- handleOpenCheckout is a plain function recreated every render, not memoized; including it would re-run this effect every render instead of exactly once per `?checkout=1` landing (the ref guard above is what makes that "once" promise hold)
+  }, [searchParams, order, appUser]);
 
   // Acknowledge a QR self-order once staff actually opens this screen — clears the badge/alert
   // on the POS home table grid. Fires at most once per mount (not on every snapshot the
@@ -397,7 +414,7 @@ export function OrderScreen({ orderId, initialTableId, initialChannelId }: Props
     const current = orderRef.current;
     if (!current) return;
     const newTotals = computeOrderTotals(newItems, settings);
-    // eslint-disable-next-line react-hooks/purity -- event handler, not render; the compiler loses track once the bill lines render their kitchen status (see lineStatusOf)
+     
     const updatedAt = Date.now();
     const updatedDraft: DraftOrder = { ...current, items: newItems, ...newTotals, updatedAt };
     orderRef.current = updatedDraft;
@@ -516,7 +533,7 @@ export function OrderScreen({ orderId, initialTableId, initialChannelId }: Props
       modifiers,
       note,
       lineTotal,
-      // eslint-disable-next-line react-hooks/purity -- event handler, not render; the compiler loses track once the bill lines render their kitchen status (see lineStatusOf)
+       
       addedAt: Date.now(),
       ...(category?.sendToKitchen === false ? { sendToKitchen: false as const } : {}),
       ...(category?.sendToBar === true ? { sendToBar: true as const } : {}),
@@ -534,7 +551,7 @@ export function OrderScreen({ orderId, initialTableId, initialChannelId }: Props
     }
     // A line the kitchen already marked "ทำแล้ว" gets its extra portions as a separate fresh line
     // (see `increaseItemQuantity`) — otherwise the kitchen screen would never show them.
-    // eslint-disable-next-line react-hooks/purity -- event handler, not render; the compiler loses track once the bill lines render their kitchen status (see lineStatusOf)
+     
     const newItems = increaseItemQuantity(current.items, item, delta, crypto.randomUUID(), Date.now(), computeLineTotal);
     applyItems(newItems);
   }
@@ -585,7 +602,7 @@ export function OrderScreen({ orderId, initialTableId, initialChannelId }: Props
       reasonNote: reason === "อื่น ๆ" ? note : null,
       performedBy: appUser!.id,
       performedByName: appUser!.name,
-      // eslint-disable-next-line react-hooks/purity -- event handler, not render; the compiler loses track once the bill lines render their kitchen status (see lineStatusOf)
+       
       createdAt: Date.now(),
     });
     setRemoveTarget(null);
@@ -963,7 +980,7 @@ export function OrderScreen({ orderId, initialTableId, initialChannelId }: Props
           serviceCharge: totals.serviceCharge,
           tax: totals.tax,
           total: totals.total,
-          // eslint-disable-next-line react-hooks/purity -- event handler, not render; same as applyItems's updatedAt above
+           
           updatedAt: Date.now(),
         });
       }

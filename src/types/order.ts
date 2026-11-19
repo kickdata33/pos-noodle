@@ -195,6 +195,16 @@ export interface Order extends WithId {
   /** The total last printed on a check bill — "คิดเงิน" auto-prints only when the total has
    * changed since, so reopening the checkout dialog doesn't waste paper. Absent = never printed. */
   checkBillPrintedTotal?: number;
+  /**
+   * The customer tapped "เช็คบิล" on their own QR ordering screen (item: ปุ่มเรียกพนักงาน/เช็คบิล)
+   * — NOT a staff action, unlike `billRequestedAt` above (staff tapping "คิดเงิน"). Drives the
+   * blinking table card + floating banner (`PosCustomerRequestBanner`) for whoever has
+   * `AppUser.canReceiveBillRequests` (or is an admin). Cleared the moment a permitted staff
+   * member taps "รับเรื่อง" there — see `lib/pos/customerRequests.ts` — regardless of whether
+   * they go on to actually open the checkout dialog. `undefined`/`null` for every order this
+   * never applied to, including every order from before this feature existed.
+   */
+  customerCheckBillRequestedAt?: EpochMillis | null;
 }
 
 /** A completed payment against an order — kept even if the order later gets refunded/voided. */

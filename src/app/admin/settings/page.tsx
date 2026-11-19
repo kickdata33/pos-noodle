@@ -345,6 +345,37 @@ export default function SettingsPage() {
           </div>
         </div>
 
+        {/* "เรียกพนักงาน" / "เช็คบิล" (ลูกค้ากดเอง) — ปุ่มเหล่านี้ขึ้นเฉพาะหน้าสั่งอาหารที่โต๊ะ (QR) ของลูกค้า
+         * เท่านั้น ไม่ขึ้นหน้าสั่งกลับบ้าน เปิด/ปิดแยกกันได้ ใครเห็นการแจ้งเตือนตั้งที่หน้า พนักงาน. */}
+        <div className="grid gap-4 rounded-lg border border-border p-4">
+          <div className="flex items-center justify-between gap-4">
+            <div>
+              <p className="font-medium">ปุ่ม &quot;เรียกพนักงาน&quot; (หน้าโต๊ะลูกค้า)</p>
+              <p className="text-sm text-muted-foreground">
+                ลูกค้ากดเรียกพนักงานได้ก่อนสั่งอาหารก็ได้ — แจ้งเตือนไปที่ Admin และพนักงานที่ตั้งสิทธิ์รับแจ้งเตือนไว้ที่หน้า
+                พนักงาน
+              </p>
+            </div>
+            <Switch
+              checked={settings.enableStaffCallButton ?? false}
+              onCheckedChange={(v) => update("enableStaffCallButton", v)}
+            />
+          </div>
+          <div className="flex items-center justify-between gap-4">
+            <div>
+              <p className="font-medium">ปุ่ม &quot;ขอเช็คบิล&quot; (หน้าโต๊ะลูกค้า)</p>
+              <p className="text-sm text-muted-foreground">
+                ลูกค้ากดขอเช็คบิลเองได้หลังมีออเดอร์แล้ว — แจ้งเตือนไปที่ Admin และพนักงานที่ตั้งสิทธิ์รับแจ้งเตือนไว้
+                กดรับเรื่องแล้วพาเข้าหน้าคิดเงินของโต๊ะนั้นให้ทันที
+              </p>
+            </div>
+            <Switch
+              checked={settings.enableCheckBillButton ?? false}
+              onCheckedChange={(v) => update("enableCheckBillButton", v)}
+            />
+          </div>
+        </div>
+
         <PrintAgentSettings />
 
         <div className="grid gap-2">

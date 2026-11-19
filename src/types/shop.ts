@@ -121,6 +121,22 @@ export interface ShopSettings extends WithId {
     barEnabled?: boolean;
   };
   /**
+   * Shows "เรียกพนักงาน" on the dine-in QR ordering screen (`/order/table/[tableId]` only — never
+   * the takeaway/pickup screen, confirmed scope) — lets a customer flag down staff before they've
+   * ordered anything, independent of any bill. Absent/`false` (every shop before this field
+   * existed) hides the button, same opt-in-by-default as every self-order toggle on this page.
+   * Who actually sees the resulting alert is a separate, per-staff decision — see
+   * `AppUser.canReceiveStaffCalls`.
+   */
+  enableStaffCallButton?: boolean;
+  /**
+   * Shows "เช็คบิล" on the dine-in QR ordering screen, for a table with an open bill — lets a
+   * customer ask staff to come collect payment instead of waiting to be noticed. Deliberately a
+   * separate switch from `enableStaffCallButton` (confirmed: "แยกสวิตช์กันคนละปุ่ม") — a shop may
+   * want one without the other. Absent/`false` hides the button, same default as above.
+   */
+  enableCheckBillButton?: boolean;
+  /**
    * Which optional Admin modules this shop has turned on, beyond the universal POS core that
    * every shop always gets (reports, orders, categories, products, modifiers, tables, channels,
    * payment methods, staff, settings). `accounting`/`cashSafe`/`delivery`/`payroll` were all

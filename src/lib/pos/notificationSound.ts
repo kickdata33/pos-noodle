@@ -154,6 +154,49 @@ function pickFemaleEnglishVoice(voices: SpeechSynthesisVoice[]): SpeechSynthesis
 }
 
 /**
+ * Alert for a dine-in customer's "เรียกพนักงาน"/"เช็คบิล" (`PosCustomerRequestBanner`) — a two-note
+ * alternating "ding-dong" doorbell pattern, deliberately shaped differently from both
+ * `playAttentionTone`'s rising three-note chime (new QR order) and `serveCallAlarm.ts`'s ring
+ * (เรียกเสิร์ฟ/อาหารพร้อมเสิร์ฟ), per the shop's confirmed requirement that this read as clearly
+ * distinct from "พร้อมเสิร์ฟ" at a glance/listen (one shared sound for both request kinds is fine
+ * — only "พร้อมเสิร์ฟ" needs to sound different). Reuses the same shared, already-unlocked
+ * `sharedChimeCtx` as `playAttentionTone` — see that function's comment for why a context created
+ * with no user gesture on the call stack would otherwise play nothing.
+ */
+export function playCustomerRequestTone(): void {
+  try {
+    const AudioContextClass = window.AudioContext ?? (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+    if (!AudioContextClass) return;
+    if (!sharedChimeCtx) sharedChimeCtx = new AudioContextClass();
+    const ctx = sharedChimeCtx;
+    if (ctx.state === "suspended") void ctx.resume();
+
+    const playNote = (frequency: number, startTime: number) => {
+      const oscillator = ctx.createOscillator();
+      const gain = ctx.createGain();
+      oscillator.type = "triangle"; // softer/rounder than the chime's sine, reads as a doorbell
+      oscillator.frequency.value = frequency;
+      const duration = 0.5;
+      gain.gain.setValueAtTime(0, startTime);
+      gain.gain.linearRampToValueAtTime(0.4, startTime + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.0001, startTime + duration);
+      oscillator.connect(gain);
+      gain.connect(ctx.destination);
+      oscillator.start(startTime);
+      oscillator.stop(startTime + duration + 0.05);
+    };
+
+    const now = ctx.currentTime;
+    // "Ding" (high) then "dong" (lower a fourth down) — the familiar doorbell interval, the
+    // opposite direction of the rising order chime, so the two never get confused by ear.
+    playNote(880, now); // A5
+    playNote(659.25, now + 0.3); // E5
+  } catch {
+    // Same reasoning as `playAttentionTone` — a missed beep is never worth crashing over.
+  }
+}
+
+/**
  * A soft ascending three-note chime (E5 → G5 → C6, a major triad) instead of two flat sine
  * beeps — the shop's feedback on the original tone was "ไม่เพราะ สั้นไป" (not nice, too short).
  * Each note layers a quiet octave-up overtone on top of the fundamental for a bell-like timbre

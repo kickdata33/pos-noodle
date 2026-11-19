@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import type { ReactNode } from "react";
 
 import { PosCatalogProvider } from "@/components/pos/PosCatalogContext";
+import { PosCustomerRequestBanner } from "@/components/pos/PosCustomerRequestBanner";
 import { PosOrderAlertListener } from "@/components/pos/PosOrderAlertListener";
 import { PrintStatusBanner } from "@/components/pos/PrintStatusBanner";
 import { ServeCallAlert } from "@/components/pos/ServeCallAlert";
@@ -59,6 +60,7 @@ export default async function PosLayout({ children }: { children: ReactNode }) {
           </div>
         </header>
         <PrintStatusBanner />
+        <PosCustomerRequestBanner />
         <ServeCallAlert />
         <div className="flex-1">{children}</div>
       </div>

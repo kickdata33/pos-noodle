@@ -292,6 +292,21 @@ service cloud.firestore {
       allow delete: if false;
     }
 
+    // "เรียกพนักงาน" (ลูกค้ากดเอง) — types/staffCall.ts. Tied to the table, not an order, so a
+    // customer can call before ordering anything. Only ever created by the customer `call-staff`
+    // route via the Admin SDK (bypasses these rules entirely) — never by a signed-in staff client
+    // — so `create` here is always denied. Staff only ever read the open-call list and resolve
+    // ("รับเรื่อง") one via `staffCallRepository.resolve`'s transaction, same shape as serveCalls'
+    // own update rule above.
+    match /staffCalls/{callId} {
+      allow read: if isActiveUser() && ownsExisting();
+      allow create: if false;
+      allow update: if isActiveUser() && ownsExisting() && ownsIncoming()
+        && request.resource.data.diff(resource.data).affectedKeys()
+             .hasOnly(['resolvedAt', 'resolvedById', 'resolvedByName']);
+      allow delete: if false;
+    }
+
     // Which order currently holds a table (doc id = tableId) — see lib/pos/tableOrder.ts. Just a
     // pointer; every reader re-checks the order itself, so a stale pointer is harmless. `get` on a
     // missing doc is allowed because the create transaction probes it before the first order.
