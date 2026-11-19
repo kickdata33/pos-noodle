@@ -31,6 +31,21 @@ Push-Location $Dir
 Pop-Location
 $vbs = Join-Path $Dir 'run-hidden.vbs'
 if (Test-Path $vbs) { (Get-Content -Raw $vbs).Replace('src\main.js"', 'src\main.js --ranpos-agent"').Replace('--ranpos-agent --ranpos-agent', '--ranpos-agent') | Set-Content -Encoding ASCII $vbs }
+Write-Host 'Refreshing the auto-start task...'
+try {
+  $runAs = "$env:USERDOMAIN\$env:USERNAME"
+  $taskAction = New-ScheduledTaskAction -Execute 'wscript.exe' -Argument ('"' + $vbs + '"') -WorkingDirectory $Dir
+  # Older installs registered this with -AtLogOn -User $runAs, which on a non-domain Windows PC
+  # can silently stop firing after a full shutdown+logon (the task itself stays fine - running it
+  # by hand always works, only the automatic trigger does not). Re-registering with a plain
+  # -AtLogOn trigger (any logon) fixes that; the Principal below still only lets it run in this
+  # user's own session, so nothing else changes about who the agent runs as.
+  $taskTrigger = New-ScheduledTaskTrigger -AtLogOn
+  $taskSettings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable -RestartCount 999 -RestartInterval (New-TimeSpan -Minutes 1) -ExecutionTimeLimit ([TimeSpan]::Zero) -MultipleInstances IgnoreNew
+  $taskPrincipal = New-ScheduledTaskPrincipal -UserId $runAs -LogonType Interactive -RunLevel Limited
+  Register-ScheduledTask -TaskName 'RanPOS Print Agent' -Action $taskAction -Trigger $taskTrigger -Settings $taskSettings -Principal $taskPrincipal -Force | Out-Null
+}
+catch { Write-Host "Could not refresh the auto-start task ($($_.Exception.Message)) - the old one is kept as is." -ForegroundColor Yellow }
 try { Start-ScheduledTask -TaskName 'RanPOS Print Agent' } catch { Start-Process wscript.exe -ArgumentList ('"' + $vbs + '"') -WorkingDirectory $Dir }
 Write-Host 'Print Agent updated and restarted.' -ForegroundColor Green
 `;

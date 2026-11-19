@@ -138,7 +138,13 @@ Step 'Starting automatically at Windows logon'
 $runAs = "$env:USERDOMAIN\$env:USERNAME"
 try {
   $action = New-ScheduledTaskAction -Execute 'wscript.exe' -Argument ('"' + (Join-Path $Dir 'run-hidden.vbs') + '"') -WorkingDirectory $Dir
-  $trigger = New-ScheduledTaskTrigger -AtLogOn -User $runAs
+  # Trigger on ANY logon, not `-AtLogOn -User $runAs` — binding the trigger itself to one named
+  # local account is a known flaky combo on non-domain Windows PCs (the trigger silently never
+  # fires after a full shutdown+logon, even though the task is registered correctly and running it
+  # by hand always works — exactly the symptom reported: "ต้องเปิด Task Scheduler กด Run เอง
+  # ทุกวัน"). The Principal below still only lets it actually *run* in $runAs's own session, so
+  # this is strictly broader on the trigger side without changing who the agent runs as.
+  $trigger = New-ScheduledTaskTrigger -AtLogOn
   $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable `
     -RestartCount 999 -RestartInterval (New-TimeSpan -Minutes 1) -ExecutionTimeLimit ([TimeSpan]::Zero) -MultipleInstances IgnoreNew
   $principal = New-ScheduledTaskPrincipal -UserId $runAs -LogonType Interactive -RunLevel Limited

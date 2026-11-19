@@ -146,14 +146,22 @@ async function runSession(config) {
 }
 
 async function main() {
-  const config = await loadConfig();
   if (process.argv.includes("--test-print")) {
-    await testPrint(config);
+    await testPrint(await loadConfig());
     return;
   }
-  log(`RanPOS Print Agent ${VERSION} starting on ${os.hostname()} → ${config.origin}`);
+  log(`RanPOS Print Agent ${VERSION} starting on ${os.hostname()}`);
   for (;;) {
     try {
+      // `loadConfig()` lives inside this same retry loop (not called once before it) on purpose —
+      // right at Windows logon the user's profile/network isn't always fully up yet, so DPAPI
+      // decrypt (`unprotect-secret.ps1`) or disk access here can fail transiently. That used to
+      // throw straight out of `main()` and exit the process for good, leaving the agent dead
+      // until someone noticed and reran it by hand — this way a flaky first attempt just retries
+      // every 30s like any other reconnect, instead of needing the OS's own task-restart policy
+      // (which is what the scheduled task's logon trigger not firing reliably was already
+      // undermining) to save it.
+      const config = await loadConfig();
       await runSession(config);
     } catch (err) {
       if (err instanceof AgentAuthError) {
