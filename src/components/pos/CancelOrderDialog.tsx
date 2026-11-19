@@ -60,7 +60,7 @@ export function CancelOrderDialog({ open, onOpenChange, orderNumber, onConfirm, 
 
         <div className="grid gap-2">
           <p className="text-sm text-muted-foreground">
-            {description ?? "ออเดอร์นี้จะถูกยกเลิกทั้งหมด และโต๊ะ/ช่องทางนี้จะว่างทันที — ทำแล้วกู้คืนไม่ได้"}
+            {description ?? "ออเดอร์นี้จะถูกยกเลิกทั้งหมด และโต๊ะ/ช่องทางนี้จะว่างทันที — ยกเลิกแล้วกู้คืนเองไม่ได้ ต้องให้แอดมินกู้คืนให้ที่หน้า \"รายการบิล\""}
           </p>
           {REASONS.map((r) => (
             <button

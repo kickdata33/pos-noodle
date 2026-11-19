@@ -22,6 +22,7 @@ const TYPE_LABEL: Record<StockMovementType, string> = {
   receive: "รับเข้า",
   count: "นับ",
   void: "คืน (ยกเลิกบิล)",
+  restore: "ตัดใหม่ (กู้คืนบิล)",
 };
 
 function formatDateTime(ms: number): string {

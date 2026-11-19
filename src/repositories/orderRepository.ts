@@ -41,6 +41,21 @@ class OrderRepository extends FirestoreRepository<Order> {
   }
 
   /**
+   * A fresh (not from any live subscription already in hand) read of whatever OPEN order a
+   * table currently has, if any — used right before restoring a cancelled order back onto its
+   * table (item: "บิลที่ยกเลิก กู้กลับคืนได้", Admin → รายการบิล), so that check is against the
+   * table's *current* state rather than whatever this admin screen's one-time `listForShop` load
+   * happened to see. All-equality filters, same as `subscribeOpenForShop` — no composite index.
+   */
+  listOpenForTable(shopId: string, tableId: string): Promise<Order[]> {
+    return this.list(
+      where("shopId", "==", shopId),
+      where("status", "==", "OPEN"),
+      where("tableId", "==", tableId)
+    );
+  }
+
+  /**
    * PAID orders whose payment fell inside `[startMs, endMs]` — the source data for the sales
    * report (`lib/pos/reports.ts`). Filtered on `paidAt`, not `createdAt`: the report answers
    * "how much did we take in on this day", which is when payment happened, not when the order

@@ -2,7 +2,7 @@ import { collection, doc, getDocs, query, runTransaction, where, type Transactio
 
 import { db } from "@/lib/firebase/client";
 import { COLLECTIONS } from "@/lib/firebase/collections";
-import { crossedLowThreshold, quantitiesToReturn, saleQuantitiesByProduct } from "@/lib/pos/stock";
+import { crossedLowThreshold, quantitiesToDeduct, quantitiesToReturn, saleQuantitiesByProduct } from "@/lib/pos/stock";
 import type { AppUser, Order, StockLevel, StockMovement } from "@/types";
 
 /**
@@ -245,5 +245,72 @@ export async function voidPaidOrderAndRestoreStock(
       });
     });
     return "voided";
+  });
+}
+
+/**
+ * Restores a VOID bill back to PAID and takes its items back off the shelf (item: "บิลที่ยกเลิก
+ * กู้กลับคืนได้" — admin-only, no time limit). Returns exactly what the *most recent* void put
+ * back — read from that void's own `void` movements, scoped by `createdAt == order.voidedAt` so
+ * an earlier void/restore cycle on the same order (if this ever happens twice) can never be
+ * double-counted — not recomputed from the items, for the same reason `voidPaidOrderAndRestoreStock`
+ * reads movements instead of items. The VOID check inside the transaction makes this safe against
+ * a double click or two admins at once, same as the void function it mirrors.
+ *
+ * (Restoring a CANCELLED order needs none of this — cancelling an OPEN order never touched stock
+ * in the first place, so there's nothing to take back. That path is a plain status flip, done
+ * directly where it's used — see `/admin/orders`.)
+ */
+export async function restoreVoidedOrderAndDeductStock(
+  order: Pick<Order, "id" | "shopId" | "voidedAt">,
+  actor: Actor
+): Promise<"restored" | "notVoid"> {
+  if (!order.voidedAt) return "notVoid";
+  const voidSnap = await getDocs(
+    query(
+      collection(db, COLLECTIONS.stockMovements),
+      where("shopId", "==", order.shopId),
+      where("orderId", "==", order.id),
+      where("type", "==", "void"),
+      where("createdAt", "==", order.voidedAt)
+    )
+  );
+  const toTake = quantitiesToDeduct(voidSnap.docs.map((d) => d.data() as Omit<StockMovement, "id">));
+
+  return runTransaction(db, async (tx) => {
+    const orderRef = doc(db, COLLECTIONS.orders, order.id);
+    const productIds = [...toTake.keys()];
+    const [orderSnap, ...levelSnaps] = await Promise.all([
+      tx.get(orderRef),
+      ...productIds.map((id) => tx.get(levelRef(id))),
+    ]);
+    if (!orderSnap.exists() || orderSnap.data().status !== "VOID") return "notVoid";
+    const now = Date.now();
+    tx.update(orderRef, { status: "PAID", voidedAt: null, voidedByName: null, updatedAt: now });
+    levelSnaps.forEach((snap, i) => {
+      // Product no longer tracked — nothing to take, same as the void side of this.
+      if (!snap.exists()) return;
+      const level = snap.data() as Omit<StockLevel, "id">;
+      const qty = toTake.get(productIds[i])!;
+      if (qty <= 0) return;
+      const qtyAfter = level.qty - qty;
+      tx.update(snap.ref, { qty: qtyAfter, updatedAt: now });
+      writeMovement(tx, {
+        shopId: order.shopId,
+        productId: productIds[i],
+        productName: level.productName,
+        type: "restore",
+        delta: -qty,
+        qtyBefore: level.qty,
+        qtyAfter,
+        orderId: order.id,
+        countId: null,
+        note: "",
+        createdBy: actor.id,
+        createdByName: actor.name,
+        createdAt: now,
+      });
+    });
+    return "restored";
   });
 }

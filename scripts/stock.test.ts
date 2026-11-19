@@ -8,6 +8,7 @@ import {
   formatDelta,
   isLowStock,
   parseStockInput,
+  quantitiesToDeduct,
   quantitiesToReturn,
   saleQuantitiesByProduct,
 } from "../src/lib/pos/stock";
@@ -78,4 +79,16 @@ test("voiding returns exactly what the bill's sales took, per product", () => {
   assert.equal(back.get("water"), 3);
   assert.equal(back.get("coke"), 1);
   assert.equal(back.size, 2);
+});
+
+test("restoring a void takes back exactly what that void returned, per product", () => {
+  const take = quantitiesToDeduct([
+    { productId: "water", delta: 3, type: "void" },
+    { productId: "coke", delta: 1, type: "void" },
+    { productId: "water", delta: 5, type: "receive" },
+    { productId: "water", delta: -2, type: "sale" },
+  ]);
+  assert.equal(take.get("water"), 3);
+  assert.equal(take.get("coke"), 1);
+  assert.equal(take.size, 2);
 });

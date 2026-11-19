@@ -78,3 +78,15 @@ export function quantitiesToReturn(saleMovements: Pick<StockMovement, "productId
   }
   return back;
 }
+
+/** What restoring a voided bill takes back off the shelf: exactly what that one void put back
+ * (the mirror of `quantitiesToReturn`) — `void` deltas are already positive ("added back"), so
+ * this just sums them as-is, per product. */
+export function quantitiesToDeduct(voidMovements: Pick<StockMovement, "productId" | "delta" | "type">[]): Map<string, number> {
+  const take = new Map<string, number>();
+  for (const m of voidMovements) {
+    if (m.type !== "void") continue;
+    take.set(m.productId, (take.get(m.productId) ?? 0) + m.delta);
+  }
+  return take;
+}

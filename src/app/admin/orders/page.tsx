@@ -19,7 +19,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { formatCurrency } from "@/lib/format";
 import { useAuth } from "@/hooks/useAuth";
 import { bangkokDateKey } from "@/lib/pos/dateRange";
-import { voidPaidOrderAndRestoreStock } from "@/lib/pos/stockService";
+import { restoreVoidedOrderAndDeductStock, voidPaidOrderAndRestoreStock } from "@/lib/pos/stockService";
 import { auditLogRepository } from "@/repositories/auditLogRepository";
 import { orderRepository } from "@/repositories/orderRepository";
 import { shopRepository } from "@/repositories/shopRepository";
@@ -60,7 +60,8 @@ export default function AdminOrdersPage() {
   const [currency, setCurrency] = useState("THB");
   const [selected, setSelected] = useState<Order | null>(null);
   const [voidOpen, setVoidOpen] = useState(false);
-  const [voidMessage, setVoidMessage] = useState<{ ok: boolean; text: string } | null>(null);
+  const [actionMessage, setActionMessage] = useState<{ ok: boolean; text: string } | null>(null);
+  const [restoring, setRestoring] = useState(false);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<OrderStatus | "all">("all");
   const [dateFilter, setDateFilter] = useState<string>(() => bangkokDateKey(Date.now()));
@@ -84,11 +85,11 @@ export default function AdminOrdersPage() {
   async function confirmVoid(reason: AuditReason, note: string) {
     const target = selected;
     if (!target || !appUser) return;
-    setVoidMessage(null);
+    setActionMessage(null);
     try {
       const result = await voidPaidOrderAndRestoreStock(target, appUser);
       if (result === "notPaid") {
-        setVoidMessage({ ok: false, text: "บิลนี้ไม่ได้อยู่ในสถานะชำระแล้ว (อาจถูกยกเลิกไปแล้ว)" });
+        setActionMessage({ ok: false, text: "บิลนี้ไม่ได้อยู่ในสถานะชำระแล้ว (อาจถูกยกเลิกไปแล้ว)" });
         return;
       }
       const now = Date.now();
@@ -116,9 +117,101 @@ export default function AdminOrdersPage() {
       const updated: Order = { ...target, status: "VOID", voidedAt: now, voidedByName: appUser.name, updatedAt: now };
       setOrders((list) => list.map((o) => (o.id === target.id ? updated : o)));
       setSelected(updated);
-      setVoidMessage({ ok: true, text: "ยกเลิกบิลแล้ว และคืนสต๊อกเรียบร้อย" });
+      setActionMessage({ ok: true, text: "ยกเลิกบิลแล้ว และคืนสต๊อกเรียบร้อย" });
     } catch {
-      setVoidMessage({ ok: false, text: "ยกเลิกบิลไม่สำเร็จ ลองอีกครั้ง" });
+      setActionMessage({ ok: false, text: "ยกเลิกบิลไม่สำเร็จ ลองอีกครั้ง" });
+    }
+  }
+
+  /**
+   * Restores a CANCELLED (never-paid) order back to OPEN (item: "บิลที่ยกเลิก กู้กลับคืนได้" —
+   * admin only, no time limit). No stock to touch here — cancelling an OPEN order never deducted
+   * any (see `confirmCancelOrder` in `OrderScreen`). The only real risk is a dine-in table that's
+   * since been reused for a new bill while this one sat cancelled — re-checked fresh right here
+   * (not from this page's one-time `orders` load) so this can't quietly create two open bills on
+   * the same table.
+   */
+  async function confirmRestoreCancelled() {
+    const target = selected;
+    if (!target || !appUser) return;
+    if (!confirm(`กู้คืนออเดอร์ ${target.orderNumber} กลับเป็น "เปิดอยู่" ใช่หรือไม่?`)) return;
+    setActionMessage(null);
+    setRestoring(true);
+    try {
+      if (target.tableId) {
+        const stillOpen = await orderRepository.listOpenForTable(target.shopId, target.tableId);
+        if (stillOpen.some((o) => o.id !== target.id)) {
+          setActionMessage({
+            ok: false,
+            text: `กู้คืนไม่ได้ — โต๊ะนี้มีออเดอร์ที่เปิดอยู่แล้ว (อาจมีลูกค้าใหม่นั่งโต๊ะนี้ไปแล้ว)`,
+          });
+          return;
+        }
+      }
+      const updatedAt = Date.now();
+      await orderRepository.update(target.id, { status: "OPEN", updatedAt });
+      await auditLogRepository.create({
+        shopId: target.shopId,
+        action: "ORDER_RESTORED",
+        orderId: target.id,
+        description: `กู้คืนออเดอร์ที่ยกเลิก ${target.orderNumber} กลับเป็นเปิดอยู่`,
+        reason: null,
+        reasonNote: null,
+        performedBy: appUser.id,
+        performedByName: appUser.name,
+        createdAt: updatedAt,
+      });
+      const updated: Order = { ...target, status: "OPEN", updatedAt };
+      setOrders((list) => list.map((o) => (o.id === target.id ? updated : o)));
+      setSelected(updated);
+      setActionMessage({ ok: true, text: "กู้คืนออเดอร์แล้ว — เปิดได้จากหน้าโต๊ะ/หน้ารับออเดอร์ตามปกติ" });
+    } catch {
+      setActionMessage({ ok: false, text: "กู้คืนไม่สำเร็จ ลองอีกครั้ง" });
+    } finally {
+      setRestoring(false);
+    }
+  }
+
+  /**
+   * Restores a VOID (previously-paid, later voided) bill back to PAID and takes its items back
+   * off the shelf — see `restoreVoidedOrderAndDeductStock`'s own comment for how the exact
+   * quantity is recovered safely. Admin only, no time limit (item: "บิลที่ยกเลิก กู้กลับคืนได้").
+   */
+  async function confirmRestoreVoid() {
+    const target = selected;
+    if (!target || !appUser) return;
+    if (
+      !confirm(`กู้คืนบิล ${target.orderNumber} กลับเป็น "ชำระแล้ว" ใช่หรือไม่? ระบบจะตัดสต๊อกที่คืนไปแล้วออกใหม่`)
+    )
+      return;
+    setActionMessage(null);
+    setRestoring(true);
+    try {
+      const result = await restoreVoidedOrderAndDeductStock(target, appUser);
+      if (result === "notVoid") {
+        setActionMessage({ ok: false, text: "บิลนี้ไม่ได้อยู่ในสถานะยกเลิก (Void) แล้ว" });
+        return;
+      }
+      const now = Date.now();
+      await auditLogRepository.create({
+        shopId: target.shopId,
+        action: "ORDER_RESTORED",
+        orderId: target.id,
+        description: `กู้คืนบิลที่ยกเลิก ${target.orderNumber} กลับเป็นชำระแล้ว (ตัดสต๊อกใหม่)`,
+        reason: null,
+        reasonNote: null,
+        performedBy: appUser.id,
+        performedByName: appUser.name,
+        createdAt: now,
+      });
+      const updated: Order = { ...target, status: "PAID", voidedAt: null, voidedByName: null, updatedAt: now };
+      setOrders((list) => list.map((o) => (o.id === target.id ? updated : o)));
+      setSelected(updated);
+      setActionMessage({ ok: true, text: "กู้คืนบิลแล้ว และตัดสต๊อกใหม่เรียบร้อย" });
+    } catch {
+      setActionMessage({ ok: false, text: "กู้คืนไม่สำเร็จ ลองอีกครั้ง" });
+    } finally {
+      setRestoring(false);
     }
   }
 
@@ -186,7 +279,10 @@ export default function AdminOrdersPage() {
             <TableRow
               key={order.id}
               className="cursor-pointer hover:bg-accent"
-              onClick={() => setSelected(order)}
+              onClick={() => {
+                setSelected(order);
+                setActionMessage(null);
+              }}
             >
               <TableCell>{order.orderNumber || "—"}</TableCell>
               <TableCell>{order.tableName ? tableLabel(order.tableName) : order.channelName}{order.customerLabel ? ` · ${order.customerLabel}` : ""}</TableCell>
@@ -212,7 +308,7 @@ export default function AdminOrdersPage() {
         onOpenChange={(open) => {
           if (!open) {
             setSelected(null);
-            setVoidMessage(null);
+            setActionMessage(null);
           }
         }}
       >
@@ -289,12 +385,22 @@ export default function AdminOrdersPage() {
                     ยกเลิกบิลเมื่อ {new Date(selected.voidedAt).toLocaleString("th-TH")} โดย {selected.voidedByName}
                   </p>
                 ) : null}
-                {voidMessage ? (
-                  <p className={voidMessage.ok ? "text-success" : "text-destructive"}>{voidMessage.text}</p>
+                {actionMessage ? (
+                  <p className={actionMessage.ok ? "text-success" : "text-destructive"}>{actionMessage.text}</p>
                 ) : null}
                 {selected.status === "PAID" ? (
                   <Button variant="outline" className="mt-2 w-full text-destructive" onClick={() => setVoidOpen(true)}>
                     ยกเลิกบิลนี้ (คืนสต๊อก)
+                  </Button>
+                ) : null}
+                {selected.status === "VOID" ? (
+                  <Button variant="outline" className="mt-2 w-full" disabled={restoring} onClick={confirmRestoreVoid}>
+                    {restoring ? "กำลังกู้คืน..." : "กู้คืนบิลนี้ (ตัดสต๊อกใหม่)"}
+                  </Button>
+                ) : null}
+                {selected.status === "CANCELLED" ? (
+                  <Button variant="outline" className="mt-2 w-full" disabled={restoring} onClick={confirmRestoreCancelled}>
+                    {restoring ? "กำลังกู้คืน..." : "กู้คืนออเดอร์นี้"}
                   </Button>
                 ) : null}
               </div>

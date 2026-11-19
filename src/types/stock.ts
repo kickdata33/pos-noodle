@@ -25,8 +25,9 @@ export interface StockLevel extends WithId {
   updatedAt: EpochMillis;
 }
 
-/** `void` = put back on the shelf because a paid bill was cancelled (Admin → รายการบิล). */
-export type StockMovementType = "sale" | "receive" | "count" | "void";
+/** `void` = put back on the shelf because a paid bill was cancelled (Admin → รายการบิล). `restore`
+ * = taken back off the shelf because a voided bill was restored (the mirror of `void`). */
+export type StockMovementType = "sale" | "receive" | "count" | "void" | "restore";
 
 /** One change to a `StockLevel`, append-only — the history/difference log. */
 export interface StockMovement extends WithId {

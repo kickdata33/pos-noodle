@@ -187,9 +187,11 @@ export interface Order extends WithId {
    */
   billRequestedAt?: number | null;
   /** Set when a PAID bill is voided (Admin → รายการบิล); stock taken at checkout was returned in
-   * the same transaction. */
-  voidedAt?: EpochMillis;
-  voidedByName?: string;
+   * the same transaction. Explicitly cleared back to `null` (not just left stale) when the void
+   * is later restored — see `restoreVoidedOrderAndDeductStock` — so this never shows a false
+   * "ยกเลิกบิลเมื่อ..." on a bill that's active again. */
+  voidedAt?: EpochMillis | null;
+  voidedByName?: string | null;
   /** The total last printed on a check bill — "คิดเงิน" auto-prints only when the total has
    * changed since, so reopening the checkout dialog doesn't waste paper. Absent = never printed. */
   checkBillPrintedTotal?: number;
